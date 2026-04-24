@@ -20,9 +20,13 @@ export async function GET(req: Request) {
     params.push(collection);
   }
   const where = clauses.length ? 'WHERE ' + clauses.join(' AND ') : '';
+  // Return `has_note` as a boolean instead of the full artist_note text.
+  // The client only needs to count empties; shipping prose per row
+  // bloats the payload for no rendering benefit.
   const { rows } = await pool.query(
     `SELECT a.id, a.slug, a.title, a.status, a.image_web_url, a.image_print_url,
-            a.artist_note, a.year_shot, a.location,
+            (a.artist_note IS NOT NULL AND length(trim(a.artist_note)) > 0) AS has_note,
+            a.year_shot, a.location,
             a.updated_at,
             c.title AS collection_title, c.slug AS collection_slug,
             (SELECT COUNT(*)::int FROM artwork_variants v

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import { pool } from '@/lib/db';
 import { formatUSD } from '@/lib/money';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
@@ -536,7 +537,15 @@ export default async function AdminDashboard({
                     borderTop: i ? '1px solid var(--adm-rule)' : 'none',
                   }}
                 >
-                  <img src={a.image_web_url} alt="" />
+                  <Image
+                    src={a.image_web_url}
+                    alt=""
+                    width={28}
+                    height={28}
+                    sizes="28px"
+                    style={{ objectFit: 'cover', borderRadius: 2 }}
+                    unoptimized={false}
+                  />
                   <div className="meta">
                     <div className="t">{a.title}</div>
                     <div className="c">

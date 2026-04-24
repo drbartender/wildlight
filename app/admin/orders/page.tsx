@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { formatUSD } from '@/lib/money';
 import { AdminPill } from '@/components/admin/AdminPill';
@@ -62,10 +62,28 @@ export default function AdminOrdersPage() {
     void load();
   }, [load]);
 
-  const filtered =
-    filter === 'all' ? rows : rows.filter((r) => r.status === filter);
-  const count = (s: FilterKey) =>
-    s === 'all' ? rows.length : rows.filter((r) => r.status === s).length;
+  // Filter strips render in both skins (Atelier + Darkroom), so the
+  // count helper would otherwise run rows.filter() 2 × FILTERS.length
+  // times per render on every keystroke. Precompute once per rows
+  // change.
+  const counts = useMemo(() => {
+    const out: Record<string, number> = { all: rows.length };
+    for (const f of FILTERS) {
+      if (f.key === 'all') continue;
+      out[f.key] = 0;
+    }
+    for (const r of rows) {
+      if (out[r.status] != null) out[r.status] += 1;
+    }
+    return out;
+  }, [rows]);
+
+  const filtered = useMemo(
+    () =>
+      filter === 'all' ? rows : rows.filter((r) => r.status === filter),
+    [rows, filter],
+  );
+  const count = (s: FilterKey) => counts[s] ?? 0;
 
   return (
     <>

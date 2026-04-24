@@ -114,6 +114,7 @@ export function AdminSidebar({ needsReview, email }: Props) {
   useEffect(() => {
     let cancelled = false;
     async function refresh() {
+      if (typeof document !== 'undefined' && document.hidden) return;
       try {
         const r = await fetch('/api/admin/integrations/health');
         if (!r.ok) return;
@@ -135,9 +136,16 @@ export function AdminSidebar({ needsReview, email }: Props) {
     }
     void refresh();
     const t = setInterval(refresh, 60_000);
+    // Resume immediately when the admin tab becomes visible again after
+    // a period of being hidden.
+    const onVis = () => {
+      if (!document.hidden) void refresh();
+    };
+    document.addEventListener('visibilitychange', onVis);
     return () => {
       cancelled = true;
       clearInterval(t);
+      document.removeEventListener('visibilitychange', onVis);
     };
   }, []);
 

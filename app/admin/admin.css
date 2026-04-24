@@ -2017,8 +2017,8 @@
   color: inherit;
 }
 .wl-adm-top-darkroom .row img {
-  width: 28px;
-  height: 28px;
+  width: 28px !important;
+  height: 28px !important;
   object-fit: cover;
   border-radius: 2px;
 }

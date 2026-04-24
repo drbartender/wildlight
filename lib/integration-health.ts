@@ -1,5 +1,6 @@
 import { pool } from '@/lib/db';
 import { getStripe } from '@/lib/stripe';
+import { S3Client, HeadBucketCommand } from '@aws-sdk/client-s3';
 
 export interface HealthPing {
   state: 'ok' | 'warn' | 'error';
@@ -146,20 +147,20 @@ async function pingResend(): Promise<HealthPing> {
   }
 }
 
-async function pingR2(): Promise<HealthPing> {
-  try {
-    if (
-      !process.env.R2_ACCESS_KEY_ID ||
-      !process.env.R2_SECRET_ACCESS_KEY ||
-      !process.env.R2_BUCKET_WEB ||
-      !process.env.R2_ACCOUNT_ID
-    ) {
-      return ping('error', 'keys missing');
-    }
-    const { S3Client, HeadBucketCommand } = await import(
-      '@aws-sdk/client-s3'
-    );
-    const client = new S3Client({
+// Cache the S3Client at module scope. Cold-import cost (~80ms) used to
+// hit the first ping on a fresh Lambda; constructing the client here means
+// it's ready at first pingR2() call.
+let r2Client: S3Client | null = null;
+function getR2Client(): S3Client | null {
+  if (
+    !process.env.R2_ACCESS_KEY_ID ||
+    !process.env.R2_SECRET_ACCESS_KEY ||
+    !process.env.R2_ACCOUNT_ID
+  ) {
+    return null;
+  }
+  if (!r2Client) {
+    r2Client = new S3Client({
       region: 'auto',
       endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
       credentials: {
@@ -167,6 +168,15 @@ async function pingR2(): Promise<HealthPing> {
         secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
       },
     });
+  }
+  return r2Client;
+}
+
+async function pingR2(): Promise<HealthPing> {
+  try {
+    if (!process.env.R2_BUCKET_WEB) return ping('error', 'keys missing');
+    const client = getR2Client();
+    if (!client) return ping('error', 'keys missing');
     await withTimeout(
       client.send(new HeadBucketCommand({ Bucket: process.env.R2_BUCKET_WEB })),
       PING_TIMEOUT_MS,

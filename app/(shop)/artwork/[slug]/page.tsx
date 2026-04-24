@@ -55,26 +55,33 @@ export default async function ArtworkPage({
   if (!arts.rowCount) notFound();
   const art = arts.rows[0];
 
-  const { rows: variants } = await pool.query<VariantOption>(
-    `SELECT id, type, size, finish, price_cents FROM artwork_variants
-     WHERE artwork_id = $1 AND active = TRUE
-     ORDER BY type, price_cents`,
-    [art.id],
-  );
-
-  const related = art.collection_slug
-    ? await pool.query<PlateCardData>(
-        `SELECT a.slug, a.title, a.image_web_url, a.year_shot, a.location,
-                (SELECT MIN(price_cents) FROM artwork_variants v
-                   WHERE v.artwork_id = a.id AND v.active = TRUE) AS min_price_cents
-         FROM artworks a
-         JOIN collections c ON c.id = a.collection_id
-         WHERE c.slug = $1 AND a.status = 'published' AND a.slug <> $2
-         ORDER BY a.display_order, a.id
-         LIMIT 4`,
-        [art.collection_slug, art.slug],
-      )
-    : { rows: [] as PlateCardData[] };
+  // variants only need art.id; related only needs collection_slug + slug.
+  // Fire both in parallel after the gating art lookup resolves — shaves a
+  // round-trip off TTFB on every cache-miss of the shop's highest-intent
+  // page.
+  const [variantsRes, relatedRes] = await Promise.all([
+    pool.query<VariantOption>(
+      `SELECT id, type, size, finish, price_cents FROM artwork_variants
+       WHERE artwork_id = $1 AND active = TRUE
+       ORDER BY type, price_cents`,
+      [art.id],
+    ),
+    art.collection_slug
+      ? pool.query<PlateCardData>(
+          `SELECT a.slug, a.title, a.image_web_url, a.year_shot, a.location,
+                  (SELECT MIN(price_cents) FROM artwork_variants v
+                     WHERE v.artwork_id = a.id AND v.active = TRUE) AS min_price_cents
+           FROM artworks a
+           JOIN collections c ON c.id = a.collection_id
+           WHERE c.slug = $1 AND a.status = 'published' AND a.slug <> $2
+           ORDER BY a.display_order, a.id
+           LIMIT 4`,
+          [art.collection_slug, art.slug],
+        )
+      : Promise.resolve({ rows: [] as PlateCardData[] }),
+  ]);
+  const variants = variantsRes.rows;
+  const related = relatedRes;
 
   const plate = plateNumber(art.slug);
   const hasKnownDims =

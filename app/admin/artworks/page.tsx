@@ -13,7 +13,7 @@ interface Row {
   status: string;
   image_web_url: string;
   image_print_url: string | null;
-  artist_note: string | null;
+  has_note: boolean;
   year_shot: number | null;
   location: string | null;
   collection_title: string | null;
@@ -83,14 +83,14 @@ export default function AdminArtworksPage() {
     failed: number;
   }>({ done: 0, total: 0, failed: 0 });
 
-  const emptyNote = rows.filter((r) => !r.artist_note);
+  const emptyNote = rows.filter((r) => !r.has_note);
   const emptyVariants = rows.filter((r) => r.variant_count === 0);
 
   async function batchAiDraft() {
     if (batchRunning) return;
     // Snapshot the target list so mid-batch state changes can't shift
     // the iteration (e.g. if the user flips a filter).
-    const targets = rows.filter((r) => !r.artist_note);
+    const targets = rows.filter((r) => !r.has_note);
     setBatchRunning('draft');
     setBatchProgress({ done: 0, total: targets.length, failed: 0 });
 
@@ -115,7 +115,7 @@ export default function AdminArtworksPage() {
         const patch: Record<string, unknown> = {};
         if (body.year_shot != null && r.year_shot == null) patch.year_shot = body.year_shot;
         if (body.location && !r.location) patch.location = body.location;
-        if (body.artist_note && !r.artist_note) patch.artist_note = body.artist_note;
+        if (body.artist_note && !r.has_note) patch.artist_note = body.artist_note;
         if (Object.keys(patch).length) {
           const pr = await fetch(`/api/admin/artworks/${r.id}`, {
             method: 'PATCH',
