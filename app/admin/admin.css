@@ -1818,3 +1818,72 @@
   font-size: 11px;
 }
 
+/* ─────── LOGIN — Atelier paper/serif vs Darkroom mono/teal ─────── */
+
+.wl-adm-login-atelier  { display: flex; }
+.wl-adm-login-darkroom { display: none; }
+.wl-admin-surface[data-theme='dark'] .wl-adm-login-atelier  { display: none; }
+.wl-admin-surface[data-theme='dark'] .wl-adm-login-darkroom { display: flex; }
+
+.wl-adm-login-darkroom {
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  background: var(--adm-bg, var(--adm-paper));
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
+}
+.wl-adm-login-darkroom .stack { width: 340px; }
+.wl-adm-login-darkroom .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.wl-adm-login-darkroom .brand .icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 3px;
+  background: var(--adm-green);
+  color: var(--adm-paper);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+}
+.wl-adm-login-darkroom .brand .txt { display: flex; flex-direction: column; }
+.wl-adm-login-darkroom .brand .txt .w {
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  color: var(--adm-ink);
+}
+.wl-adm-login-darkroom .brand .txt .s {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--adm-muted);
+}
+.wl-adm-login-darkroom .brand .health {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--adm-green);
+}
+.wl-adm-login-darkroom .card {
+  background: var(--adm-panel);
+  border: 1px solid var(--adm-rule);
+  border-radius: 4px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.wl-adm-login-darkroom .foot {
+  margin-top: 14px;
+  font-size: 10px;
+  color: var(--adm-muted);
+}
+.wl-adm-login-darkroom .err {
+  color: var(--adm-red);
+  font-size: 11px;
+  margin: 0;
+}
+
