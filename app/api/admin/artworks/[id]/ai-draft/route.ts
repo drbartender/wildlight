@@ -1,9 +1,21 @@
 export const runtime = 'nodejs';
+export const maxDuration = 60;
+
 import { NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 import { readExifFromBuffer } from '@/lib/exif';
 import { draftArtworkMetadata } from '@/lib/ai-draft';
+
+function isAllowedImageHost(url: string): boolean {
+  const base = process.env.R2_PUBLIC_BASE_URL;
+  if (!base) return false;
+  try {
+    return new URL(url).host === new URL(base).host;
+  } catch {
+    return false;
+  }
+}
 
 export async function POST(
   _req: Request,
@@ -11,6 +23,10 @@ export async function POST(
 ) {
   await requireAdmin();
   const { id } = await ctx.params;
+  const numericId = Number(id);
+  if (!Number.isInteger(numericId) || numericId <= 0) {
+    return NextResponse.json({ error: 'invalid id' }, { status: 400 });
+  }
 
   const { rows } = await pool.query<{
     title: string;
@@ -20,10 +36,17 @@ export async function POST(
     `SELECT a.title, a.image_web_url, c.slug AS collection_slug
      FROM artworks a LEFT JOIN collections c ON c.id = a.collection_id
      WHERE a.id = $1`,
-    [id],
+    [numericId],
   );
   if (!rows.length) return NextResponse.json({ error: 'not found' }, { status: 404 });
   const a = rows[0];
+
+  if (!isAllowedImageHost(a.image_web_url)) {
+    return NextResponse.json(
+      { error: 'image url not from allowed host' },
+      { status: 400 },
+    );
+  }
 
   let buf: Buffer;
   try {
