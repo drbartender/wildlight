@@ -83,6 +83,17 @@ export async function POST(req: Request) {
         [ourId, trackingUrl, trackingNumber],
       );
       if (r.rowCount) {
+        await pool.query(
+          `INSERT INTO order_events (order_id, type, who, payload)
+           VALUES ($1, 'shipped', 'printful', $2::jsonb)`,
+          [
+            ourId,
+            JSON.stringify({
+              tracking_number: trackingNumber,
+              tracking_url: trackingUrl,
+            }),
+          ],
+        );
         const siteUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
         try {
           await sendOrderShipped(
@@ -96,6 +107,18 @@ export async function POST(req: Request) {
           logger.warn('shipped email failed', { err, orderId: ourId });
         }
       }
+    } else if (event.type === 'package_delivered') {
+      const r = await pool.query<{ id: number }>(
+        `UPDATE orders SET status='delivered', updated_at=NOW() WHERE id = $1 RETURNING id`,
+        [ourId],
+      );
+      if (r.rowCount) {
+        await pool.query(
+          `INSERT INTO order_events (order_id, type, who, payload)
+           VALUES ($1, 'delivered', 'printful', '{}'::jsonb)`,
+          [ourId],
+        );
+      }
     } else if (
       event.type === 'package_returned' ||
       event.type === 'order_canceled'
@@ -104,6 +127,11 @@ export async function POST(req: Request) {
         `UPDATE orders SET status='canceled', updated_at=NOW() WHERE id = $1`,
         [ourId],
       );
+      await pool.query(
+        `INSERT INTO order_events (order_id, type, who, payload)
+         VALUES ($1, 'canceled', 'printful', $2::jsonb)`,
+        [ourId, JSON.stringify({ via: event.type })],
+      );
     } else if (
       event.type === 'order_failed' ||
       event.type === 'order_put_hold'
@@ -111,6 +139,11 @@ export async function POST(req: Request) {
       await pool.query(
         `UPDATE orders SET status='needs_review', notes=$2, updated_at=NOW() WHERE id = $1`,
         [ourId, event.type],
+      );
+      await pool.query(
+        `INSERT INTO order_events (order_id, type, who, payload)
+         VALUES ($1, 'printful_flagged', 'printful', $2::jsonb)`,
+        [ourId, JSON.stringify({ reason: event.type })],
       );
     }
 
