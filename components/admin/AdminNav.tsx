@@ -1,6 +1,16 @@
+'use client';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 export function AdminNav({ currentEmail }: { currentEmail: string }) {
+  const router = useRouter();
+
+  async function signOut() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    router.push('/login');
+    router.refresh();
+  }
+
   return (
     <nav
       style={{
@@ -19,23 +29,24 @@ export function AdminNav({ currentEmail }: { currentEmail: string }) {
       <Link href="/admin/orders">Orders</Link>
       <Link href="/admin/subscribers">Subscribers</Link>
       <Link href="/admin/settings">Settings</Link>
-      <span style={{ marginLeft: 'auto', color: '#777', fontSize: 12 }}>{currentEmail}</span>
-      <form action="/api/auth/logout" method="post" style={{ display: 'inline', margin: 0 }}>
-        <button
-          type="submit"
-          style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: '#777',
-            fontFamily: 'inherit',
-            fontSize: 'inherit',
-            padding: 0,
-          }}
-        >
-          sign out
-        </button>
-      </form>
+      <span style={{ marginLeft: 'auto', color: '#777', fontSize: 12 }}>
+        {currentEmail}
+      </span>
+      <button
+        type="button"
+        onClick={signOut}
+        style={{
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          color: '#777',
+          fontFamily: 'inherit',
+          fontSize: 'inherit',
+          padding: 0,
+        }}
+      >
+        sign out
+      </button>
     </nav>
   );
 }
