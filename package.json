@@ -18,6 +18,7 @@
     "publish:selections": "tsx scripts/publish-selections.ts",
     "seed:admins": "tsx scripts/seed-admins.ts",
     "sync:printful": "tsx scripts/sync-printful-products.ts",
+    "backfill:image-dims": "tsx scripts/backfill-image-dims.ts",
     "migrate": "tsx lib/migrate.ts"
   },
   "dependencies": {
@@ -33,6 +34,7 @@
     "jsonwebtoken": "^9.0.2",
     "next": "^16.2.4",
     "pg": "^8.13.1",
+    "probe-image-size": "^7.2.3",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "resend": "^4.0.1",
@@ -45,6 +47,7 @@
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^22.9.0",
     "@types/pg": "^8.11.10",
+    "@types/probe-image-size": "^7.2.5",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@types/uuid": "^10.0.0",
