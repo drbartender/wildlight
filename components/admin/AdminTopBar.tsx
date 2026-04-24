@@ -1,18 +1,29 @@
 'use client';
 
+import type { ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
 import { AdminThemeSwitch } from './AdminThemeSwitch';
 
 interface Props {
   title: string;
   subtitle?: string;
+  actions?: ReactNode;
 }
 
-export function AdminTopBar({ title, subtitle }: Props) {
+export function AdminTopBar({ title, subtitle, actions }: Props) {
+  const router = useRouter();
+
   function openCmdK() {
     const opener = (
       window as unknown as { __wlAdminOpenCmdk?: () => void }
     ).__wlAdminOpenCmdk;
     if (opener) opener();
+  }
+
+  async function signOut() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    router.push('/login');
+    router.refresh();
   }
 
   return (
@@ -37,7 +48,15 @@ export function AdminTopBar({ title, subtitle }: Props) {
         <kbd>⌘K</kbd>
       </button>
       <div className="right">
+        {actions}
         <AdminThemeSwitch />
+        <button
+          type="button"
+          className="wl-adm-topbar-signout"
+          onClick={signOut}
+        >
+          Sign out
+        </button>
       </div>
     </header>
   );

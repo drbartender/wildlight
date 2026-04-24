@@ -317,6 +317,27 @@
   align-items: center;
 }
 
+.wl-adm-topbar-signout {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--adm-muted);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: var(--adm-radius-md);
+  cursor: pointer;
+}
+.wl-adm-topbar-signout:hover {
+  background: var(--adm-card);
+  color: var(--adm-red);
+  border-color: var(--adm-rule);
+}
+.wl-admin-surface[data-theme='dark'] .wl-adm-topbar-signout {
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
+  font-size: 11px;
+  text-transform: lowercase;
+}
+
 .wl-adm-search {
   display: flex;
   align-items: center;
