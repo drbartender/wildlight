@@ -380,6 +380,16 @@ html[data-mood='ink'] .wl-surface::after {
 .wl-mood-opt.on {
   color: var(--paper);
 }
+/* Mood switch — mobile compact (icon-only under 480px). */
+@media (max-width: 480px) {
+  .wl-mood-switch .wl-mood-label {
+    display: none;
+  }
+  .wl-mood-opt {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+}
 .wl-mood-dot {
   width: 9px;
   height: 9px;

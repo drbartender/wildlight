@@ -47,10 +47,11 @@ export function MoodSwitch({ size = 'md' }: { size?: 'sm' | 'md' }) {
           type="button"
           className={`wl-mood-opt ${mood === o.key ? 'on' : ''}`}
           aria-pressed={mood === o.key}
+          aria-label={o.label}
           onClick={() => choose(o.key)}
         >
           <span className={`wl-mood-dot ${o.key}`} aria-hidden="true" />
-          <span>{o.label}</span>
+          <span className="wl-mood-label">{o.label}</span>
         </button>
       ))}
     </div>
