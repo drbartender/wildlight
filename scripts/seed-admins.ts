@@ -23,10 +23,22 @@ async function prompt(q: string, silent = false): Promise<string> {
   return answer.trim();
 }
 
+function argFor(name: string): string | undefined {
+  const prefix = `--${name}=`;
+  for (const a of process.argv.slice(2)) {
+    if (a.startsWith(prefix)) return a.slice(prefix.length);
+  }
+  return undefined;
+}
+
 async function main() {
-  const email = (await prompt('Admin email: ')).toLowerCase();
+  const argEmail = argFor('email');
+  const argPass = argFor('password');
+  const email = argEmail
+    ? argEmail.toLowerCase()
+    : (await prompt('Admin email: ')).toLowerCase();
   if (!email || !email.includes('@')) throw new Error('email required');
-  const pass = await prompt('Password (min 12 chars): ', true);
+  const pass = argPass || (await prompt('Password (min 12 chars): ', true));
   if (pass.length < 12) throw new Error('password too short');
   const hash = await hashPassword(pass);
   const res = await pool.query(
