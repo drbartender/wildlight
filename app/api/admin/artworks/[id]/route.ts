@@ -70,12 +70,29 @@ export async function PATCH(
   const d = parsed.data;
 
   await withTransaction(async (client) => {
+    // If status is transitioning to 'published', stamp published_at.
+    // We don't clear published_at when going back to draft/retired —
+    // it's the last-published timestamp, not a current-state flag.
+    let stampPublishedAt = false;
+    if (d.status === 'published') {
+      const prev = await client.query<{ status: string }>(
+        'SELECT status FROM artworks WHERE id = $1 FOR UPDATE',
+        [id],
+      );
+      if (prev.rowCount && prev.rows[0].status !== 'published') {
+        stampPublishedAt = true;
+      }
+    }
+
     const updateCols: string[] = [];
     const vals: unknown[] = [];
     for (const [k, v] of Object.entries(d)) {
       if (k === 'applyTemplate' || v === undefined) continue;
       updateCols.push(`${k} = $${vals.length + 1}`);
       vals.push(v);
+    }
+    if (stampPublishedAt) {
+      updateCols.push(`published_at = NOW()`);
     }
     if (updateCols.length) {
       vals.push(id);
