@@ -7,10 +7,11 @@ import { AdminThemeSwitch } from './AdminThemeSwitch';
 interface Props {
   title: string;
   subtitle?: string;
+  breadcrumb?: string[];
   actions?: ReactNode;
 }
 
-export function AdminTopBar({ title, subtitle, actions }: Props) {
+export function AdminTopBar({ title, subtitle, breadcrumb, actions }: Props) {
   const router = useRouter();
 
   function openCmdK() {
@@ -32,6 +33,14 @@ export function AdminTopBar({ title, subtitle, actions }: Props) {
         {subtitle && <div className="sub">{subtitle}</div>}
         <h1>{title}</h1>
       </div>
+      <nav className="wl-adm-topbar-crumbs" aria-label="Breadcrumb">
+        {(breadcrumb ?? [title]).map((b, i, arr) => (
+          <span key={i} className={i === arr.length - 1 ? 'current' : ''}>
+            {b}
+            {i < arr.length - 1 && <span className="sep">/</span>}
+          </span>
+        ))}
+      </nav>
       <button type="button" className="wl-adm-search" onClick={openCmdK}>
         <svg
           width="13"
