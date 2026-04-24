@@ -38,12 +38,12 @@ export async function getAdminSession(): Promise<AdminTokenPayload | null> {
 }
 
 /**
- * Use in Server Components and Server Actions — redirects to /admin/login
+ * Use in Server Components and Server Actions — redirects to /login
  * when the visitor isn't authenticated.
  */
 export async function requireAdminOrRedirect(): Promise<AdminTokenPayload> {
   const s = await getAdminSession();
-  if (!s) redirect('/admin/login');
+  if (!s) redirect('/login');
   return s;
 }
 
