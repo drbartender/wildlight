@@ -84,8 +84,11 @@ export default function ArtworkEditPage({
       if (body.year_shot != null && !data?.artwork.year_shot) patch.year_shot = body.year_shot;
       if (body.location && !data?.artwork.location) patch.location = body.location;
       if (body.artist_note && !data?.artwork.artist_note) patch.artist_note = body.artist_note;
-      if (Object.keys(patch).length > 0) await save(patch);
-      setDraftConfidence(body.confidence);
+      // Only surface the model's confidence when we actually used its output.
+      if (Object.keys(patch).length > 0) {
+        await save(patch);
+        setDraftConfidence(body.confidence);
+      }
     } catch (err) {
       setDraftError(err instanceof Error ? err.message : String(err));
     } finally {

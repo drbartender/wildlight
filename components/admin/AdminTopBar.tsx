@@ -22,7 +22,14 @@ export function AdminTopBar({ title, subtitle, breadcrumb, actions }: Props) {
   }
 
   async function signOut() {
-    await fetch('/api/auth/logout', { method: 'POST' });
+    const r = await fetch('/api/auth/logout', { method: 'POST' });
+    if (!r.ok) {
+      // If the logout endpoint fails, stay put — sending the user to
+      // /login while still holding a valid cookie is worse than
+      // surfacing the error.
+      console.error('sign-out failed', r.status);
+      return;
+    }
     router.push('/login');
     router.refresh();
   }

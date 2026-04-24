@@ -86,11 +86,14 @@ export default function AdminArtworksPage() {
 
   async function batchAiDraft() {
     if (batchRunning) return;
+    // Snapshot the target list so mid-batch state changes can't shift
+    // the iteration (e.g. if the user flips a filter).
+    const targets = rows.filter((r) => !r.artist_note);
     setBatchRunning('draft');
-    setBatchProgress({ done: 0, total: emptyNote.length, failed: 0 });
+    setBatchProgress({ done: 0, total: targets.length, failed: 0 });
     let done = 0;
     let failed = 0;
-    for (const r of emptyNote) {
+    for (const r of targets) {
       try {
         const res = await fetch(`/api/admin/artworks/${r.id}/ai-draft`, {
           method: 'POST',
@@ -106,17 +109,18 @@ export default function AdminArtworksPage() {
         if (body.location) patch.location = body.location;
         if (body.artist_note) patch.artist_note = body.artist_note;
         if (Object.keys(patch).length) {
-          await fetch(`/api/admin/artworks/${r.id}`, {
+          const pr = await fetch(`/api/admin/artworks/${r.id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(patch),
           });
+          if (!pr.ok) throw new Error(`PATCH HTTP ${pr.status}`);
         }
       } catch {
         failed += 1;
       }
       done += 1;
-      setBatchProgress({ done, total: emptyNote.length, failed });
+      setBatchProgress({ done, total: targets.length, failed });
     }
     setBatchRunning(null);
     await reload();
@@ -124,11 +128,12 @@ export default function AdminArtworksPage() {
 
   async function batchApplyFull() {
     if (batchRunning) return;
+    const targets = rows.filter((r) => r.variant_count === 0);
     setBatchRunning('variants');
-    setBatchProgress({ done: 0, total: emptyVariants.length, failed: 0 });
+    setBatchProgress({ done: 0, total: targets.length, failed: 0 });
     let done = 0;
     let failed = 0;
-    for (const r of emptyVariants) {
+    for (const r of targets) {
       try {
         const res = await fetch(`/api/admin/artworks/${r.id}`, {
           method: 'PATCH',
@@ -140,7 +145,7 @@ export default function AdminArtworksPage() {
         failed += 1;
       }
       done += 1;
-      setBatchProgress({ done, total: emptyVariants.length, failed });
+      setBatchProgress({ done, total: targets.length, failed });
     }
     setBatchRunning(null);
     await reload();
