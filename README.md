@@ -40,6 +40,8 @@ Scripts:
 | `npm run seed:admins` | Add/update an admin user (interactive) |
 | `npm run scrape` | Crawl wildlightimagery.com gallery images into `scraped/` |
 | `npm run import:manifest` | Upload scraped images to R2 + seed draft artworks |
+| `npm run curate:build` | Regenerate `scraped/curate.html` (the 50-pick review page) from the manifest |
+| `npm run publish:selections [-- --apply]` | Flip selected drafts to `published`; dry-run by default |
 | `npm run sync:printful <id \| all>` | Create Printful sync_products for artwork(s) |
 
 ## Deploy
