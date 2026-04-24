@@ -83,14 +83,20 @@ export default function AdminArtworksPage() {
     failed: number;
   }>({ done: 0, total: 0, failed: 0 });
 
-  const emptyNote = rows.filter((r) => !r.has_note);
   const emptyVariants = rows.filter((r) => r.variant_count === 0);
 
   async function batchAiDraft() {
     if (batchRunning) return;
     // Snapshot the target list so mid-batch state changes can't shift
     // the iteration (e.g. if the user flips a filter).
-    const targets = rows.filter((r) => !r.has_note);
+    const targets = rows.slice();
+    if (
+      !confirm(
+        `Rewrite title, location, and artist note for all ${targets.length} artworks? This overwrites existing values.`,
+      )
+    ) {
+      return;
+    }
     setBatchRunning('draft');
     setBatchProgress({ done: 0, total: targets.length, failed: 0 });
 
@@ -108,14 +114,17 @@ export default function AdminArtworksPage() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const body = (await res.json()) as {
           year_shot: number | null;
+          title: string;
           location: string | null;
           artist_note: string;
         };
-        // Only fill fields that were empty for THIS row.
+        // Title/location/note overwrite always; year_shot only fills empty
+        // (EXIF-only — we never let the AI guess a year).
         const patch: Record<string, unknown> = {};
         if (body.year_shot != null && r.year_shot == null) patch.year_shot = body.year_shot;
-        if (body.location && !r.location) patch.location = body.location;
-        if (body.artist_note && !r.has_note) patch.artist_note = body.artist_note;
+        if (body.title) patch.title = body.title;
+        if (body.location) patch.location = body.location;
+        if (body.artist_note) patch.artist_note = body.artist_note;
         if (Object.keys(patch).length) {
           const pr = await fetch(`/api/admin/artworks/${r.id}`, {
             method: 'PATCH',
@@ -215,11 +224,11 @@ export default function AdminArtworksPage() {
             type="button"
             className="wl-adm-btn small"
             onClick={batchAiDraft}
-            disabled={batchRunning !== null || emptyNote.length === 0}
+            disabled={batchRunning !== null || rows.length === 0}
           >
             {batchRunning === 'draft'
               ? `Drafting ${batchProgress.done}/${batchProgress.total}…`
-              : `AI-draft ${emptyNote.length} empty`}
+              : `AI-draft all (${rows.length})`}
           </button>
           <button
             type="button"

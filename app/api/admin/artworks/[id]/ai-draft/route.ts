@@ -44,12 +44,11 @@ export async function POST(
   }
 
   const { rows } = await pool.query<{
-    title: string;
     image_web_url: string;
     collection_slug: string | null;
     year_shot: number | null;
   }>(
-    `SELECT a.title, a.image_web_url, a.year_shot, c.slug AS collection_slug
+    `SELECT a.image_web_url, a.year_shot, c.slug AS collection_slug
      FROM artworks a LEFT JOIN collections c ON c.id = a.collection_id
      WHERE a.id = $1`,
     [numericId],
@@ -81,12 +80,12 @@ export async function POST(
   try {
     const draft = await draftArtworkMetadata({
       imageUrl: a.image_web_url,
-      title: a.title,
       collectionSlug: a.collection_slug,
       gps,
     });
     return NextResponse.json({
       year_shot,
+      title: draft.title,
       location: draft.location,
       artist_note: draft.artist_note,
       confidence: draft.confidence,
