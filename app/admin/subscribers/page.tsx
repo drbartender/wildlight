@@ -44,6 +44,14 @@ function fmtJoined(iso: string): string {
   return d.toLocaleDateString();
 }
 
+interface BroadcastRow {
+  id: number;
+  subject: string;
+  recipient_count: number;
+  sent_at: string;
+  sent_by: string | null;
+}
+
 function SubscribersInner() {
   const qp = useSearchParams();
   const initialTab = (qp.get('tab') as Tab) || 'list';
@@ -59,6 +67,10 @@ function SubscribersInner() {
   const [testTo, setTestTo] = useState('');
   const [state, setState] = useState<'idle' | 'sending' | 'done'>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [idemKey, setIdemKey] = useState<string>(() => crypto.randomUUID());
+
+  const [broadcasts, setBroadcasts] = useState<BroadcastRow[]>([]);
+  const [broadcastsLoading, setBroadcastsLoading] = useState(false);
 
   useEffect(() => {
     fetch('/api/admin/subscribers')
@@ -66,6 +78,16 @@ function SubscribersInner() {
       .then((d: { rows: Row[] }) => setRows(d.rows))
       .catch(() => setRows([]));
   }, []);
+
+  useEffect(() => {
+    if (tab !== 'history') return;
+    setBroadcastsLoading(true);
+    fetch('/api/admin/subscribers/broadcasts')
+      .then((r) => r.json())
+      .then((d: { rows: BroadcastRow[] }) => setBroadcasts(d.rows))
+      .catch(() => setBroadcasts([]))
+      .finally(() => setBroadcastsLoading(false));
+  }, [tab]);
 
   const activeCount = useMemo(
     () => rows.filter((r) => r.confirmed_at && !r.unsubscribed_at).length,
@@ -87,6 +109,10 @@ function SubscribersInner() {
       return;
     }
     setState('done');
+    if (!('testTo' in body)) {
+      // Rotate the idempotency key so a future full send gets a new UUID.
+      setIdemKey(crypto.randomUUID());
+    }
   }
 
   return (
@@ -95,7 +121,11 @@ function SubscribersInner() {
 
       <div className="wl-adm-page tight">
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div className="wl-adm-tabs" style={{ flex: 1 }}>
+          {/* Atelier tab bar */}
+          <div
+            className="wl-adm-tabs wl-adm-subs-tabs-atelier"
+            style={{ flex: 1 }}
+          >
             {(
               [
                 ['list', 'Subscribers'],
@@ -112,6 +142,26 @@ function SubscribersInner() {
               </button>
             ))}
           </div>
+
+          {/* Darkroom tab bar */}
+          <div className="wl-adm-subs-tabs-darkroom" style={{ flex: 1 }}>
+            {(
+              [
+                ['list', `subscribers [${rows.length}]`],
+                ['broadcast', 'new_broadcast'],
+                ['history', `history [${broadcasts.length}]`],
+              ] as [Tab, string][]
+            ).map(([k, l]) => (
+              <button
+                key={k}
+                className={tab === k ? 'on' : ''}
+                onClick={() => setTab(k)}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
+
           <span style={{ fontSize: 12, color: 'var(--adm-muted)' }}>
             {activeCount} active · {rows.length} total
           </span>
@@ -225,7 +275,7 @@ function SubscribersInner() {
                       )
                     )
                       return;
-                    void send({ subject, html });
+                    void send({ subject, html, idempotencyKey: idemKey });
                   }}
                 >
                   {state === 'sending'
@@ -279,13 +329,101 @@ function SubscribersInner() {
         )}
 
         {tab === 'history' && (
-          <div className="wl-adm-card">
-            <div className="wl-adm-history-empty">
-              Broadcast history isn&apos;t logged yet. Add a
-              broadcast_log table to capture send events — subject, recipient
-              count, sent_at — and they&apos;ll appear here.
-            </div>
-          </div>
+          <>
+            {broadcastsLoading ? (
+              <div
+                className="wl-adm-card"
+                style={{
+                  padding: 20,
+                  color: 'var(--adm-muted)',
+                  fontSize: 13,
+                }}
+              >
+                Loading broadcast history…
+              </div>
+            ) : broadcasts.length === 0 ? (
+              <div className="wl-adm-card">
+                <div className="wl-adm-history-empty">
+                  Nothing sent yet. Your first broadcast will show up here.
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Atelier — editorial list */}
+                <div className="wl-adm-card wl-adm-history-atelier">
+                  {broadcasts.map((b, i) => (
+                    <div
+                      key={b.id}
+                      className="row"
+                      style={{
+                        borderTop: i ? '1px solid var(--adm-rule)' : 'none',
+                      }}
+                    >
+                      <div className="ttl">{b.subject}</div>
+                      <div className="meta">
+                        <span>{new Date(b.sent_at).toLocaleString()}</span>
+                        <span>·</span>
+                        <span className="mono">
+                          {b.recipient_count} recipients
+                        </span>
+                      </div>
+                      <div className="by">{b.sent_by || 'system'}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Darkroom — tabular panel */}
+                <div className="wl-adm-panel wl-adm-history-darkroom">
+                  <table className="wl-adm-table mono">
+                    <thead>
+                      <tr>
+                        <th>sent_at</th>
+                        <th>subject</th>
+                        <th className="right">recipients</th>
+                        <th className="right">open_rate</th>
+                        <th className="right">click_rate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {broadcasts.map((b) => (
+                        <tr key={b.id}>
+                          <td className="muted">
+                            {new Date(b.sent_at).toLocaleDateString(undefined, {
+                              month: 'short',
+                              day: '2-digit',
+                            })}
+                            {' · '}
+                            {new Date(b.sent_at).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </td>
+                          <td>{b.subject}</td>
+                          <td className="right">{b.recipient_count}</td>
+                          <td
+                            className="right"
+                            style={{ color: 'var(--adm-green)' }}
+                          >
+                            —
+                          </td>
+                          <td
+                            className="right"
+                            style={{ color: 'var(--adm-green)' }}
+                          >
+                            —
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="f">
+                    // open/click rates not tracked yet — requires resend
+                    webhook + link rewriting
+                  </div>
+                </div>
+              </>
+            )}
+          </>
         )}
       </div>
     </>
