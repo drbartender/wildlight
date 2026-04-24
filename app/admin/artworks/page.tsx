@@ -14,6 +14,8 @@ interface Row {
   image_web_url: string;
   image_print_url: string | null;
   artist_note: string | null;
+  year_shot: number | null;
+  location: string | null;
   collection_title: string | null;
   variant_count: number;
   min_price_cents: number | null;
@@ -104,10 +106,13 @@ export default function AdminArtworksPage() {
           location: string | null;
           artist_note: string;
         };
+        // Only fill fields that were empty for THIS row — mirrors the
+        // single-item guard on the detail page so bulk runs can't
+        // clobber hand-edited year/location.
         const patch: Record<string, unknown> = {};
-        if (body.year_shot != null) patch.year_shot = body.year_shot;
-        if (body.location) patch.location = body.location;
-        if (body.artist_note) patch.artist_note = body.artist_note;
+        if (body.year_shot != null && r.year_shot == null) patch.year_shot = body.year_shot;
+        if (body.location && !r.location) patch.location = body.location;
+        if (body.artist_note && !r.artist_note) patch.artist_note = body.artist_note;
         if (Object.keys(patch).length) {
           const pr = await fetch(`/api/admin/artworks/${r.id}`, {
             method: 'PATCH',

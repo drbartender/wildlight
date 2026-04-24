@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 import { readExifFromBuffer } from '@/lib/exif';
-import { draftArtworkMetadata } from '@/lib/ai-draft';
+import { draftArtworkMetadata, isRetryableAnthropicError } from '@/lib/ai-draft';
 
 function isAllowedImageHost(url: string): boolean {
   const base = process.env.R2_PUBLIC_BASE_URL;
@@ -86,13 +86,13 @@ export async function POST(
   } catch (err) {
     // Map rate-limit / transient upstream errors to 429 so the UI can
     // distinguish them from other failures.
-    const status =
-      err instanceof Error && /status (?:429|529)/i.test(err.message)
-        ? 429
-        : 502;
-    return NextResponse.json(
-      { error: 'ai-draft failed', detail: String(err) },
-      { status },
-    );
+    const status = isRetryableAnthropicError(err) ? 429 : 502;
+    // Log the full error server-side; only leak details to the client in
+    // non-production builds. Admin-only, but stack text on the wire is
+    // still a smell.
+    console.error('ai-draft failed', err);
+    const body: { error: string; detail?: string } = { error: 'ai-draft failed' };
+    if (process.env.NODE_ENV !== 'production') body.detail = String(err);
+    return NextResponse.json(body, { status });
   }
 }

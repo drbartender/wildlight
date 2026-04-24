@@ -22,7 +22,7 @@ export async function GET(req: Request) {
   const where = clauses.length ? 'WHERE ' + clauses.join(' AND ') : '';
   const { rows } = await pool.query(
     `SELECT a.id, a.slug, a.title, a.status, a.image_web_url, a.image_print_url,
-            a.artist_note,
+            a.artist_note, a.year_shot, a.location,
             a.updated_at,
             c.title AS collection_title, c.slug AS collection_slug,
             (SELECT COUNT(*)::int FROM artwork_variants v

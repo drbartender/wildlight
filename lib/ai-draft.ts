@@ -60,12 +60,15 @@ const DRAFT_TOOL = {
 };
 
 /**
- * Strip angle brackets so an admin-controlled title cannot close the
- * XML-ish fence in userPreamble and inject pseudo-tags. Cheap
- * defense-in-depth against prompt-injection in titles/slugs.
+ * Strip angle brackets (would let a title close the XML-ish fence in
+ * userPreamble) and ASCII control chars so a newline-embedded injection
+ * cannot break the frame. Cheap defense-in-depth against prompt-injection
+ * in titles/slugs.
  */
+// eslint-disable-next-line no-control-regex
+const SANITIZE_RX = /[<>\x00-\x1f\x7f]/g;
 function sanitize(s: string): string {
-  return s.replace(/[<>]/g, '').slice(0, 200);
+  return s.replace(SANITIZE_RX, '').slice(0, 200);
 }
 
 function userPreamble(input: DraftInput): string {
@@ -101,24 +104,33 @@ function validate(raw: unknown): DraftResult {
  * failures (rate limits, 5xx, overload) are worth another shot; shape
  * violations from the model are not.
  */
-function isRetryable(err: unknown): boolean {
+export function isRetryableAnthropicError(err: unknown): boolean {
   if (err instanceof Anthropic.APIError) {
     return err.status === 429 || err.status === 529 || err.status >= 500;
   }
   return false;
 }
 
+// Lazy module-level singleton. A bulk run of ~50 sequential calls would
+// otherwise rebuild the client 50× and lose keep-alive / internal retry state.
+let client: Anthropic | null = null;
+function getClient(): Anthropic {
+  if (client) return client;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY missing');
+  client = new Anthropic({ apiKey });
+  return client;
+}
+
 export async function draftArtworkMetadata(
   input: DraftInput,
 ): Promise<DraftResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error('ANTHROPIC_API_KEY missing');
-  const client = new Anthropic({ apiKey });
+  const c = getClient();
 
   let lastErr: unknown = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await client.messages.create({
+      const res = await c.messages.create({
         model: MODEL,
         max_tokens: 512,
         // Cache the static system prompt so a bulk run (~50 sequential calls
@@ -156,7 +168,7 @@ export async function draftArtworkMetadata(
       lastErr = err;
       // Only retry transient upstream failures. A shape error from the model
       // won't self-correct without a corrective turn, so fail fast.
-      if (!isRetryable(err)) break;
+      if (!isRetryableAnthropicError(err)) break;
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error('ai-draft failed');

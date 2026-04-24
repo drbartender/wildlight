@@ -68,6 +68,13 @@ export default function ArtworkEditPage({
     setDrafting(true);
     setDraftError(null);
     setDraftConfidence(null);
+    // Snapshot current field values so a stale closure can't re-fire a
+    // double-click into overwriting a field the first call just filled.
+    const snapshot = {
+      year_shot: data?.artwork.year_shot ?? null,
+      location: data?.artwork.location ?? null,
+      artist_note: data?.artwork.artist_note ?? null,
+    };
     try {
       const r = await fetch(`/api/admin/artworks/${id}/ai-draft`, { method: 'POST' });
       if (!r.ok) {
@@ -81,9 +88,9 @@ export default function ArtworkEditPage({
         confidence: 'high' | 'low';
       };
       const patch: Record<string, unknown> = {};
-      if (body.year_shot != null && !data?.artwork.year_shot) patch.year_shot = body.year_shot;
-      if (body.location && !data?.artwork.location) patch.location = body.location;
-      if (body.artist_note && !data?.artwork.artist_note) patch.artist_note = body.artist_note;
+      if (body.year_shot != null && snapshot.year_shot == null) patch.year_shot = body.year_shot;
+      if (body.location && !snapshot.location) patch.location = body.location;
+      if (body.artist_note && !snapshot.artist_note) patch.artist_note = body.artist_note;
       // Only surface the model's confidence when we actually used its output.
       if (Object.keys(patch).length > 0) {
         await save(patch);

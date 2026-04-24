@@ -5,12 +5,19 @@ import { pool, withTransaction } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 import { applyTemplate, type TemplateKey } from '@/lib/variant-templates';
 
+function parseId(raw: string): number | null {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
 export async function GET(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
   await requireAdmin();
-  const { id } = await ctx.params;
+  const { id: raw } = await ctx.params;
+  const id = parseId(raw);
+  if (id == null) return NextResponse.json({ error: 'invalid id' }, { status: 400 });
   const [a, v] = await Promise.all([
     pool.query(
       `SELECT a.*, c.title AS collection_title
@@ -53,7 +60,9 @@ export async function PATCH(
   ctx: { params: Promise<{ id: string }> },
 ) {
   await requireAdmin();
-  const { id } = await ctx.params;
+  const { id: raw } = await ctx.params;
+  const id = parseId(raw);
+  if (id == null) return NextResponse.json({ error: 'invalid id' }, { status: 400 });
   const parsed = Patch.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: 'invalid input' }, { status: 400 });
@@ -101,7 +110,9 @@ export async function DELETE(
   ctx: { params: Promise<{ id: string }> },
 ) {
   await requireAdmin();
-  const { id } = await ctx.params;
+  const { id: raw } = await ctx.params;
+  const id = parseId(raw);
+  if (id == null) return NextResponse.json({ error: 'invalid id' }, { status: 400 });
   await pool.query('DELETE FROM artworks WHERE id = $1', [id]);
   return NextResponse.json({ ok: true });
 }
