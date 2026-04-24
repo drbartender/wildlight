@@ -223,6 +223,36 @@ export default async function AdminDashboard({
           </div>
         </div>
 
+        <div className="wl-adm-kpis-darkroom">
+          <div className="wl-adm-kpi-d">
+            <div className="k">revenue_30d</div>
+            <div className="v">{formatUSD(revTotal)}</div>
+            <div className="d up">
+              {revN > 0 ? `▲ ${revN} paid` : 'no sales yet'}
+            </div>
+          </div>
+          <div className="wl-adm-kpi-d">
+            <div className="k">orders_30d</div>
+            <div className="v">{revN}</div>
+            <div className="d">last 30 days</div>
+          </div>
+          <div className="wl-adm-kpi-d">
+            <div className="k">aov</div>
+            <div className="v">{formatUSD(revAvg)}</div>
+            <div className="d">avg per order</div>
+          </div>
+          <div className="wl-adm-kpi-d">
+            <div className="k">subscribers</div>
+            <div className="v">{subCount.toLocaleString()}</div>
+            <div className="d">confirmed</div>
+          </div>
+          <div className={`wl-adm-kpi-d ${needsReviewCount > 0 ? 'alert' : ''}`}>
+            <div className="k">needs_review</div>
+            <div className="v">{needsReviewCount}</div>
+            <div className="d">{needsReviewCount > 0 ? 'action' : 'clear'}</div>
+          </div>
+        </div>
+
         <div className="wl-adm-row2">
           <div className="wl-adm-card">
             <div className="h">
