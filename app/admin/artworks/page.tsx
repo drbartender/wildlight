@@ -13,6 +13,7 @@ interface Row {
   status: string;
   image_web_url: string;
   image_print_url: string | null;
+  artist_note: string | null;
   collection_title: string | null;
   variant_count: number;
   min_price_cents: number | null;
@@ -73,6 +74,78 @@ export default function AdminArtworksPage() {
     void reload();
   }
 
+  const [batchRunning, setBatchRunning] = useState<null | 'draft' | 'variants'>(null);
+  const [batchProgress, setBatchProgress] = useState<{
+    done: number;
+    total: number;
+    failed: number;
+  }>({ done: 0, total: 0, failed: 0 });
+
+  const emptyNote = rows.filter((r) => !r.artist_note);
+  const emptyVariants = rows.filter((r) => r.variant_count === 0);
+
+  async function batchAiDraft() {
+    if (batchRunning) return;
+    setBatchRunning('draft');
+    setBatchProgress({ done: 0, total: emptyNote.length, failed: 0 });
+    let done = 0;
+    let failed = 0;
+    for (const r of emptyNote) {
+      try {
+        const res = await fetch(`/api/admin/artworks/${r.id}/ai-draft`, {
+          method: 'POST',
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = (await res.json()) as {
+          year_shot: number | null;
+          location: string | null;
+          artist_note: string;
+        };
+        const patch: Record<string, unknown> = {};
+        if (body.year_shot != null) patch.year_shot = body.year_shot;
+        if (body.location) patch.location = body.location;
+        if (body.artist_note) patch.artist_note = body.artist_note;
+        if (Object.keys(patch).length) {
+          await fetch(`/api/admin/artworks/${r.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(patch),
+          });
+        }
+      } catch {
+        failed += 1;
+      }
+      done += 1;
+      setBatchProgress({ done, total: emptyNote.length, failed });
+    }
+    setBatchRunning(null);
+    await reload();
+  }
+
+  async function batchApplyFull() {
+    if (batchRunning) return;
+    setBatchRunning('variants');
+    setBatchProgress({ done: 0, total: emptyVariants.length, failed: 0 });
+    let done = 0;
+    let failed = 0;
+    for (const r of emptyVariants) {
+      try {
+        const res = await fetch(`/api/admin/artworks/${r.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ applyTemplate: 'full' }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      } catch {
+        failed += 1;
+      }
+      done += 1;
+      setBatchProgress({ done, total: emptyVariants.length, failed });
+    }
+    setBatchRunning(null);
+    await reload();
+  }
+
   const tabs = ['all', 'published', 'draft', 'retired'] as const;
   const counts: Record<string, number> = {
     all: rows.length,
@@ -121,6 +194,26 @@ export default function AdminArtworksPage() {
               <span style={{ width: 1, height: 18, background: 'var(--adm-rule)' }} />
             </>
           )}
+          <button
+            type="button"
+            className="wl-adm-btn small"
+            onClick={batchAiDraft}
+            disabled={batchRunning !== null || emptyNote.length === 0}
+          >
+            {batchRunning === 'draft'
+              ? `Drafting ${batchProgress.done}/${batchProgress.total}…`
+              : `AI-draft ${emptyNote.length} empty`}
+          </button>
+          <button
+            type="button"
+            className="wl-adm-btn small"
+            onClick={batchApplyFull}
+            disabled={batchRunning !== null || emptyVariants.length === 0}
+          >
+            {batchRunning === 'variants'
+              ? `Applying ${batchProgress.done}/${batchProgress.total}…`
+              : `Apply full template to ${emptyVariants.length} empty`}
+          </button>
           <Link
             href="/admin/artworks/new"
             className="wl-adm-btn small primary"
