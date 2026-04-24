@@ -21,6 +21,9 @@ out/
 # scraper output
 scraped/
 
+# local scratch work — design handoffs, raw letters, experiments
+temp/
+
 # editor / OS
 .DS_Store
 .claude/
