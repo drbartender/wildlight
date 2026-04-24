@@ -115,9 +115,41 @@ CREATE TABLE IF NOT EXISTS admin_users (
 CREATE TABLE IF NOT EXISTS webhook_events (
   id           SERIAL PRIMARY KEY,
   source       TEXT NOT NULL,
-  event_id     TEXT UNIQUE,
+  event_id     TEXT UNIQUE NOT NULL,
   payload      JSONB NOT NULL,
   processed_at TIMESTAMPTZ,
   error        TEXT,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Idempotent post-create migrations ---------------------------------------
+-- Use this block for column additions + constraint refinements so `npm run
+-- migrate` remains safe on existing databases. Every statement must be safe
+-- to re-run.
+
+-- CHECK constraints on status enums (protects dashboards from silent typos).
+-- DROP-then-ADD pattern since Postgres has no `ADD CONSTRAINT IF NOT EXISTS`.
+ALTER TABLE artworks DROP CONSTRAINT IF EXISTS artworks_status_chk;
+ALTER TABLE artworks ADD CONSTRAINT artworks_status_chk
+  CHECK (status IN ('draft', 'published', 'retired'));
+
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_status_chk;
+ALTER TABLE orders ADD CONSTRAINT orders_status_chk CHECK (status IN (
+  'pending', 'paid', 'submitted', 'needs_review',
+  'fulfilled', 'shipped', 'delivered',
+  'canceled', 'refunded',
+  'refunding', 'resubmitting'          -- intermediate states used during admin actions
+));
+
+ALTER TABLE artwork_variants DROP CONSTRAINT IF EXISTS artwork_variants_type_chk;
+ALTER TABLE artwork_variants ADD CONSTRAINT artwork_variants_type_chk
+  CHECK (type IN ('print', 'canvas', 'framed', 'metal'));
+
+-- Indexes added after initial CREATE TABLE.
+CREATE INDEX IF NOT EXISTS idx_orders_created_at       ON orders(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_variants_printful_sync  ON artwork_variants(printful_sync_variant_id)
+  WHERE printful_sync_variant_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_webhook_events_unprocessed
+  ON webhook_events(source, created_at) WHERE processed_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_subscribers_active      ON subscribers(id)
+  WHERE confirmed_at IS NOT NULL AND unsubscribed_at IS NULL;
