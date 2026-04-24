@@ -70,3 +70,25 @@ export function applyTemplate(key: TemplateKey): VariantRow[] {
     price_cents: roundPriceCents(Math.ceil(v.cost_cents * 2.1)),
   }));
 }
+
+/**
+ * Look up the Printful catalog variant spec that matches a stored
+ * `artwork_variants` row. Returns undefined if no template entry matches —
+ * used by `printful-sync.ts` to resolve real Printful catalog IDs at sync time.
+ *
+ * For Phase 1 all `printful_catalog_variant_id` entries are `0` placeholders.
+ * Before calling `npm run sync:printful`, edit the tables above and fill in
+ * the real catalog IDs (one-time lookup via the Printful Products API).
+ */
+export function findVariantSpec(query: {
+  type: VariantType | string;
+  size: string;
+  finish: string | null;
+}): VariantSpec | undefined {
+  return TEMPLATES.full.find(
+    (v) =>
+      v.type === query.type &&
+      v.size === query.size &&
+      (v.finish ?? null) === (query.finish ?? null),
+  );
+}

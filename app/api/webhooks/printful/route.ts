@@ -46,18 +46,16 @@ export async function POST(req: Request) {
     ? `pf_${event.data.id}_${event.type}`
     : `pf_${Date.now()}_${event.type}`;
 
-  const dupe = await pool.query<{ processed_at: Date | null }>(
-    'SELECT processed_at FROM webhook_events WHERE event_id = $1',
-    [eventId],
+  // Race-free dedupe via INSERT ON CONFLICT — see app/api/webhooks/stripe/route.ts.
+  const claim = await pool.query<{ id: number }>(
+    `INSERT INTO webhook_events (source, event_id, payload)
+     VALUES ('printful', $1, $2)
+     ON CONFLICT (event_id) DO NOTHING
+     RETURNING id`,
+    [eventId, event],
   );
-  if (dupe.rowCount && dupe.rows[0].processed_at) {
+  if (!claim.rowCount) {
     return NextResponse.json({ ok: true, duplicate: true });
-  }
-  if (!dupe.rowCount) {
-    await pool.query(
-      `INSERT INTO webhook_events (source, event_id, payload) VALUES ('printful', $1, $2)`,
-      [eventId, event],
-    );
   }
 
   try {

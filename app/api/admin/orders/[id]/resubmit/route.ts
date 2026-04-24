@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 import { printful } from '@/lib/printful';
+import { signedPrivateUrl } from '@/lib/r2';
 import { logger } from '@/lib/logger';
 
 interface OrderRow {
@@ -60,6 +61,14 @@ export async function POST(
 
   const addr = o.shipping_address || {};
   try {
+    // Sign each private R2 object so Printful can download the print file.
+    const pfItems = await Promise.all(
+      items.rows.map(async (r) => ({
+        sync_variant_id: r.printful_sync_variant_id!,
+        quantity: r.quantity,
+        files: [{ url: await signedPrivateUrl(r.image_print_url!, 7 * 24 * 3600) }],
+      })),
+    );
     const pf = await printful.createOrder({
       external_id: `order_${o.id}`,
       recipient: {
@@ -72,11 +81,7 @@ export async function POST(
         zip: addr.postal_code || '',
         email: o.customer_email,
       },
-      items: items.rows.map((r) => ({
-        sync_variant_id: r.printful_sync_variant_id!,
-        quantity: r.quantity,
-        files: [{ url: r.image_print_url! }],
-      })),
+      items: pfItems,
       confirm: true,
     });
     await pool.query(

@@ -4,6 +4,7 @@ import type Stripe from 'stripe';
 import { pool, withTransaction } from '@/lib/db';
 import { getStripe, getStripeConfig } from '@/lib/stripe';
 import { printful } from '@/lib/printful';
+import { signedPrivateUrl } from '@/lib/r2';
 import {
   sendOrderConfirmation,
   sendNeedsReviewAlert,
@@ -49,19 +50,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'invalid signature' }, { status: 400 });
   }
 
-  // dedupe
-  const existing = await pool.query<{ processed_at: Date | null }>(
-    'SELECT processed_at FROM webhook_events WHERE event_id = $1',
-    [event.id],
+  // Race-free dedupe: INSERT ON CONFLICT. If the row is already present
+  // (another delivery got here first), we acknowledge and let that in-flight
+  // request own the processing. Stripe's at-least-once delivery is fine with
+  // a 200 here — the owning request will mark processed_at.
+  const claim = await pool.query<{ id: number }>(
+    `INSERT INTO webhook_events (source, event_id, payload)
+     VALUES ('stripe', $1, $2)
+     ON CONFLICT (event_id) DO NOTHING
+     RETURNING id`,
+    [event.id, event],
   );
-  if (existing.rowCount && existing.rows[0].processed_at) {
+  if (!claim.rowCount) {
     return NextResponse.json({ ok: true, duplicate: true });
-  }
-  if (!existing.rowCount) {
-    await pool.query(
-      `INSERT INTO webhook_events (source, event_id, payload) VALUES ('stripe', $1, $2)`,
-      [event.id, event],
-    );
   }
 
   try {
@@ -192,14 +193,19 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     );
   } else {
     try {
-      const pfItems = cart.map((l) => {
-        const v = byId.get(l.variantId)!;
-        return {
-          sync_variant_id: v.printful_sync_variant_id!,
-          quantity: l.quantity,
-          files: [{ url: v.image_print_url! }],
-        };
-      });
+      // Printful needs to download the print file — sign each private R2 key
+      // with a window long enough to outlive Printful's fulfillment retries.
+      const pfItems = await Promise.all(
+        cart.map(async (l) => {
+          const v = byId.get(l.variantId)!;
+          const signedUrl = await signedPrivateUrl(v.image_print_url!, 7 * 24 * 3600);
+          return {
+            sync_variant_id: v.printful_sync_variant_id!,
+            quantity: l.quantity,
+            files: [{ url: signedUrl }],
+          };
+        }),
+      );
       const pfOrder = await printful.createOrder({
         external_id: `order_${orderId}`,
         recipient: {

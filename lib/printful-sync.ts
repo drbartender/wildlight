@@ -2,13 +2,16 @@
  * Creates a Printful `sync_product` for a given artwork and stamps
  * `artwork_variants.printful_sync_variant_id` back onto our rows.
  *
- * Requires Printful catalog variant IDs to be resolved and stored in
- * `artwork_variants.cost_cents` / variant-templates first. For Phase 1 these
- * are placeholder values; run once per batch after curating the
- * variant-templates.ts file with real Printful catalog IDs.
+ * Preconditions:
+ *  - Artwork has an `image_print_url` (R2 private object key)
+ *  - `variant-templates.ts` has the artwork's {type, size, finish} tuple with
+ *    a real, non-zero `printful_catalog_variant_id` (one-time lookup against
+ *    the Printful Products API)
  */
 import { pool } from './db';
 import { printful } from './printful';
+import { signedPrivateUrl } from './r2';
+import { findVariantSpec, type VariantType } from './variant-templates';
 import { ExternalServiceError } from './errors';
 
 export async function syncArtworkProducts(artworkId: number): Promise<{ created: number }> {
@@ -22,31 +25,59 @@ export async function syncArtworkProducts(artworkId: number): Promise<{ created:
     throw new ExternalServiceError(
       'db',
       'print_file_missing',
-      `artwork ${artworkId} has no image_print_url — upload one before syncing`,
+      `artwork ${artworkId} has no image_print_url — upload a print file first`,
     );
   }
 
   const variants = await pool.query<{
     id: number;
-    printful_catalog_variant_id: number | null;
+    type: string;
+    size: string;
+    finish: string | null;
     price_cents: number;
   }>(
-    `SELECT id, price_cents,
-            (SELECT CAST(0 AS INT)) AS printful_catalog_variant_id
+    `SELECT id, type, size, finish, price_cents
      FROM artwork_variants
      WHERE artwork_id = $1 AND active = TRUE`,
     [artworkId],
   );
   if (!variants.rowCount) return { created: 0 };
 
-  // Actual Printful create: pass sync_variants. The catalog variant_id per row
-  // MUST be a real Printful ID; these come from the variant-templates definition.
-  // (Placeholder logic: requires curation before first real sync.)
-  const syncVariants = variants.rows.map((v) => ({
-    variant_id: v.printful_catalog_variant_id ?? 0,
-    retail_price: (v.price_cents / 100).toFixed(2),
-    files: [{ url: a.rows[0].image_print_url! }],
-  }));
+  // Resolve each of our variant rows to a real Printful catalog variant id via
+  // the shared variant-templates table. Bail loud if anything is missing —
+  // Printful will reject a sync_product with variant_id: 0 anyway.
+  const syncVariants: Array<{
+    variant_id: number;
+    retail_price: string;
+    files: Array<{ url: string }>;
+  }> = [];
+  const missing: string[] = [];
+  // Printful downloads the print file from the URL we provide, so sign the
+  // private R2 object for long enough to outlive any Printful retry window.
+  const signedUrl = await signedPrivateUrl(a.rows[0].image_print_url, 7 * 24 * 3600);
+  for (const v of variants.rows) {
+    const spec = findVariantSpec({
+      type: v.type as VariantType,
+      size: v.size,
+      finish: v.finish,
+    });
+    if (!spec || !spec.printful_catalog_variant_id) {
+      missing.push(`${v.type} ${v.size}${v.finish ? ` (${v.finish})` : ''}`);
+      continue;
+    }
+    syncVariants.push({
+      variant_id: spec.printful_catalog_variant_id,
+      retail_price: (v.price_cents / 100).toFixed(2),
+      files: [{ url: signedUrl }],
+    });
+  }
+  if (missing.length) {
+    throw new ExternalServiceError(
+      'printful',
+      'missing_catalog_variant_id',
+      `variant-templates.ts is missing printful_catalog_variant_id for: ${missing.join(', ')}`,
+    );
+  }
 
   const result = await printful.createSyncProduct({
     sync_product: { name: a.rows[0].title, external_id: `art_${artworkId}` },
