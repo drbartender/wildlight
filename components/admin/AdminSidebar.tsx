@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
 interface NavDef {
   id: string;
@@ -66,12 +67,16 @@ const ACCOUNT: NavDef[] = [
 interface Props {
   needsReview: number;
   email: string;
-  systemHealth?: Array<{
-    key: string;
-    state: 'ok' | 'warn' | 'error';
-    note: string;
-  }>;
 }
+
+interface HealthRow {
+  key: string;
+  state: 'ok' | 'warn' | 'error';
+  note: string;
+}
+
+const HEALTH_KEYS: readonly ['stripe', 'printful', 'resend', 'r2', 'webhooks'] =
+  ['stripe', 'printful', 'resend', 'r2', 'webhooks'] as const;
 
 function Item({ n, path }: { n: NavDef; path: string }) {
   const active = n.match(path);
@@ -98,12 +103,43 @@ function Item({ n, path }: { n: NavDef; path: string }) {
   );
 }
 
-export function AdminSidebar({ needsReview, email, systemHealth }: Props) {
+export function AdminSidebar({ needsReview, email }: Props) {
   const path = usePathname() || '/admin';
   const orders = COMMERCE.map((n) =>
     n.id === 'orders' && needsReview > 0 ? { ...n, badge: needsReview } : n,
   );
   const initials = email.slice(0, 2).toUpperCase();
+
+  const [systemHealth, setSystemHealth] = useState<HealthRow[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    async function refresh() {
+      try {
+        const r = await fetch('/api/admin/integrations/health');
+        if (!r.ok) return;
+        const d = (await r.json()) as Record<
+          string,
+          { state: 'ok' | 'warn' | 'error'; note: string }
+        >;
+        if (cancelled) return;
+        setSystemHealth(
+          HEALTH_KEYS.map((key) => ({
+            key,
+            state: d[key]?.state ?? 'warn',
+            note: d[key]?.note ?? '—',
+          })),
+        );
+      } catch {
+        /* quiet — keep prior state on transient failures */
+      }
+    }
+    void refresh();
+    const t = setInterval(refresh, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, []);
 
   return (
     <aside className="wl-adm-sidebar">

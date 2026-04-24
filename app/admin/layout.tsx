@@ -33,12 +33,6 @@ export default async function AdminLayout({ children }: { children: ReactNode })
       <AdminSidebar
         needsReview={needsReview}
         email={session.email}
-        systemHealth={[
-          { key: 'stripe', state: 'ok', note: 'live' },
-          { key: 'printful', state: 'ok', note: 'ok' },
-          { key: 'resend', state: 'ok', note: 'ok' },
-          { key: 'webhooks', state: 'ok', note: 'ok' },
-        ]}
       />
       <div className="wl-adm-main">
         {children}
