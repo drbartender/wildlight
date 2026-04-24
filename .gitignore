@@ -4,6 +4,9 @@ node_modules/
 # local env files
 .env
 .env*.local
+.env.local.*
+.env*.bak
+.env.*.bak
 
 # next.js
 .next/
@@ -28,3 +31,5 @@ scraped/
 # literal-tilde dir if vercel CLI is invoked from Git Bash with `-Q ~/.vercel-cli`
 # (tilde doesn't expand, creates a `~` folder containing credentials — never commit)
 ~/
+
+.env*.local
