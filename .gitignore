@@ -24,3 +24,7 @@ scraped/
 
 # logs
 *.log
+
+# literal-tilde dir if vercel CLI is invoked from Git Bash with `-Q ~/.vercel-cli`
+# (tilde doesn't expand, creates a `~` folder containing credentials — never commit)
+~/

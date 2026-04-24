@@ -20,7 +20,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.674.0",
     "@aws-sdk/s3-request-presigner": "^3.674.0",
-    "@sentry/nextjs": "^8.38.0",
+    "@sentry/nextjs": "^10.50.0",
     "axios": "^1.7.7",
     "bcryptjs": "^2.4.3",
     "cheerio": "^1.0.0",
@@ -50,6 +50,7 @@
     "eslint-config-next": "^16.2.4",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
+    "vercel": "^52.0.0",
     "vitest": "^2.1.5"
   }
 }
