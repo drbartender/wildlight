@@ -1,7 +1,7 @@
 export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 import crypto from 'node:crypto';
-import { pool } from '@/lib/db';
+import { pool, withTransaction } from '@/lib/db';
 import { sendOrderShipped } from '@/lib/email';
 import { logger } from '@/lib/logger';
 
@@ -73,17 +73,20 @@ export async function POST(req: Request) {
       const shipment = event.data?.shipment;
       const trackingUrl = shipment?.tracking_url || null;
       const trackingNumber = shipment?.tracking_number || null;
-      const r = await pool.query<{
-        customer_email: string;
-        public_token: string;
-      }>(
-        `UPDATE orders SET status='shipped', tracking_url=$2, tracking_number=$3, updated_at=NOW()
-         WHERE id = $1
-         RETURNING customer_email, public_token`,
-        [ourId, trackingUrl, trackingNumber],
-      );
-      if (r.rowCount) {
-        await pool.query(
+      // UPDATE + event INSERT share one txn so a crash can't leave orders
+      // as shipped without a matching ledger row.
+      const emailCtx = await withTransaction(async (client) => {
+        const r = await client.query<{
+          customer_email: string;
+          public_token: string;
+        }>(
+          `UPDATE orders SET status='shipped', tracking_url=$2, tracking_number=$3, updated_at=NOW()
+           WHERE id = $1
+           RETURNING customer_email, public_token`,
+          [ourId, trackingUrl, trackingNumber],
+        );
+        if (!r.rowCount) return null;
+        await client.query(
           `INSERT INTO order_events (order_id, type, who, payload)
            VALUES ($1, 'shipped', 'printful', $2::jsonb)`,
           [
@@ -94,11 +97,14 @@ export async function POST(req: Request) {
             }),
           ],
         );
+        return r.rows[0];
+      });
+      if (emailCtx) {
         const siteUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
         try {
           await sendOrderShipped(
-            r.rows[0].customer_email,
-            r.rows[0].public_token,
+            emailCtx.customer_email,
+            emailCtx.public_token,
             trackingUrl,
             trackingNumber,
             siteUrl,
@@ -108,43 +114,49 @@ export async function POST(req: Request) {
         }
       }
     } else if (event.type === 'package_delivered') {
-      const r = await pool.query<{ id: number }>(
-        `UPDATE orders SET status='delivered', updated_at=NOW() WHERE id = $1 RETURNING id`,
-        [ourId],
-      );
-      if (r.rowCount) {
-        await pool.query(
-          `INSERT INTO order_events (order_id, type, who, payload)
-           VALUES ($1, 'delivered', 'printful', '{}'::jsonb)`,
+      await withTransaction(async (client) => {
+        const r = await client.query<{ id: number }>(
+          `UPDATE orders SET status='delivered', updated_at=NOW() WHERE id = $1 RETURNING id`,
           [ourId],
         );
-      }
+        if (r.rowCount) {
+          await client.query(
+            `INSERT INTO order_events (order_id, type, who, payload)
+             VALUES ($1, 'delivered', 'printful', '{}'::jsonb)`,
+            [ourId],
+          );
+        }
+      });
     } else if (
       event.type === 'package_returned' ||
       event.type === 'order_canceled'
     ) {
-      await pool.query(
-        `UPDATE orders SET status='canceled', updated_at=NOW() WHERE id = $1`,
-        [ourId],
-      );
-      await pool.query(
-        `INSERT INTO order_events (order_id, type, who, payload)
-         VALUES ($1, 'canceled', 'printful', $2::jsonb)`,
-        [ourId, JSON.stringify({ via: event.type })],
-      );
+      await withTransaction(async (client) => {
+        await client.query(
+          `UPDATE orders SET status='canceled', updated_at=NOW() WHERE id = $1`,
+          [ourId],
+        );
+        await client.query(
+          `INSERT INTO order_events (order_id, type, who, payload)
+           VALUES ($1, 'canceled', 'printful', $2::jsonb)`,
+          [ourId, JSON.stringify({ via: event.type })],
+        );
+      });
     } else if (
       event.type === 'order_failed' ||
       event.type === 'order_put_hold'
     ) {
-      await pool.query(
-        `UPDATE orders SET status='needs_review', notes=$2, updated_at=NOW() WHERE id = $1`,
-        [ourId, event.type],
-      );
-      await pool.query(
-        `INSERT INTO order_events (order_id, type, who, payload)
-         VALUES ($1, 'printful_flagged', 'printful', $2::jsonb)`,
-        [ourId, JSON.stringify({ reason: event.type })],
-      );
+      await withTransaction(async (client) => {
+        await client.query(
+          `UPDATE orders SET status='needs_review', notes=$2, updated_at=NOW() WHERE id = $1`,
+          [ourId, event.type],
+        );
+        await client.query(
+          `INSERT INTO order_events (order_id, type, who, payload)
+           VALUES ($1, 'printful_flagged', 'printful', $2::jsonb)`,
+          [ourId, JSON.stringify({ reason: event.type })],
+        );
+      });
     }
 
     await pool.query(

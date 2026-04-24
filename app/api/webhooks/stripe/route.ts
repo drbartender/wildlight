@@ -196,49 +196,40 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   // If price drift was detected above, hold the order for operator review
   // instead of auto-fulfilling. Stripe already took the payment, so the
   // customer is fine — we want a human to reconcile the price mismatch.
+  // Atomic helper: status UPDATE + lifecycle event INSERT in the same txn.
+  // A process crash between these two writes would leave orders.status and
+  // the ledger disagreeing.
+  const flagOrder = async (reason: string) => {
+    await withTransaction(async (client) => {
+      await client.query(
+        `UPDATE orders SET status='needs_review', notes=$2, updated_at=NOW() WHERE id=$1`,
+        [orderId, reason],
+      );
+      await client.query(
+        `INSERT INTO order_events (order_id, type, who, payload)
+         VALUES ($1, 'printful_flagged', 'system', $2::jsonb)`,
+        [orderId, JSON.stringify({ reason })],
+      );
+    });
+  };
+
   if (priceDrift) {
     const reason = `price drift: db subtotal ${dbSubtotal} vs stripe amount_subtotal ${
       session.amount_subtotal || 0
     } — verify pricing before fulfilling`;
-    await pool.query(
-      `UPDATE orders SET status='needs_review', notes=$2, updated_at=NOW() WHERE id=$1`,
-      [orderId, reason],
-    );
-    await pool.query(
-      `INSERT INTO order_events (order_id, type, who, payload)
-       VALUES ($1, 'printful_flagged', 'system', $2::jsonb)`,
-      [orderId, JSON.stringify({ reason })],
-    );
+    await flagOrder(reason);
     await sendNeedsReviewAlert(
       orderId,
       'price drift between DB and Stripe checkout — review before fulfilling',
     );
   } else if (cart.some((l) => !byId.get(l.variantId)?.image_print_url)) {
-    const reason = 'missing image_print_url on one or more artworks';
-    await pool.query(
-      `UPDATE orders SET status='needs_review', notes=$2, updated_at=NOW() WHERE id=$1`,
-      [orderId, reason],
-    );
-    await pool.query(
-      `INSERT INTO order_events (order_id, type, who, payload)
-       VALUES ($1, 'printful_flagged', 'system', $2::jsonb)`,
-      [orderId, JSON.stringify({ reason })],
-    );
+    await flagOrder('missing image_print_url on one or more artworks');
     await sendNeedsReviewAlert(
       orderId,
       'image_print_url missing — upload print file in /admin/artworks/<id>',
     );
   } else if (cart.some((l) => !byId.get(l.variantId)?.printful_sync_variant_id)) {
-    const reason = 'printful_sync_variant_id missing on one or more variants';
-    await pool.query(
-      `UPDATE orders SET status='needs_review', notes=$2, updated_at=NOW() WHERE id=$1`,
-      [orderId, reason],
-    );
-    await pool.query(
-      `INSERT INTO order_events (order_id, type, who, payload)
-       VALUES ($1, 'printful_flagged', 'system', $2::jsonb)`,
-      [orderId, JSON.stringify({ reason })],
-    );
+    await flagOrder('printful_sync_variant_id missing on one or more variants');
     await sendNeedsReviewAlert(
       orderId,
       'printful_sync_variant_id missing — run `npm run sync:printful <artworkId>`',
@@ -288,27 +279,21 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
         },
         confirm: true,
       });
-      await pool.query(
-        `UPDATE orders SET status='submitted', printful_order_id=$2, updated_at=NOW() WHERE id=$1`,
-        [orderId, pfOrder.id],
-      );
-      await pool.query(
-        `INSERT INTO order_events (order_id, type, who, payload)
-         VALUES ($1, 'printful_submitted', 'printful', $2::jsonb)`,
-        [orderId, JSON.stringify({ printful_order_id: pfOrder.id })],
-      );
+      await withTransaction(async (client) => {
+        await client.query(
+          `UPDATE orders SET status='submitted', printful_order_id=$2, updated_at=NOW() WHERE id=$1`,
+          [orderId, pfOrder.id],
+        );
+        await client.query(
+          `INSERT INTO order_events (order_id, type, who, payload)
+           VALUES ($1, 'printful_submitted', 'printful', $2::jsonb)`,
+          [orderId, JSON.stringify({ printful_order_id: pfOrder.id })],
+        );
+      });
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       logger.error('printful submit failed', err, { orderId });
-      await pool.query(
-        `UPDATE orders SET status='needs_review', notes=$2, updated_at=NOW() WHERE id=$1`,
-        [orderId, reason],
-      );
-      await pool.query(
-        `INSERT INTO order_events (order_id, type, who, payload)
-         VALUES ($1, 'printful_flagged', 'system', $2::jsonb)`,
-        [orderId, JSON.stringify({ reason })],
-      );
+      await flagOrder(reason);
       await sendNeedsReviewAlert(orderId, reason);
     }
   }
@@ -347,31 +332,33 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
   const paymentIntent =
     typeof charge.payment_intent === 'string' ? charge.payment_intent : null;
   if (!paymentIntent) return;
-  const { rows } = await pool.query<{ id: number }>(
-    `SELECT id FROM orders WHERE stripe_payment_id = $1`,
-    [paymentIntent],
-  );
-  if (!rows.length) return;
-  const orderId = rows[0].id;
 
-  // Dedupe against events the admin refund route may have already written
-  // (which runs before Stripe sends charge.refunded). Best-effort: no unique
-  // key, just a not-exists check before insert.
-  const existing = await pool.query(
-    `SELECT 1 FROM order_events
-     WHERE order_id = $1 AND type = 'refunded' LIMIT 1`,
-    [orderId],
-  );
-  if (existing.rowCount) return;
+  // Race-safe: admin refund route and this handler can both fire against
+  // the same order. The partial unique index uniq_order_events_refunded
+  // (order_id) WHERE type='refunded' arbitrates via ON CONFLICT DO NOTHING.
+  // The INSERT's `rowCount` tells us whether we're the first writer; only
+  // the first writer updates orders.status.
+  await withTransaction(async (client) => {
+    const { rows } = await client.query<{ id: number }>(
+      `SELECT id FROM orders WHERE stripe_payment_id = $1 FOR UPDATE`,
+      [paymentIntent],
+    );
+    if (!rows.length) return;
+    const orderId = rows[0].id;
 
-  await pool.query(
-    `UPDATE orders SET status='refunded', updated_at=NOW()
-     WHERE id = $1 AND status <> 'refunded'`,
-    [orderId],
-  );
-  await pool.query(
-    `INSERT INTO order_events (order_id, type, who, payload)
-     VALUES ($1, 'refunded', 'stripe', $2::jsonb)`,
-    [orderId, JSON.stringify({ amount_cents: charge.amount_refunded ?? 0 })],
-  );
+    const inserted = await client.query<{ id: number }>(
+      `INSERT INTO order_events (order_id, type, who, payload)
+       VALUES ($1, 'refunded', 'stripe', $2::jsonb)
+       ON CONFLICT DO NOTHING
+       RETURNING id`,
+      [orderId, JSON.stringify({ amount_cents: charge.amount_refunded ?? 0 })],
+    );
+    if (inserted.rowCount) {
+      await client.query(
+        `UPDATE orders SET status='refunded', updated_at=NOW()
+         WHERE id = $1 AND status <> 'refunded'`,
+        [orderId],
+      );
+    }
+  });
 }

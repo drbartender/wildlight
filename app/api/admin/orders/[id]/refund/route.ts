@@ -1,6 +1,6 @@
 export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
-import { pool } from '@/lib/db';
+import { pool, withTransaction } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 import { getStripe } from '@/lib/stripe';
 import { printful } from '@/lib/printful';
@@ -59,15 +59,21 @@ export async function POST(
         });
       }
     }
-    await pool.query(
-      `UPDATE orders SET status='refunded', updated_at=NOW() WHERE id = $1`,
-      [id],
-    );
-    await pool.query(
-      `INSERT INTO order_events (order_id, type, who, payload)
-       VALUES ($1, 'refunded', 'admin', '{}'::jsonb)`,
-      [id],
-    );
+    // Atomic pair: status transition + ledger entry must not diverge.
+    // The partial unique index uniq_order_events_refunded arbitrates
+    // against a concurrent Stripe charge.refunded webhook via ON CONFLICT.
+    await withTransaction(async (client) => {
+      await client.query(
+        `UPDATE orders SET status='refunded', updated_at=NOW() WHERE id = $1`,
+        [id],
+      );
+      await client.query(
+        `INSERT INTO order_events (order_id, type, who, payload)
+         VALUES ($1, 'refunded', 'admin', '{}'::jsonb)
+         ON CONFLICT DO NOTHING`,
+        [id],
+      );
+    });
     return NextResponse.json({ ok: true });
   } catch (err) {
     logger.error('refund failed', err, { orderId: id });
