@@ -349,7 +349,7 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
     const inserted = await client.query<{ id: number }>(
       `INSERT INTO order_events (order_id, type, who, payload)
        VALUES ($1, 'refunded', 'stripe', $2::jsonb)
-       ON CONFLICT DO NOTHING
+       ON CONFLICT (order_id) WHERE type = 'refunded' DO NOTHING
        RETURNING id`,
       [orderId, JSON.stringify({ amount_cents: charge.amount_refunded ?? 0 })],
     );

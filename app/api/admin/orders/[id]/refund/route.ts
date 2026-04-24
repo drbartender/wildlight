@@ -72,7 +72,7 @@ export async function POST(
       await client.query(
         `INSERT INTO order_events (order_id, type, who, payload)
          VALUES ($1, 'refunded', 'admin', '{}'::jsonb)
-         ON CONFLICT DO NOTHING`,
+         ON CONFLICT (order_id) WHERE type = 'refunded' DO NOTHING`,
         [id],
       );
     });

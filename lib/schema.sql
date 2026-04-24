@@ -210,6 +210,13 @@ CREATE INDEX IF NOT EXISTS idx_order_items_artwork_slug
 CREATE INDEX IF NOT EXISTS idx_order_items_order
   ON order_items(order_id);
 
+-- handleChargeRefunded's `SELECT … WHERE stripe_payment_id = $1 FOR UPDATE`
+-- held row locks on a seq-scan without this. Partial index: the column
+-- is nullable for orders that never completed payment.
+CREATE INDEX IF NOT EXISTS idx_orders_stripe_payment
+  ON orders(stripe_payment_id)
+  WHERE stripe_payment_id IS NOT NULL;
+
 -- Order events (append-only lifecycle ledger) — Spec 3 --------------
 CREATE TABLE IF NOT EXISTS order_events (
   id          SERIAL PRIMARY KEY,
