@@ -177,3 +177,17 @@ ALTER TABLE admin_users
 ALTER TABLE admin_users DROP CONSTRAINT IF EXISTS admin_users_role_chk;
 ALTER TABLE admin_users ADD CONSTRAINT admin_users_role_chk
   CHECK (role IN ('owner', 'operator'));
+
+-- Broadcast log (one row per successful non-test send) — Spec 5a ----
+CREATE TABLE IF NOT EXISTS broadcast_log (
+  id               SERIAL PRIMARY KEY,
+  subject          TEXT NOT NULL,
+  html             TEXT NOT NULL,
+  recipient_count  INT NOT NULL DEFAULT 0,
+  sent_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  sent_by          TEXT,
+  idempotency_key  UUID UNIQUE
+);
+
+CREATE INDEX IF NOT EXISTS idx_broadcast_log_sent_at
+  ON broadcast_log(sent_at DESC);
