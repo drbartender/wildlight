@@ -153,3 +153,19 @@ CREATE INDEX IF NOT EXISTS idx_webhook_events_unprocessed
   ON webhook_events(source, created_at) WHERE processed_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_subscribers_active      ON subscribers(id)
   WHERE confirmed_at IS NOT NULL AND unsubscribed_at IS NULL;
+
+-- Home "Latest" season — published_at column (Shop-Polish) ---------------
+-- Added 2026-04-24.
+ALTER TABLE artworks
+  ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ;
+
+-- Backfill: for rows currently published without a published_at,
+-- seed to updated_at. Idempotent — re-running never overwrites an
+-- already-populated value.
+UPDATE artworks
+SET published_at = updated_at
+WHERE status = 'published' AND published_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_artworks_published_at
+  ON artworks(published_at DESC NULLS LAST)
+  WHERE status = 'published';
