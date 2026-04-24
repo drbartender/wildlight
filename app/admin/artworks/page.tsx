@@ -106,12 +106,16 @@ export default function AdminArtworksPage() {
     const CONCURRENCY = 3;
     let done = 0;
     let failed = 0;
+    let firstError: string | null = null;
     const runOne = async (r: Row): Promise<void> => {
       try {
         const res = await fetch(`/api/admin/artworks/${r.id}/ai-draft`, {
           method: 'POST',
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          throw new Error(`ai-draft HTTP ${res.status}: ${text.slice(0, 200)}`);
+        }
         const body = (await res.json()) as {
           year_shot: number | null;
           title: string;
@@ -131,10 +135,18 @@ export default function AdminArtworksPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(patch),
           });
-          if (!pr.ok) throw new Error(`PATCH HTTP ${pr.status}`);
+          if (!pr.ok) {
+            const text = await pr.text().catch(() => '');
+            throw new Error(`PATCH HTTP ${pr.status}: ${text.slice(0, 200)}`);
+          }
         }
-      } catch {
+      } catch (err) {
         failed += 1;
+        if (!firstError) {
+          firstError = err instanceof Error ? err.message : String(err);
+          // eslint-disable-next-line no-console
+          console.error(`ai-draft failed for artwork ${r.id} (${r.slug}):`, err);
+        }
       }
       done += 1;
       setBatchProgress({ done, total: targets.length, failed });
@@ -144,6 +156,11 @@ export default function AdminArtworksPage() {
       await Promise.all(targets.slice(i, i + CONCURRENCY).map(runOne));
     }
     setBatchRunning(null);
+    if (failed > 0) {
+      alert(
+        `Done. ${done - failed} succeeded, ${failed} failed.\n\nFirst error: ${firstError ?? '(unknown)'}\n\nOpen DevTools → Console for details.`,
+      );
+    }
     await reload();
   }
 
@@ -227,7 +244,7 @@ export default function AdminArtworksPage() {
             disabled={batchRunning !== null || rows.length === 0}
           >
             {batchRunning === 'draft'
-              ? `Drafting ${batchProgress.done}/${batchProgress.total}…`
+              ? `Drafting ${batchProgress.done}/${batchProgress.total}${batchProgress.failed > 0 ? ` · ${batchProgress.failed} failed` : ''}…`
               : `AI-draft all (${rows.length})`}
           </button>
           <button
