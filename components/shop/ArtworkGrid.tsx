@@ -1,28 +1,12 @@
-import { ArtworkCard } from './ArtworkCard';
+import { PlateCard, type PlateCardData } from './PlateCard';
 
-export interface GridItem {
-  slug: string;
-  title: string;
-  image_web_url: string;
-}
+export type GridItem = PlateCardData;
 
 export function ArtworkGrid({ items }: { items: GridItem[] }) {
   return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-        gap: 20,
-        marginTop: 24,
-      }}
-    >
+    <div className="wl-plates">
       {items.map((i) => (
-        <ArtworkCard
-          key={i.slug}
-          slug={i.slug}
-          title={i.title}
-          imageUrl={i.image_web_url}
-        />
+        <PlateCard key={i.slug} item={i} />
       ))}
     </div>
   );

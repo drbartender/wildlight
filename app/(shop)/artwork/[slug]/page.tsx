@@ -1,8 +1,10 @@
-import { notFound } from 'next/navigation';
-import Image from 'next/image';
 import Link from 'next/link';
+import Image from 'next/image';
+import { notFound } from 'next/navigation';
 import { pool } from '@/lib/db';
-import { VariantPicker, type VariantOption } from '@/components/shop/VariantPicker';
+import { OrderCard, type VariantOption } from '@/components/shop/OrderCard';
+import { PlateCard, type PlateCardData } from '@/components/shop/PlateCard';
+import { plateNumber } from '@/lib/plate-number';
 
 export const revalidate = 60;
 
@@ -14,8 +16,14 @@ interface ArtworkRow {
   year_shot: number | null;
   location: string | null;
   image_web_url: string;
+  image_width: number | null;
+  image_height: number | null;
   collection_slug: string | null;
   collection_title: string | null;
+  /** 1-based index among published artworks in the global catalog. */
+  plate_idx: number;
+  /** Total published artworks in the catalog. */
+  plate_total: number;
 }
 
 export default async function ArtworkPage({
@@ -26,12 +34,22 @@ export default async function ArtworkPage({
   const { slug } = await params;
 
   const arts = await pool.query<ArtworkRow>(
-    `SELECT a.id, a.slug, a.title, a.artist_note, a.year_shot, a.location,
-            a.image_web_url,
+    `WITH published AS (
+       SELECT a.id, a.slug, a.title, a.artist_note, a.year_shot, a.location,
+              a.image_web_url, a.image_width, a.image_height,
+              a.collection_id,
+              ROW_NUMBER() OVER (ORDER BY a.display_order, a.id) AS plate_idx,
+              COUNT(*) OVER () AS plate_total
+       FROM artworks a
+       WHERE a.status = 'published'
+     )
+     SELECT p.id, p.slug, p.title, p.artist_note, p.year_shot, p.location,
+            p.image_web_url, p.image_width, p.image_height,
+            p.plate_idx::int, p.plate_total::int,
             c.slug AS collection_slug, c.title AS collection_title
-     FROM artworks a
-     LEFT JOIN collections c ON c.id = a.collection_id
-     WHERE a.slug = $1 AND a.status = 'published'`,
+     FROM published p
+     LEFT JOIN collections c ON c.id = p.collection_id
+     WHERE p.slug = $1`,
     [slug],
   );
   if (!arts.rowCount) notFound();
@@ -44,69 +62,122 @@ export default async function ArtworkPage({
     [art.id],
   );
 
+  const related = art.collection_slug
+    ? await pool.query<PlateCardData>(
+        `SELECT a.slug, a.title, a.image_web_url, a.year_shot, a.location,
+                (SELECT MIN(price_cents) FROM artwork_variants v
+                   WHERE v.artwork_id = a.id AND v.active = TRUE) AS min_price_cents
+         FROM artworks a
+         JOIN collections c ON c.id = a.collection_id
+         WHERE c.slug = $1 AND a.status = 'published' AND a.slug <> $2
+         ORDER BY a.display_order, a.id
+         LIMIT 4`,
+        [art.collection_slug, art.slug],
+      )
+    : { rows: [] as PlateCardData[] };
+
+  const plate = plateNumber(art.slug);
+  const hasKnownDims =
+    !!art.image_width &&
+    !!art.image_height &&
+    art.image_width > 0 &&
+    art.image_height > 0;
+
   return (
-    <section
-      className="container"
-      style={{
-        padding: '40px 0',
-        display: 'grid',
-        gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)',
-        gap: 48,
-      }}
-    >
-      <div style={{ position: 'relative', aspectRatio: '4/5', background: 'var(--rule)' }}>
-        <Image
-          src={art.image_web_url}
-          alt={art.title}
-          fill
-          priority
-          sizes="(max-width: 900px) 100vw, 58vw"
-          style={{ objectFit: 'cover' }}
-        />
+    <div>
+      <div className="wl-art-head">
+        <span>
+          {art.collection_slug && art.collection_title ? (
+            <Link href={`/collections/${art.collection_slug}`}>
+              ← {art.collection_title}
+            </Link>
+          ) : (
+            <Link href="/collections">← Collections</Link>
+          )}
+        </span>
+        <span>
+          {plate} · Plate {String(art.plate_idx).padStart(3, '0')} of{' '}
+          {String(art.plate_total).padStart(3, '0')}
+        </span>
       </div>
-      <div>
-        {art.collection_title && art.collection_slug && (
-          <Link
-            href={`/collections/${art.collection_slug}`}
-            style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}
-          >
-            {art.collection_title}
-          </Link>
-        )}
-        <h1 style={{ marginTop: 8 }}>{art.title}</h1>
-        {art.artist_note && (
-          <p style={{ marginTop: 16, maxWidth: 520, whiteSpace: 'pre-wrap' }}>
-            {art.artist_note}
-          </p>
-        )}
-        {(art.location || art.year_shot) && (
-          <p style={{ color: 'var(--muted)', fontSize: 13 }}>
-            {art.location}
-            {art.location && art.year_shot ? ', ' : ''}
-            {art.year_shot}
-          </p>
-        )}
-        <div style={{ marginTop: 32 }}>
-          <VariantPicker
+
+      <section className="wl-art">
+        <div className="wl-art-grid">
+          <div className="wl-art-plate">
+            <span className="plate-no">{plate}</span>
+            <span className="plate-marks">Archival</span>
+            <div className="plate-frame">
+              {hasKnownDims ? (
+                <Image
+                  src={art.image_web_url}
+                  alt={art.title}
+                  width={art.image_width!}
+                  height={art.image_height!}
+                  priority
+                  sizes="(max-width: 900px) 100vw, 58vw"
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: 560,
+                    width: 'auto',
+                    height: 'auto',
+                    objectFit: 'contain',
+                  }}
+                />
+              ) : (
+                // Fallback for artworks imported before width/height were
+                // captured — still render, just without intrinsic sizing.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={art.image_web_url}
+                  alt={art.title}
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: 560,
+                    width: 'auto',
+                    height: 'auto',
+                    objectFit: 'contain',
+                  }}
+                />
+              )}
+            </div>
+            <div className="plate-cap">
+              <span>{art.title}</span>
+              <span>
+                {art.location ? `${art.location} · ` : ''}
+                {art.year_shot ?? ''}
+              </span>
+            </div>
+          </div>
+
+          <OrderCard
             artworkId={art.id}
-            artworkTitle={art.title}
             artworkSlug={art.slug}
+            artworkTitle={art.title}
             imageUrl={art.image_web_url}
+            plateNo={plate}
+            chapterTitle={art.collection_title}
+            yearShot={art.year_shot}
+            note={art.artist_note}
             variants={variants}
           />
-          <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 16 }}>
-            Made to order — ships within 7 business days.
-          </p>
-          <p style={{ marginTop: 32 }}>
-            <Link
-              href={`/contact?license=${art.slug}`}
-              style={{ color: 'var(--muted)', fontSize: 14 }}
-            >
-              License this image →
-            </Link>
-          </p>
         </div>
-      </div>
-    </section>
+
+        {related.rows.length > 0 && art.collection_title && (
+          <div className="wl-art-more">
+            <h3>
+              More from <em>{art.collection_title}</em>
+            </h3>
+            <div
+              className="wl-plates"
+              style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}
+            >
+              {related.rows.map((r) => (
+                <PlateCard key={r.slug} item={r} />
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+    </div>
   );
 }

@@ -1,26 +1,16 @@
 'use client';
+
 import Image from 'next/image';
 import Link from 'next/link';
 import { useState } from 'react';
 import { useCart } from '@/components/shop/CartProvider';
 import { formatUSD } from '@/lib/money';
+import { plateNumber } from '@/lib/plate-number';
 
 export default function CartPage() {
   const cart = useCart();
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  if (cart.lines.length === 0) {
-    return (
-      <section className="container" style={{ padding: '40px 0' }}>
-        <h1>Cart</h1>
-        <p>Your cart is empty.</p>
-        <Link className="button" href="/collections">
-          Browse collections
-        </Link>
-      </section>
-    );
-  }
 
   async function checkout() {
     setCheckoutLoading(true);
@@ -49,99 +39,122 @@ export default function CartPage() {
     }
   }
 
+  const count = cart.lines.length;
+  const plateWord = count === 1 ? 'plate' : 'plates';
+
   return (
-    <section className="container" style={{ padding: '40px 0' }}>
-      <h1>Cart</h1>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1fr) 320px',
-          gap: 48,
-          marginTop: 24,
-        }}
-      >
+    <section className="wl-cart">
+      <h1>
+        Your <em>order</em>.
+      </h1>
+      <div className="sub">
+        {count === 0
+          ? 'No plates yet'
+          : `${count} ${plateWord} · printed to order in Aurora, CO`}
+      </div>
+
+      <div className="wl-cart-grid">
         <div>
-          {cart.lines.map((l) => (
-            <div
-              key={l.variantId}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '100px 1fr auto',
-                gap: 16,
-                alignItems: 'center',
-                padding: '12px 0',
-                borderBottom: '1px solid var(--rule)',
-              }}
-            >
-              <div style={{ position: 'relative', aspectRatio: '1/1' }}>
-                <Image
-                  src={l.imageUrl}
-                  alt={l.artworkTitle}
-                  fill
-                  sizes="100px"
-                  style={{ objectFit: 'cover' }}
-                />
-              </div>
-              <div>
-                <Link href={`/artwork/${l.artworkSlug}`} style={{ color: 'inherit' }}>
-                  <strong>{l.artworkTitle}</strong>
-                </Link>
-                <div style={{ color: 'var(--muted)', fontSize: 13 }}>
-                  {l.type} · {l.size}
-                  {l.finish ? ` · ${l.finish}` : ''}
-                </div>
-                <div style={{ marginTop: 4 }}>
-                  <input
-                    type="number"
-                    min={1}
-                    value={l.quantity}
-                    onChange={(e) =>
-                      cart.setQty(l.variantId, parseInt(e.target.value) || 1)
-                    }
-                    style={{ width: 60, padding: 4 }}
+          {count === 0 ? (
+            <div className="wl-cart-empty">
+              Browse the{' '}
+              <Link href="/collections">collections</Link> to add your first
+              plate.
+            </div>
+          ) : (
+            cart.lines.map((l) => (
+              <div key={l.variantId} className="wl-ci">
+                <div className="wl-ci-img">
+                  <Image
+                    src={l.imageUrl}
+                    alt={l.artworkTitle}
+                    fill
+                    sizes="96px"
+                    style={{ objectFit: 'cover' }}
                   />
-                  <button
-                    style={{
-                      marginLeft: 12,
-                      background: 'none',
-                      border: 'none',
-                      color: 'var(--muted)',
-                      cursor: 'pointer',
-                      fontFamily: 'inherit',
-                      fontSize: 13,
-                    }}
-                    onClick={() => cart.remove(l.variantId)}
+                </div>
+                <div>
+                  <Link
+                    href={`/artwork/${l.artworkSlug}`}
+                    style={{ color: 'inherit' }}
                   >
-                    remove
-                  </button>
+                    <div className="wl-ci-title">{l.artworkTitle}</div>
+                  </Link>
+                  <div className="wl-ci-sub">
+                    {plateNumber(l.artworkSlug)} · {l.type} · {l.size}
+                    {l.finish ? ` · ${l.finish}` : ''}
+                  </div>
+                  <div className="wl-ci-controls">
+                    <div className="wl-qty">
+                      <button
+                        onClick={() => cart.setQty(l.variantId, l.quantity - 1)}
+                        aria-label="Decrease quantity"
+                      >
+                        −
+                      </button>
+                      <span>{l.quantity}</span>
+                      <button
+                        onClick={() => cart.setQty(l.variantId, l.quantity + 1)}
+                        aria-label="Increase quantity"
+                      >
+                        +
+                      </button>
+                    </div>
+                    <button
+                      className="wl-ci-remove"
+                      onClick={() => cart.remove(l.variantId)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+                <div className="wl-ci-price">
+                  {formatUSD(l.priceCents * l.quantity)}
                 </div>
               </div>
-              <div style={{ textAlign: 'right' }}>
-                {formatUSD(l.priceCents * l.quantity)}
-              </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
-        <aside>
-          <div style={{ border: '1px solid var(--rule)', padding: 16, background: 'white' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span>Subtotal</span>
-              <span>{formatUSD(cart.subtotalCents)}</span>
-            </div>
-            <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 8 }}>
-              Shipping and tax calculated at checkout.
-            </p>
-            {error && (
-              <p style={{ color: '#b22', fontSize: 13 }}>{error}</p>
-            )}
+
+        <aside className="wl-summary">
+          <span className="wl-summary-label">RECEIPT</span>
+          <div className="wl-sum-row">
+            <span>Subtotal</span>
+            <span>{formatUSD(cart.subtotalCents)}</span>
+          </div>
+          <div className="wl-sum-row">
+            <span>Shipping &amp; tax</span>
+            <span>Calculated at checkout</span>
+          </div>
+          <div className="wl-sum-row total">
+            <span>Total</span>
+            <span>{formatUSD(cart.subtotalCents)}</span>
+          </div>
+          <p className="wl-sum-note">
+            Archival · printed to order.
+            <br />
+            Ships in 5–7 days from Aurora, Colorado.
+          </p>
+          {error && <p className="wl-sum-error">{error}</p>}
+          <div
+            style={{
+              marginTop: 20,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
+          >
             <button
-              className="button"
-              style={{ width: '100%', marginTop: 16 }}
+              type="button"
+              className="wl-btn primary"
               onClick={checkout}
-              disabled={checkoutLoading}
+              disabled={count === 0 || checkoutLoading}
             >
-              {checkoutLoading ? 'Redirecting…' : 'Checkout'}
+              {checkoutLoading ? 'Redirecting…' : 'Proceed to checkout →'}
             </button>
+            <Link className="wl-btn ghost" href="/collections">
+              Continue browsing
+            </Link>
           </div>
         </aside>
       </div>

@@ -1,114 +1,125 @@
-import Link from 'next/link';
-import Image from 'next/image';
 import { pool } from '@/lib/db';
-import { CollectionCard } from '@/components/shop/CollectionCard';
+import { ArtworkGrid, type GridItem } from '@/components/shop/ArtworkGrid';
 
 export const revalidate = 60;
 
-interface Featured {
-  slug: string;
-  title: string;
-  image_web_url: string;
+interface PlateRow extends GridItem {}
+
+interface CountsRow {
+  n: number;
+  latest: string | null;
 }
-interface CollectionRow {
-  slug: string;
-  title: string;
-  tagline: string | null;
-  cover_image_url: string | null;
+
+function seasonOf(date: Date): string {
+  const m = date.getUTCMonth(); // 0..11
+  const y = date.getUTCFullYear();
+  const yy = `'${String(y).slice(2)}`;
+  if (m === 11 || m <= 1) return `Winter ${m === 11 ? `'${String((y + 1)).slice(2)}` : yy}`;
+  if (m <= 4) return `Spring ${yy}`;
+  if (m <= 7) return `Summer ${yy}`;
+  return `Fall ${yy}`;
 }
 
 export default async function HomePage() {
-  // Pick a hero by OFFSET instead of ORDER BY random() — random() forces a
-  // full-table scan that scales badly as the catalog grows. Two fast queries
-  // is cheaper than one slow one.
-  const [countRes, collections] = await Promise.all([
-    pool.query<{ n: number }>(
-      `SELECT COUNT(*)::int AS n FROM artworks WHERE status='published'`,
+  const [countsRes, platesRes] = await Promise.all([
+    pool.query<CountsRow>(
+      `SELECT COUNT(*)::int AS n, MAX(updated_at)::text AS latest
+       FROM artworks WHERE status='published'`,
     ),
-    pool.query<CollectionRow>(
-      `SELECT slug, title, tagline, cover_image_url FROM collections ORDER BY display_order`,
+    pool.query<PlateRow>(
+      `SELECT a.slug,
+              a.title,
+              a.image_web_url,
+              a.year_shot,
+              a.location,
+              c.title AS collection_title,
+              (SELECT MIN(price_cents) FROM artwork_variants v
+                 WHERE v.artwork_id = a.id AND v.active = TRUE) AS min_price_cents
+       FROM artworks a
+       LEFT JOIN collections c ON c.id = a.collection_id
+       WHERE a.status = 'published'
+       ORDER BY a.display_order, a.id
+       LIMIT 12`,
     ),
   ]);
-  const total = countRes.rows[0]?.n ?? 0;
-  const offset = total > 0 ? Math.floor(Math.random() * total) : 0;
-  const featured =
-    total > 0
-      ? await pool.query<Featured>(
-          `SELECT slug, title, image_web_url FROM artworks
-           WHERE status='published' ORDER BY id LIMIT 1 OFFSET $1`,
-          [offset],
-        )
-      : { rows: [] as Featured[] };
-  const hero = featured.rows[0];
+
+  const count = countsRes.rows[0]?.n ?? 0;
+  const latestRaw = countsRes.rows[0]?.latest ?? null;
+  const latestLabel = latestRaw ? seasonOf(new Date(latestRaw)) : '—';
+  const plates = platesRes.rows;
 
   return (
     <>
-      <section className="container" style={{ paddingTop: 40, paddingBottom: 40 }}>
-        {hero ? (
-          <Link href={`/artwork/${hero.slug}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-            <div
-              style={{
-                position: 'relative',
-                aspectRatio: '16/9',
-                background: 'var(--rule)',
-                overflow: 'hidden',
-              }}
-            >
-              <Image
-                src={hero.image_web_url}
-                alt={hero.title}
-                fill
-                priority
-                sizes="100vw"
-                style={{ objectFit: 'cover' }}
-              />
-            </div>
-            <p style={{ color: 'var(--muted)', marginTop: 8, fontSize: 13 }}>{hero.title}</p>
-          </Link>
-        ) : (
-          <div
-            style={{
-              aspectRatio: '16/9',
-              background: 'var(--rule)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'var(--muted)',
-            }}
-          >
-            (no published work yet)
+      <section className="wl-masthead">
+        <div className="wl-masthead-intro">
+          <span className="wl-eyebrow">Wildlight Imagery · Aurora, Colorado</span>
+          <h1>
+            Exploring <em>my light</em>
+            <br /> for as long as I<br /> can remember.
+          </h1>
+        </div>
+        <div className="wl-masthead-side">
+          <div>
+            <b>Est.</b> 2004
           </div>
-        )}
-        <div style={{ marginTop: 48, maxWidth: 680 }}>
-          <h1>A curated selection of fine art by Dan Raby.</h1>
-          <p style={{ color: 'var(--muted)', fontSize: 17 }}>
-            Archival prints, canvases, and framed pieces — made to order, shipped worldwide.
-          </p>
-          <Link className="button" href="/collections" style={{ marginTop: 16 }}>
-            Browse collections
-          </Link>
+          <div>
+            <b>Plates on file</b> {String(count).padStart(3, '0')}
+          </div>
+          <div>
+            <b>Latest</b> {latestLabel}
+          </div>
+          <div style={{ marginTop: 8 }}>
+            Printed to order ·<br />
+            shipped archival
+          </div>
         </div>
       </section>
-      <section className="container" style={{ paddingBottom: 80 }}>
-        <h2>Collections</h2>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-            gap: 32,
-            marginTop: 24,
-          }}
-        >
-          {collections.rows.map((c) => (
-            <CollectionCard
-              key={c.slug}
-              slug={c.slug}
-              title={c.title}
-              tagline={c.tagline}
-              coverUrl={c.cover_image_url}
-            />
-          ))}
+
+      <section className="wl-masthead-lede">
+        <div>
+          <div className="label">
+            A note from
+            <br />
+            the studio
+          </div>
         </div>
+        <div>
+          <p>
+            My father handed me a camera when I was a child and I never put it
+            down. I'm a photographic rebel — I take the rules I learned at the
+            Colorado Institute of Art and then do something else. Let's try this
+            and see what happens.
+          </p>
+          <p>
+            Everything here has earned its way onto the site. A small,
+            considered selection, added sparingly.
+          </p>
+          <div className="sig">— Dan</div>
+        </div>
+      </section>
+
+      <section className="wl-sheet">
+        <header className="wl-sheet-h">
+          <h2>Index of plates</h2>
+          <div className="wl-rule"></div>
+          <span className="count">
+            {String(count).padStart(2, '0')} works on file
+          </span>
+        </header>
+        {plates.length > 0 ? (
+          <ArtworkGrid items={plates} />
+        ) : (
+          <p
+            style={{
+              color: 'var(--ink-3)',
+              fontFamily: 'var(--f-serif)',
+              fontSize: 17,
+              padding: '40px 0',
+            }}
+          >
+            No published works yet. Check back soon.
+          </p>
+        )}
       </section>
     </>
   );

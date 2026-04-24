@@ -6,9 +6,11 @@ import { CartProvider } from '@/components/shop/CartProvider';
 export default function ShopLayout({ children }: { children: ReactNode }) {
   return (
     <CartProvider>
-      <Nav />
-      <main>{children}</main>
-      <Footer />
+      <div className="wl-surface">
+        <Nav />
+        <main>{children}</main>
+        <Footer />
+      </div>
     </CartProvider>
   );
 }

@@ -1,5 +1,6 @@
+import Link from 'next/link';
+import Image from 'next/image';
 import { pool } from '@/lib/db';
-import { CollectionCard } from '@/components/shop/CollectionCard';
 
 export const revalidate = 60;
 
@@ -20,29 +21,62 @@ export default async function CollectionsIndex() {
      GROUP BY c.id
      ORDER BY c.display_order`,
   );
+
+  const totalPlates = rows.reduce((s, r) => s + r.n, 0);
+
   return (
-    <section className="container" style={{ padding: '40px 0' }}>
-      <h1>Collections</h1>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-          gap: 32,
-          marginTop: 24,
-        }}
-      >
-        {rows.map((c) => (
-          <div key={c.slug}>
-            <CollectionCard
-              slug={c.slug}
-              title={c.title}
-              tagline={c.tagline}
-              coverUrl={c.cover_image_url}
-            />
-            <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 4 }}>{c.n} pieces</p>
+    <div>
+      <header className="wl-cindex-head">
+        <div>
+          <span className="wl-eyebrow">
+            The Catalog · {rows.length} {rows.length === 1 ? 'Chapter' : 'Chapters'}
+          </span>
+          <h1>Collections.</h1>
+          <p>
+            Small bodies of work, curated from twenty years of looking. Each
+            collection is a chapter in a longer letter about light.
+          </p>
+        </div>
+        <div className="wl-masthead-side">
+          <div>
+            <b>Chapters</b> {String(rows.length).padStart(2, '0')}
           </div>
+          <div>
+            <b>Plates</b> {String(totalPlates).padStart(3, '0')}
+          </div>
+          <div>
+            <b>Media</b> Print · Canvas · Metal
+          </div>
+        </div>
+      </header>
+
+      <div className="wl-cindex-list">
+        {rows.map((c, i) => (
+          <Link
+            key={c.slug}
+            href={`/collections/${c.slug}`}
+            className="wl-cindex-row"
+          >
+            <span className="no">CH · {String(i + 1).padStart(2, '0')}</span>
+            <span className="title">{c.title.replace(/^The /, '')}</span>
+            <span className="tagline">{c.tagline ?? ''}</span>
+            <span className="count">
+              {c.n} {c.n === 1 ? 'plate' : 'plates'}
+            </span>
+            <span className="thumb">
+              {c.cover_image_url && (
+                <Image
+                  src={c.cover_image_url}
+                  alt={c.title}
+                  fill
+                  sizes="120px"
+                  style={{ objectFit: 'cover' }}
+                />
+              )}
+            </span>
+          </Link>
         ))}
       </div>
-    </section>
+    </div>
   );
 }
