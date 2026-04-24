@@ -5,12 +5,21 @@ declare global {
   var __wildlight_pool: Pool | undefined;
 }
 
+function wantsNoSsl(url: string | undefined): boolean {
+  if (!url) return false;
+  // Local dev hosts or an explicit sslmode=disable in the connection string.
+  return (
+    /@(localhost|127\.0\.0\.1|::1)(:\d+)?\//.test(url) ||
+    /[?&]sslmode=disable\b/i.test(url)
+  );
+}
+
 function createPool(): Pool {
   return new Pool({
     connectionString: process.env.DATABASE_URL,
-    // Neon serves a valid public cert chain; verify it. If you hit
-    // SELF_SIGNED_CERT errors on some managed hosts, flip to `false`.
-    ssl: process.env.DATABASE_URL?.includes('localhost')
+    // Verify cert chain on managed hosts (Neon, RDS, etc serve valid public
+    // certs). If you hit SELF_SIGNED_CERT errors, flip to `false`.
+    ssl: wantsNoSsl(process.env.DATABASE_URL)
       ? false
       : { rejectUnauthorized: true },
     max: 10,

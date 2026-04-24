@@ -5,7 +5,8 @@
   "description": "Wildlight Imagery — artist storefront for Dan Raby",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "tsx lib/migrate.ts && next build",
+    "build:skip-migrate": "next build",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
