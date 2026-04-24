@@ -26,6 +26,9 @@
   --adm-blue: #3a5d7a;
   --adm-blue-soft: #d3dee8;
   --adm-chip-track: #e7e3d6;
+  --adm-panel-2: #efeae0;
+  --adm-hover: #f1ede3;
+  --adm-dim: #b4ac9b;
   --adm-radius-md: 5px;
   --adm-radius-lg: 8px;
 
@@ -56,6 +59,9 @@
   --adm-blue: #7aa8cf;
   --adm-blue-soft: #13202b;
   --adm-chip-track: #20252c;
+  --adm-panel-2: #1b1f25;
+  --adm-hover: #20252c;
+  --adm-dim: #4a4d51;
   --adm-radius-md: 3px;
   --adm-radius-lg: 4px;
 }
