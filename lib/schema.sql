@@ -191,3 +191,104 @@ CREATE TABLE IF NOT EXISTS broadcast_log (
 
 CREATE INDEX IF NOT EXISTS idx_broadcast_log_sent_at
   ON broadcast_log(sent_at DESC);
+
+-- Order events (append-only lifecycle ledger) — Spec 3 --------------
+CREATE TABLE IF NOT EXISTS order_events (
+  id          SERIAL PRIMARY KEY,
+  order_id    INT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  type        TEXT NOT NULL,
+  who         TEXT NOT NULL DEFAULT 'system',
+  payload     JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_order_events_order_created
+  ON order_events(order_id, created_at);
+
+ALTER TABLE order_events DROP CONSTRAINT IF EXISTS order_events_type_chk;
+ALTER TABLE order_events ADD CONSTRAINT order_events_type_chk CHECK (type IN (
+  'placed', 'paid',
+  'printful_submitted', 'printful_flagged',
+  'shipped', 'delivered',
+  'refund_initiated', 'refunded',
+  'resubmit_attempted',
+  'canceled',
+  'admin_note',
+  'error'
+));
+
+ALTER TABLE order_events DROP CONSTRAINT IF EXISTS order_events_who_chk;
+ALTER TABLE order_events ADD CONSTRAINT order_events_who_chk CHECK (who IN (
+  'customer', 'system', 'admin', 'stripe', 'printful'
+));
+
+-- Backfill order_events from existing orders. Each statement is guarded
+-- by NOT EXISTS so the script is safe to re-run.
+INSERT INTO order_events (order_id, type, who, payload, created_at)
+SELECT o.id, 'placed', 'customer', '{}'::jsonb, o.created_at FROM orders o
+WHERE NOT EXISTS (
+  SELECT 1 FROM order_events e WHERE e.order_id = o.id AND e.type = 'placed'
+);
+
+INSERT INTO order_events (order_id, type, who, payload, created_at)
+SELECT o.id, 'paid', 'stripe',
+       jsonb_build_object('amount_cents', o.total_cents), o.updated_at
+FROM orders o
+WHERE o.status <> 'pending'
+  AND NOT EXISTS (
+    SELECT 1 FROM order_events e WHERE e.order_id = o.id AND e.type = 'paid'
+  );
+
+INSERT INTO order_events (order_id, type, who, payload, created_at)
+SELECT o.id, 'printful_submitted', 'printful',
+       jsonb_build_object('printful_order_id', o.printful_order_id),
+       o.updated_at
+FROM orders o
+WHERE o.printful_order_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM order_events e
+    WHERE e.order_id = o.id AND e.type = 'printful_submitted'
+  );
+
+INSERT INTO order_events (order_id, type, who, payload, created_at)
+SELECT o.id, 'printful_flagged', 'system',
+       jsonb_build_object('reason', COALESCE(o.notes, 'unknown')),
+       o.updated_at
+FROM orders o
+WHERE o.status = 'needs_review'
+  AND NOT EXISTS (
+    SELECT 1 FROM order_events e
+    WHERE e.order_id = o.id AND e.type = 'printful_flagged'
+  );
+
+INSERT INTO order_events (order_id, type, who, payload, created_at)
+SELECT o.id, 'shipped', 'printful',
+       jsonb_build_object(
+         'tracking_number', o.tracking_number,
+         'tracking_url',    o.tracking_url
+       ),
+       o.updated_at
+FROM orders o
+WHERE o.tracking_number IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM order_events e
+    WHERE e.order_id = o.id AND e.type = 'shipped'
+  );
+
+INSERT INTO order_events (order_id, type, who, payload, created_at)
+SELECT o.id, 'delivered', 'printful', '{}'::jsonb, o.updated_at
+FROM orders o
+WHERE o.status = 'delivered'
+  AND NOT EXISTS (
+    SELECT 1 FROM order_events e
+    WHERE e.order_id = o.id AND e.type = 'delivered'
+  );
+
+INSERT INTO order_events (order_id, type, who, payload, created_at)
+SELECT o.id, 'refunded', 'admin', '{}'::jsonb, o.updated_at
+FROM orders o
+WHERE o.status = 'refunded'
+  AND NOT EXISTS (
+    SELECT 1 FROM order_events e
+    WHERE e.order_id = o.id AND e.type = 'refunded'
+  );
