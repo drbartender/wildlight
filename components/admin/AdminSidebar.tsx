@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 
 interface NavDef {
   id: string;
@@ -66,6 +66,11 @@ const ACCOUNT: NavDef[] = [
 interface Props {
   needsReview: number;
   email: string;
+  systemHealth?: Array<{
+    key: string;
+    state: 'ok' | 'warn' | 'error';
+    note: string;
+  }>;
 }
 
 function Item({ n, path }: { n: NavDef; path: string }) {
@@ -93,19 +98,12 @@ function Item({ n, path }: { n: NavDef; path: string }) {
   );
 }
 
-export function AdminSidebar({ needsReview, email }: Props) {
+export function AdminSidebar({ needsReview, email, systemHealth }: Props) {
   const path = usePathname() || '/admin';
-  const router = useRouter();
   const orders = COMMERCE.map((n) =>
     n.id === 'orders' && needsReview > 0 ? { ...n, badge: needsReview } : n,
   );
   const initials = email.slice(0, 2).toUpperCase();
-
-  async function signOut() {
-    await fetch('/api/auth/logout', { method: 'POST' });
-    router.push('/login');
-    router.refresh();
-  }
 
   return (
     <aside className="wl-adm-sidebar">
@@ -134,6 +132,22 @@ export function AdminSidebar({ needsReview, email }: Props) {
         {ACCOUNT.map((n) => (
           <Item key={n.id} n={n} path={path} />
         ))}
+        {systemHealth && systemHealth.length > 0 && (
+          <>
+            <div className="wl-adm-sidebar-group second wl-adm-system-health-label">
+              System
+            </div>
+            <div className="wl-adm-system-health">
+              {systemHealth.map((h) => (
+                <div key={h.key} className={`row state-${h.state}`}>
+                  <span className="dot" aria-hidden="true" />
+                  <span className="key">{h.key}</span>
+                  <span className="note">{h.note}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </nav>
 
       <div className="wl-adm-sidebar-foot">
@@ -146,9 +160,6 @@ export function AdminSidebar({ needsReview, email }: Props) {
             {email}
           </div>
         </div>
-        <button type="button" className="wl-adm-signout" onClick={signOut}>
-          sign out
-        </button>
       </div>
     </aside>
   );

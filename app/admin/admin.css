@@ -295,20 +295,50 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.wl-adm-signout {
-  background: transparent;
-  border: 0;
-  color: var(--adm-muted);
-  font-size: 11px;
-  padding: 4px 8px;
-  margin-left: auto;
-  cursor: pointer;
-  border-radius: var(--adm-radius-md);
-  font-family: inherit;
+/* ─────── SYSTEM HEALTH (Darkroom-only block, Atelier hides it) ─────── */
+
+.wl-adm-system-health {
+  padding: 0 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
 }
-.wl-adm-signout:hover {
-  background: var(--adm-card);
+.wl-adm-system-health .row {
+  padding: 3px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--adm-ink-2);
+}
+.wl-adm-system-health .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 6px;
+  background: var(--adm-green);
+  flex-shrink: 0;
+}
+.wl-adm-system-health .row.state-warn .dot {
+  background: var(--adm-amber);
+}
+.wl-adm-system-health .row.state-error .dot {
+  background: var(--adm-red);
+}
+.wl-adm-system-health .row.state-error .note {
   color: var(--adm-red);
+}
+.wl-adm-system-health .key {
+  flex: 1;
+}
+.wl-adm-system-health .note {
+  font-size: 10px;
+  color: var(--adm-muted);
+}
+.wl-admin-surface:not([data-theme='dark']) .wl-adm-system-health,
+.wl-admin-surface:not([data-theme='dark']) .wl-adm-system-health-label {
+  display: none;
 }
 
 /* ─────── MAIN ─────── */
