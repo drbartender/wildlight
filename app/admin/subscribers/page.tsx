@@ -319,9 +319,17 @@ function SubscribersInner() {
               <div className="wl-adm-broadcast-preview">
                 <div className="stamp">Wildlight Imagery</div>
                 <div className="subj">{subject || '—'}</div>
-                <div
-                  style={{ marginTop: 14 }}
-                  dangerouslySetInnerHTML={{ __html: html }}
+                {/*
+                  Sandboxed iframe — an injected <script> in the composer
+                  body can't read the admin-origin cookies or call
+                  /api/admin/* routes. Same-origin access is explicitly
+                  not granted (no `allow-same-origin`).
+                */}
+                <iframe
+                  className="wl-adm-broadcast-preview-frame"
+                  title="Broadcast body preview"
+                  sandbox=""
+                  srcDoc={html}
                 />
               </div>
             </div>

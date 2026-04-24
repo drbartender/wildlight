@@ -70,8 +70,16 @@ export async function POST(req: Request) {
     );
     return NextResponse.json({ sent: subs.length });
   } catch (err) {
-    // Roll back the log row so admin can retry with the same UUID.
-    await pool.query(`DELETE FROM broadcast_log WHERE id = $1`, [logId]);
+    // Preserve the log row. Resend may have partially sent before the
+    // failure, and deleting the row would allow a retry with the same
+    // idempotency key to re-send to everyone. Admin must mint a fresh
+    // UUID to retry.
+    await pool.query(
+      `UPDATE broadcast_log
+       SET recipient_count = 0
+       WHERE id = $1 AND recipient_count = 0`,
+      [logId],
+    );
     throw err;
   }
 }

@@ -1565,6 +1565,14 @@
   font-family: inherit;
   font-weight: 500;
 }
+.wl-adm-broadcast-preview-frame {
+  margin-top: 14px;
+  width: 100%;
+  min-height: 260px;
+  border: 1px solid var(--adm-rule);
+  background: var(--adm-paper);
+  border-radius: var(--adm-radius-sm);
+}
 
 .wl-adm-history-empty {
   padding: 40px;
