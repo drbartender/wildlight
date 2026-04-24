@@ -47,8 +47,9 @@ export async function POST(
     title: string;
     image_web_url: string;
     collection_slug: string | null;
+    year_shot: number | null;
   }>(
-    `SELECT a.title, a.image_web_url, c.slug AS collection_slug
+    `SELECT a.title, a.image_web_url, a.year_shot, c.slug AS collection_slug
      FROM artworks a LEFT JOIN collections c ON c.id = a.collection_id
      WHERE a.id = $1`,
     [numericId],
@@ -63,12 +64,19 @@ export async function POST(
     );
   }
 
-  // EXIF is read locally from a small byte range. AI-draft reads the image
-  // via Anthropic's URL source (no full buffer through this route).
-  const buf = await fetchForExif(a.image_web_url);
-  const { year_shot, gps } = buf
-    ? await readExifFromBuffer(buf)
-    : { year_shot: null, gps: null };
+  // EXIF is read locally from a small byte range — skip the fetch entirely
+  // when year_shot is already populated. AI-draft reads the image via
+  // Anthropic's URL source, so no full buffer ever passes through this route.
+  let year_shot: number | null = a.year_shot;
+  let gps: { lat: number; lon: number } | null = null;
+  if (year_shot == null) {
+    const buf = await fetchForExif(a.image_web_url);
+    if (buf) {
+      const exif = await readExifFromBuffer(buf);
+      year_shot = exif.year_shot;
+      gps = exif.gps;
+    }
+  }
 
   try {
     const draft = await draftArtworkMetadata({

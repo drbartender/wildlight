@@ -93,9 +93,14 @@ export default function AdminArtworksPage() {
     const targets = rows.filter((r) => !r.artist_note);
     setBatchRunning('draft');
     setBatchProgress({ done: 0, total: targets.length, failed: 0 });
+
+    // Run with small concurrency. Anthropic prompt cache (ephemeral,
+    // 5-min TTL on our system prompt) works fine when up to a handful
+    // of requests are in flight against the same cache key.
+    const CONCURRENCY = 3;
     let done = 0;
     let failed = 0;
-    for (const r of targets) {
+    const runOne = async (r: Row): Promise<void> => {
       try {
         const res = await fetch(`/api/admin/artworks/${r.id}/ai-draft`, {
           method: 'POST',
@@ -106,9 +111,7 @@ export default function AdminArtworksPage() {
           location: string | null;
           artist_note: string;
         };
-        // Only fill fields that were empty for THIS row — mirrors the
-        // single-item guard on the detail page so bulk runs can't
-        // clobber hand-edited year/location.
+        // Only fill fields that were empty for THIS row.
         const patch: Record<string, unknown> = {};
         if (body.year_shot != null && r.year_shot == null) patch.year_shot = body.year_shot;
         if (body.location && !r.location) patch.location = body.location;
@@ -126,6 +129,10 @@ export default function AdminArtworksPage() {
       }
       done += 1;
       setBatchProgress({ done, total: targets.length, failed });
+    };
+
+    for (let i = 0; i < targets.length; i += CONCURRENCY) {
+      await Promise.all(targets.slice(i, i + CONCURRENCY).map(runOne));
     }
     setBatchRunning(null);
     await reload();
