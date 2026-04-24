@@ -44,6 +44,15 @@ interface RecentRow {
   status: string;
   created_at: string;
 }
+interface TopArtworkRow {
+  id: number;
+  slug: string;
+  title: string;
+  image_web_url: string;
+  collection_title: string | null;
+  units_sold: number;
+  revenue_cents: number;
+}
 
 function fmtWhen(iso: string): string {
   const d = new Date(iso);
@@ -68,14 +77,22 @@ function fmtWhen(iso: string): string {
   return d.toLocaleDateString();
 }
 
-export default async function AdminDashboard() {
+export default async function AdminDashboard({
+  searchParams,
+}: {
+  searchParams: Promise<{ metric?: string }>;
+}) {
+  const { metric: rawMetric } = await searchParams;
+  const topMetric: 'units' | 'revenue' =
+    rawMetric === 'revenue' ? 'revenue' : 'units';
+
   const today = new Date().toLocaleDateString(undefined, {
     weekday: 'short',
     month: 'long',
     day: 'numeric',
   });
 
-  const [rev, sub, daily, catalog, missing, needs, recent] = await Promise.all([
+  const [rev, sub, daily, catalog, missing, needs, recent, topArts] = await Promise.all([
     pool.query<RevRow>(
       `SELECT COALESCE(SUM(total_cents), 0)::int AS total,
               COUNT(*)::int AS n,
@@ -111,6 +128,27 @@ export default async function AdminDashboard() {
     pool.query<RecentRow>(
       `SELECT id, customer_name, customer_email, total_cents, status, created_at::text
        FROM orders ORDER BY created_at DESC LIMIT 5`,
+    ),
+    pool.query<TopArtworkRow>(
+      `SELECT
+         a.id, a.slug, a.title, a.image_web_url,
+         c.title AS collection_title,
+         COALESCE(SUM(oi.quantity), 0)::int                           AS units_sold,
+         COALESCE(SUM(oi.quantity * oi.price_cents_snapshot), 0)::int AS revenue_cents
+       FROM order_items oi
+       JOIN orders   o ON o.id = oi.order_id
+       JOIN artworks a ON a.slug = (oi.artwork_snapshot->>'slug')
+       LEFT JOIN collections c ON c.id = a.collection_id
+       WHERE o.created_at >= NOW() - INTERVAL '30 days'
+         AND o.status IN ('paid','submitted','fulfilled','shipped','delivered')
+       GROUP BY a.id, c.title
+       ORDER BY
+         CASE WHEN $1::text = 'revenue'
+              THEN SUM(oi.quantity * oi.price_cents_snapshot)
+              ELSE SUM(oi.quantity)
+         END DESC NULLS LAST
+       LIMIT 5`,
+      [topMetric],
     ),
   ]);
 
