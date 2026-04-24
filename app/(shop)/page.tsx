@@ -23,7 +23,7 @@ function seasonOf(date: Date): string {
 export default async function HomePage() {
   const [countsRes, platesRes] = await Promise.all([
     pool.query<CountsRow>(
-      `SELECT COUNT(*)::int AS n, MAX(updated_at)::text AS latest
+      `SELECT COUNT(*)::int AS n, MAX(published_at)::text AS latest
        FROM artworks WHERE status='published'`,
     ),
     pool.query<PlateRow>(
