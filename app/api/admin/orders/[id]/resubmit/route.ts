@@ -60,17 +60,29 @@ export async function POST(
 
   const missingPrint = items.rows.find((r) => !r.image_print_url);
   if (missingPrint) {
+    const reason = 'image_print_url still missing';
     await pool.query(
       `UPDATE orders SET status='needs_review', notes=$2, updated_at=NOW() WHERE id = $1`,
-      [id, 'image_print_url still missing'],
+      [id, reason],
+    );
+    await pool.query(
+      `INSERT INTO order_events (order_id, type, who, payload)
+       VALUES ($1, 'resubmit_attempted', 'admin', $2::jsonb)`,
+      [id, JSON.stringify({ outcome: 'failed', reason })],
     );
     return NextResponse.json({ error: 'missing print file' }, { status: 400 });
   }
   const missingSync = items.rows.find((r) => !r.printful_sync_variant_id);
   if (missingSync) {
+    const reason = 'printful_sync_variant_id still missing';
     await pool.query(
       `UPDATE orders SET status='needs_review', notes=$2, updated_at=NOW() WHERE id = $1`,
-      [id, 'printful_sync_variant_id still missing'],
+      [id, reason],
+    );
+    await pool.query(
+      `INSERT INTO order_events (order_id, type, who, payload)
+       VALUES ($1, 'resubmit_attempted', 'admin', $2::jsonb)`,
+      [id, JSON.stringify({ outcome: 'failed', reason })],
     );
     return NextResponse.json({ error: 'missing sync variant id' }, { status: 400 });
   }
@@ -113,18 +125,26 @@ export async function POST(
       `UPDATE orders SET status='submitted', printful_order_id=$2, notes=NULL, updated_at=NOW() WHERE id = $1`,
       [id, pf.id],
     );
+    await pool.query(
+      `INSERT INTO order_events (order_id, type, who, payload)
+       VALUES ($1, 'resubmit_attempted', 'admin', $2::jsonb)`,
+      [id, JSON.stringify({ outcome: 'ok', printful_order_id: pf.id })],
+    );
     return NextResponse.json({ ok: true });
   } catch (err) {
     logger.error('resubmit failed', err, { orderId: id });
+    const reason = err instanceof Error ? err.message : String(err);
     // Roll back intermediate `resubmitting` state so admin can retry.
     await pool.query(
       `UPDATE orders SET status = 'needs_review', notes = $2, updated_at = NOW()
        WHERE id = $1 AND status = 'resubmitting'`,
-      [id, `resubmit failed: ${err instanceof Error ? err.message : String(err)}`],
+      [id, `resubmit failed: ${reason}`],
     );
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : String(err) },
-      { status: 500 },
+    await pool.query(
+      `INSERT INTO order_events (order_id, type, who, payload)
+       VALUES ($1, 'resubmit_attempted', 'admin', $2::jsonb)`,
+      [id, JSON.stringify({ outcome: 'failed', reason })],
     );
+    return NextResponse.json({ error: reason }, { status: 500 });
   }
 }

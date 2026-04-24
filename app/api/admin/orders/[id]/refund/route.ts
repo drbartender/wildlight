@@ -38,6 +38,12 @@ export async function POST(
   }
   const { stripe_payment_id, printful_order_id } = claim.rows[0];
 
+  await pool.query(
+    `INSERT INTO order_events (order_id, type, who, payload)
+     VALUES ($1, 'refund_initiated', 'admin', '{}'::jsonb)`,
+    [id],
+  );
+
   try {
     if (stripe_payment_id) {
       const stripe = getStripe();
@@ -55,6 +61,11 @@ export async function POST(
     }
     await pool.query(
       `UPDATE orders SET status='refunded', updated_at=NOW() WHERE id = $1`,
+      [id],
+    );
+    await pool.query(
+      `INSERT INTO order_events (order_id, type, who, payload)
+       VALUES ($1, 'refunded', 'admin', '{}'::jsonb)`,
       [id],
     );
     return NextResponse.json({ ok: true });
