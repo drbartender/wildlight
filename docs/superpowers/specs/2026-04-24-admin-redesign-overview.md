@@ -146,60 +146,61 @@ unique CSS rules it owned in `admin.css`. `admin.css` should not
 grow unboundedly — it should shrink or stay flat as sub-projects
 consolidate patterns into tokens.
 
-## Decomposition
+## Design invariant (added 2026-04-24, after subs 1 & 2 shipped)
 
-Each row is one spec → plan → implementation → merge cycle. Order
-matters for the first two; the rest can parallelize once the shell
-lands.
+Atelier and Darkroom are **independent visual languages** over the
+same data. Do not propose convergence changes — the disparity is a
+feature. Dashboard bars vs line+gradient; serif vs mono-only; round
+pills vs square mono-lowercase pills; editorial grids vs tabular
+panels. Every remaining spec describes each theme's treatment
+separately. "Parity" in those specs means "each theme matches its
+own mockup target."
 
-| # | Sub-project | Depends on | Scope |
-|---|---|---|---|
-| 1 | **Design system + shell parity** | — | Audit `admin.css` tokens against both mockup palettes and fill gaps. Verify/add `next/font` for Inter, Libre Caslon, JetBrains Mono. Bring `AdminSidebar`, `AdminTopBar`, `AdminPill`, `AdminField` to mockup parity in both themes. Smoke-test on the current dashboard to confirm the shell renders correctly under both themes. |
-| 2 | **Artworks list + detail parity** | 1 | Compare current `app/admin/artworks/page.tsx` and `app/admin/artworks/[id]/page.tsx` against `AArtworksList` / `AArtworkDetail` + `DArtworksList` / `DArtworkDetail`. Fill gaps. Absorbs the AI-draft + bulk-action work (see "Absorbed work" below). |
-| 3 | **Orders list + detail parity** | 1 | Compare current `app/admin/orders/*` against `AOrdersList` / `AOrderDetail` + `DOrdersList` / `DOrderDetail`. Needs-review alert with resubmit/refund actions, timeline, customer/ship/payment/printful sidebar cards. |
-| 4 | **Dashboard parity** | 1 | Compare current `app/admin/page.tsx` against `ADashboard` / `DDashboard`. The current dashboard is close in structure but lacks the Darkroom chart treatment (line + gradient fill instead of bars), the "top artworks" panel, and the Darkroom 5-wide KPI strip including `needs_review`. |
-| 5 | **Collections + Subscribers + Settings + Cmd-K + Login parity** | 1 | `ACollections`/`DCollections`, `ASubscribers`/`DSubscribers` (list + broadcast composer + history), `ASettings`/`DSettings` (password + integrations + env_vars + admins), `ACmdK`/`DCmdK`, `ALogin`/`DLogin`. Subscribers broadcast composer is a net-new screen; mail send plumbing decided in Spec 5. |
-| 6 | **Cross-screen Darkroom polish** | 1–5 | Only if the Darkroom theme needs screen-specific fixes beyond what tokens cover. Likely empty if sub-project 1 does its job. |
+## Decomposition (updated)
 
-Sub-projects 2–5 can run in parallel branches once sub-project 1 is
-merged. Each gets its own worktree if desired.
+Each row is one spec → plan → implementation → merge cycle. Subs 1
+and 2 are shipped. Subs 3, 4, 5a, 5b, 5c, and Shop-Polish are
+independent once sub 1 is merged and can run in any order.
 
-## Absorbed work
+| # | Sub-project | Status | Depends on | Scope |
+|---|---|---|---|---|
+| 1 | **Design system + shell parity** | ✅ shipped | — | `admin.css` tokens, fonts via `next/font`, `AdminSidebar` / `AdminTopBar` / `AdminPill` / `AdminField` / `AdminButton`. See `2026-04-24-admin-spec-1-design-system-parity.md`. |
+| 2 | **Artworks AI-draft + bulk actions** | ✅ shipped | 1 | `POST /api/admin/artworks/[id]/ai-draft`, `lib/exif.ts`, `lib/ai-draft.ts`, edit-page button, list-page bulk actions. Hardening in commits `df95a77..bfb2335`. See `2026-04-24-admin-spec-2-artworks-ai-draft-and-bulk.md`. |
+| 3 | **Orders + `order_events` timeline** | spec | 1 | New `order_events` append-only ledger; writes from Stripe + Printful + refund + resubmit + new admin-note endpoint; timeline reads from the ledger; per-skin list + detail layouts. See `2026-04-24-admin-spec-3-orders-and-events.md`. |
+| 4 | **Dashboard** | spec | 1 | Each skin matches its own mockup. Atelier keeps bars; Darkroom gets line+gradient, 5-wide KPI with `needs_review`, top-artworks panel with units/$ toggle. See `2026-04-24-admin-spec-4-dashboard.md`. |
+| 5a | **Subscribers + broadcast composer + History** | spec | 1 | New `broadcast_log` table; composer writes on send (real Resend); `GET /api/admin/subscribers/broadcasts` drives History; per-skin composer + history layouts. See `2026-04-24-admin-spec-5a-subscribers-and-broadcasts.md`. |
+| 5b | **Settings + live integration health** | spec | 1 | New `GET /api/admin/integrations/health`; replaces sub-1's placeholder; `admin_users.role` column; per-skin Settings layouts. See `2026-04-24-admin-spec-5b-settings-and-integration-health.md`. |
+| 5c | **Collections + Login** | spec | 1 | Per-skin renderings of Collections (card grid vs mono panel) + Login (paper+serif vs mono+teal). ⌘K real search explicitly deferred. See `2026-04-24-admin-spec-5c-collections-and-login.md`. |
+| 6 | **Cross-screen Darkroom polish** | reserve — no spec | 1–5 | Open only if regressions surface during 3/4/5. Not written speculatively. |
+| — | **Shop-Polish** (outside the admin ladder) | spec | — | Four small shop items: image-dimensions backfill, `/orders/[token]` shared StatusBadge, `published_at` column + home "Latest" fix, mood switch mobile compact. See `2026-04-24-shop-polish.md`. |
 
-The earlier "Admin: AI-draft Metadata + Bulk Actions" spec (written
-and then deleted this morning) is absorbed into sub-project 2. Its
-design — `POST /api/admin/artworks/[id]/ai-draft`, `lib/exif.ts`,
-edit-page "Draft with AI" button, list-page bulk actions — becomes a
-feature section in the Artworks spec rather than a standalone
-deliverable. Nothing is lost; it just moves.
+## Absorbed from HANDOFF
 
-## Out of scope for this redesign
+The 2026-04-24 print-room-redesign HANDOFF flagged deferred items.
+They are absorbed as follows:
 
-- Public shop UI. Handled in the parallel session.
-- Database schema changes. None required.
-- New admin auth flows beyond what exists.
-- Email sending infrastructure. The Subscribers broadcast composer UI
-  is in scope; whether "Send to N subscribers" actually delivers mail
-  is a Spec 5 decision based on what plumbing already exists.
-- Routing changes. Existing `app/admin/*` routes stay.
+- `order_events` timeline → Spec 3.
+- `broadcast_log` + History tab → Spec 5a.
+- Live integration health (replaces Spec 1's placeholder) → Spec 5b.
+- Real ⌘K search → **deferred** explicitly in Spec 5c. Revisit when
+  catalog > ~30 artworks.
+- `image_width` / `image_height` backfill → Shop-Polish.
+- `/orders/[token]` status pill → Shop-Polish.
+- Home "Latest" season (`published_at` column) → Shop-Polish.
+- Mood switch mobile compact → Shop-Polish.
+- Admin light/dark flicker on old browsers → not specced. Triage if
+  reported.
 
-## Open questions (resolved per-spec, not here)
+## Out of scope
 
-- No-flash theme hydration: inline script in `<head>` reading
-  localStorage before first paint, or accept a frame of flash? Decide
-  in Spec 2 (design system).
-- Cmd-K search target: static command list only, or search artworks/
-  orders/subscribers? Decide in Spec 6.
-- Broadcast composer's "Send" button wiring: real send via existing
-  Resend integration, or UI-only for now with a TODO. Decide in Spec 5.
+- No new admin auth flows.
+- No routing changes under `app/admin/*`.
+- No new webhook kinds. Existing Stripe + Printful handlers gain
+  event writes (Spec 3); nothing else changes.
 
 ## Rollout
 
-Each sub-project merges to `main` independently after its own review
-and local smoke-test. No staging gate — the admin is Dan-only and any
-regression is reversible.
-
-The Atelier theme must work end-to-end at every merge point.
-Darkroom is allowed to be cosmetically rough mid-series; if tokens
-are well-chosen it will follow for free. Sub-project 6 exists as a
-safety net.
+Each spec merges to `main` independently after its own review and
+local smoke-test. No staging gate — the admin is Dan-only. Specs 3,
+4, 5a, 5b, 5c, and Shop-Polish can run in any order or in parallel
+worktrees.
