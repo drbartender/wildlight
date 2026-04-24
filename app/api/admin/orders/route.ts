@@ -7,6 +7,7 @@ export async function GET() {
   await requireAdmin();
   const { rows } = await pool.query(
     `SELECT o.id, o.status, o.customer_email, o.customer_name, o.total_cents,
+            o.shipping_address,
             o.created_at::text, o.printful_order_id,
             (SELECT COUNT(*)::int FROM order_items WHERE order_id = o.id) AS item_count
      FROM orders o

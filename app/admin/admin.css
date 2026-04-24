@@ -2224,3 +2224,101 @@
   border-radius: 3px;
 }
 
+/* ─────── ORDERS LIST — filter strips + dual-DOM tables ─────── */
+
+.wl-adm-orders-filters-atelier {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.wl-adm-orders-filters-atelier .chips {
+  display: flex;
+  border: 1px solid var(--adm-rule);
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--adm-card);
+}
+.wl-adm-orders-filters-atelier .chips button {
+  padding: 6px 12px;
+  border: none;
+  cursor: pointer;
+  background: transparent;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--adm-ink-2);
+  border-right: 1px solid var(--adm-rule);
+  white-space: nowrap;
+}
+.wl-adm-orders-filters-atelier .chips button:last-child {
+  border-right: none;
+}
+.wl-adm-orders-filters-atelier .chips button.on {
+  background: var(--adm-panel-2);
+  color: var(--adm-ink);
+}
+.wl-adm-orders-filters-atelier .chips .count {
+  color: var(--adm-muted);
+  margin-left: 4px;
+}
+.wl-adm-orders-filters-atelier .actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.wl-adm-orders-filters-darkroom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+.wl-adm-orders-filters-darkroom .chips {
+  display: flex;
+  gap: 2px;
+  background: var(--adm-panel);
+  border: 1px solid var(--adm-rule);
+  border-radius: 3px;
+  padding: 2px;
+}
+.wl-adm-orders-filters-darkroom .chips button {
+  padding: 3px 8px;
+  border: none;
+  cursor: pointer;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--adm-ink-2);
+  font-family: inherit;
+  font-size: 11px;
+}
+.wl-adm-orders-filters-darkroom .chips button.on {
+  background: var(--adm-panel-2);
+  color: var(--adm-ink);
+}
+.wl-adm-orders-filters-darkroom .chips .count {
+  color: var(--adm-muted);
+  margin-left: 4px;
+}
+.wl-adm-orders-filters-darkroom .note {
+  color: var(--adm-muted);
+}
+.wl-adm-orders-filters-darkroom .actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+/* Skin visibility */
+.wl-adm-orders-filters-atelier  { display: flex; }
+.wl-adm-orders-filters-darkroom { display: none; }
+.wl-adm-orders-atelier          { display: block; }
+.wl-adm-orders-darkroom         { display: none; }
+.wl-admin-surface[data-theme='dark'] .wl-adm-orders-filters-atelier  { display: none; }
+.wl-admin-surface[data-theme='dark'] .wl-adm-orders-filters-darkroom { display: flex; }
+.wl-admin-surface[data-theme='dark'] .wl-adm-orders-atelier          { display: none; }
+.wl-admin-surface[data-theme='dark'] .wl-adm-orders-darkroom         { display: block; }
+
