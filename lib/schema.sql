@@ -169,3 +169,11 @@ WHERE status = 'published' AND published_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_artworks_published_at
   ON artworks(published_at DESC NULLS LAST)
   WHERE status = 'published';
+
+-- Admin role column for Darkroom admins table (Spec 5b) --------------
+ALTER TABLE admin_users
+  ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'owner';
+
+ALTER TABLE admin_users DROP CONSTRAINT IF EXISTS admin_users_role_chk;
+ALTER TABLE admin_users ADD CONSTRAINT admin_users_role_chk
+  CHECK (role IN ('owner', 'operator'));
