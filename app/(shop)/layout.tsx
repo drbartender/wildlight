@@ -1,6 +1,14 @@
 import type { ReactNode } from 'react';
+import { Nav } from '@/components/shop/Nav';
+import { Footer } from '@/components/shop/Footer';
+import { CartProvider } from '@/components/shop/CartProvider';
 
-// Nav + Footer + CartProvider get wired in during Phase 4; placeholder layout for Phase 0 builds.
 export default function ShopLayout({ children }: { children: ReactNode }) {
-  return <main>{children}</main>;
+  return (
+    <CartProvider>
+      <Nav />
+      <main>{children}</main>
+      <Footer />
+    </CartProvider>
+  );
 }
