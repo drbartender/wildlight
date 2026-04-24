@@ -49,3 +49,15 @@ export async function withTransaction<T>(
     client.release();
   }
 }
+
+/**
+ * Coerce a URL path segment to a positive integer id. Returns null for
+ * non-numeric / fractional / out-of-range input so callers can 400 early
+ * instead of letting Postgres reject the query with an integer-parse
+ * error that leaks SQL fragments into the response body.
+ */
+export function parsePathId(raw: string | undefined | null): number | null {
+  if (raw == null) return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}

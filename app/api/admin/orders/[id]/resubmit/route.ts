@@ -1,6 +1,6 @@
 export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
-import { pool, withTransaction } from '@/lib/db';
+import { pool, parsePathId, withTransaction } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 import { printful } from '@/lib/printful';
 import { signedPrivateUrl } from '@/lib/r2';
@@ -24,7 +24,9 @@ export async function POST(
   ctx: { params: Promise<{ id: string }> },
 ) {
   await requireAdmin();
-  const { id } = await ctx.params;
+  const { id: raw } = await ctx.params;
+  const id = parsePathId(raw);
+  if (id == null) return NextResponse.json({ error: 'invalid id' }, { status: 400 });
 
   // Atomic state guard — only accept the resubmit if the order is currently
   // in `needs_review` AND has no `printful_order_id`. Prevents double-submission

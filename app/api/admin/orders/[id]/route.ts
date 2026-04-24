@@ -1,6 +1,6 @@
 export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
-import { pool } from '@/lib/db';
+import { pool, parsePathId } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 
 export async function GET(
@@ -8,7 +8,9 @@ export async function GET(
   ctx: { params: Promise<{ id: string }> },
 ) {
   await requireAdmin();
-  const { id } = await ctx.params;
+  const { id: raw } = await ctx.params;
+  const id = parsePathId(raw);
+  if (id == null) return NextResponse.json({ error: 'invalid id' }, { status: 400 });
   const [o, items, events] = await Promise.all([
     pool.query('SELECT * FROM orders WHERE id = $1', [id]),
     pool.query('SELECT * FROM order_items WHERE order_id = $1', [id]),

@@ -1,6 +1,6 @@
 export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
-import { pool, withTransaction } from '@/lib/db';
+import { pool, parsePathId, withTransaction } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 import { getStripe } from '@/lib/stripe';
 import { printful } from '@/lib/printful';
@@ -11,7 +11,9 @@ export async function POST(
   ctx: { params: Promise<{ id: string }> },
 ) {
   await requireAdmin();
-  const { id } = await ctx.params;
+  const { id: raw } = await ctx.params;
+  const id = parsePathId(raw);
+  if (id == null) return NextResponse.json({ error: 'invalid id' }, { status: 400 });
 
   // Atomic state guard — only refund orders that aren't already refunded or
   // canceled. Stash to an intermediate state so a double-click can't double-call Stripe.

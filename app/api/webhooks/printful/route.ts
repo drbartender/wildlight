@@ -60,8 +60,9 @@ export async function POST(req: Request) {
 
   try {
     const externalId = event?.data?.external_id; // our "order_<id>"
-    const ourId = Number(String(externalId || '').replace(/^order_/, ''));
-    if (!ourId) {
+    const idStr = String(externalId || '').replace(/^order_/, '');
+    const ourId = /^\d+$/.test(idStr) ? parseInt(idStr, 10) : 0;
+    if (!ourId || !Number.isSafeInteger(ourId)) {
       await pool.query(
         'UPDATE webhook_events SET processed_at = NOW() WHERE event_id = $1',
         [eventId],

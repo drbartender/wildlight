@@ -1,7 +1,7 @@
 export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { pool } from '@/lib/db';
+import { pool, parsePathId } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 
 const Body = z.object({ text: z.string().min(1).max(500) });
@@ -12,13 +12,24 @@ export async function POST(
 ) {
   await requireAdmin();
   const { id: raw } = await ctx.params;
-  const id = Number(raw);
-  if (!Number.isFinite(id)) {
-    return NextResponse.json({ error: 'bad id' }, { status: 400 });
+  const id = parsePathId(raw);
+  if (id == null) {
+    return NextResponse.json({ error: 'invalid id' }, { status: 400 });
   }
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: 'invalid' }, { status: 400 });
+  }
+
+  // Verify the order exists first; otherwise the FK failure on insert
+  // would throw a pg error that Next turns into a 500 with a leaked
+  // message. 404 early instead.
+  const existing = await pool.query<{ id: number }>(
+    `SELECT id FROM orders WHERE id = $1`,
+    [id],
+  );
+  if (!existing.rowCount) {
+    return NextResponse.json({ error: 'not found' }, { status: 404 });
   }
 
   const { rows } = await pool.query<{
