@@ -60,6 +60,39 @@ export default function ArtworkEditPage({
     setSaving(false);
   }
 
+  const [drafting, setDrafting] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [draftConfidence, setDraftConfidence] = useState<'high' | 'low' | null>(null);
+
+  async function draftWithAi() {
+    setDrafting(true);
+    setDraftError(null);
+    setDraftConfidence(null);
+    try {
+      const r = await fetch(`/api/admin/artworks/${id}/ai-draft`, { method: 'POST' });
+      if (!r.ok) {
+        const body = (await r.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error || `HTTP ${r.status}`);
+      }
+      const body = (await r.json()) as {
+        year_shot: number | null;
+        location: string | null;
+        artist_note: string;
+        confidence: 'high' | 'low';
+      };
+      const patch: Record<string, unknown> = {};
+      if (body.year_shot != null && !data?.artwork.year_shot) patch.year_shot = body.year_shot;
+      if (body.location && !data?.artwork.location) patch.location = body.location;
+      if (body.artist_note && !data?.artwork.artist_note) patch.artist_note = body.artist_note;
+      if (Object.keys(patch).length > 0) await save(patch);
+      setDraftConfidence(body.confidence);
+    } catch (err) {
+      setDraftError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDrafting(false);
+    }
+  }
+
   if (!data) {
     return (
       <>
@@ -174,6 +207,26 @@ export default function ArtworkEditPage({
               }}
             >
               /artwork/{a.slug}
+            </div>
+
+            <div className="wl-adm-ai-draft-row">
+              <button
+                type="button"
+                className="wl-adm-btn small"
+                onClick={draftWithAi}
+                disabled={drafting}
+              >
+                {drafting ? 'Drafting…' : 'Draft with AI'}
+              </button>
+              {draftConfidence === 'low' && (
+                <span className="wl-adm-ai-confidence-low">low confidence</span>
+              )}
+              {draftError && (
+                <span className="wl-adm-ai-draft-err">{draftError}</span>
+              )}
+              <span className="wl-adm-ai-draft-hint">
+                Fills any empty Location / Year / Artist note.
+              </span>
             </div>
 
             <div style={{ marginTop: 20 }} className="wl-adm-field-grid">
