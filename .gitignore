@@ -1,7 +1,26 @@
+# dependencies
 node_modules/
-scraped/
+
+# local env files
 .env
-.env.local
-*.log
+.env*.local
+
+# next.js
+.next/
+out/
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+
+# scraper output
+scraped/
+
+# editor / OS
 .DS_Store
 .claude/
+
+# logs
+*.log
