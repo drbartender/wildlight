@@ -1,0 +1,132 @@
+export const runtime = 'nodejs';
+import { NextResponse } from 'next/server';
+import crypto from 'node:crypto';
+import { pool } from '@/lib/db';
+import { sendOrderShipped } from '@/lib/email';
+import { logger } from '@/lib/logger';
+
+function verify(bodyRaw: string, headerSig: string | null): boolean {
+  const secret = process.env.PRINTFUL_WEBHOOK_SECRET;
+  if (!secret || !headerSig) return false;
+  const expected = crypto.createHmac('sha256', secret).update(bodyRaw).digest('hex');
+  try {
+    return crypto.timingSafeEqual(Buffer.from(headerSig), Buffer.from(expected));
+  } catch {
+    return false;
+  }
+}
+
+interface PfEvent {
+  type: string;
+  data?: {
+    id?: number;
+    external_id?: string;
+    shipment?: {
+      tracking_url?: string;
+      tracking_number?: string;
+    };
+  };
+}
+
+export async function POST(req: Request) {
+  const body = await req.text();
+  const sig = req.headers.get('x-pf-signature');
+  if (!verify(body, sig)) {
+    return NextResponse.json({ error: 'invalid signature' }, { status: 401 });
+  }
+
+  let event: PfEvent;
+  try {
+    event = JSON.parse(body) as PfEvent;
+  } catch {
+    return NextResponse.json({ error: 'invalid json' }, { status: 400 });
+  }
+
+  const eventId = event?.data?.id
+    ? `pf_${event.data.id}_${event.type}`
+    : `pf_${Date.now()}_${event.type}`;
+
+  const dupe = await pool.query<{ processed_at: Date | null }>(
+    'SELECT processed_at FROM webhook_events WHERE event_id = $1',
+    [eventId],
+  );
+  if (dupe.rowCount && dupe.rows[0].processed_at) {
+    return NextResponse.json({ ok: true, duplicate: true });
+  }
+  if (!dupe.rowCount) {
+    await pool.query(
+      `INSERT INTO webhook_events (source, event_id, payload) VALUES ('printful', $1, $2)`,
+      [eventId, event],
+    );
+  }
+
+  try {
+    const externalId = event?.data?.external_id; // our "order_<id>"
+    const ourId = Number(String(externalId || '').replace(/^order_/, ''));
+    if (!ourId) {
+      await pool.query(
+        'UPDATE webhook_events SET processed_at = NOW() WHERE event_id = $1',
+        [eventId],
+      );
+      return NextResponse.json({ ok: true, ignored: 'no external_id' });
+    }
+
+    if (event.type === 'package_shipped') {
+      const shipment = event.data?.shipment;
+      const trackingUrl = shipment?.tracking_url || null;
+      const trackingNumber = shipment?.tracking_number || null;
+      const r = await pool.query<{
+        customer_email: string;
+        public_token: string;
+      }>(
+        `UPDATE orders SET status='shipped', tracking_url=$2, tracking_number=$3, updated_at=NOW()
+         WHERE id = $1
+         RETURNING customer_email, public_token`,
+        [ourId, trackingUrl, trackingNumber],
+      );
+      if (r.rowCount) {
+        const siteUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+        try {
+          await sendOrderShipped(
+            r.rows[0].customer_email,
+            r.rows[0].public_token,
+            trackingUrl,
+            trackingNumber,
+            siteUrl,
+          );
+        } catch (err) {
+          logger.warn('shipped email failed', { err, orderId: ourId });
+        }
+      }
+    } else if (
+      event.type === 'package_returned' ||
+      event.type === 'order_canceled'
+    ) {
+      await pool.query(
+        `UPDATE orders SET status='canceled', updated_at=NOW() WHERE id = $1`,
+        [ourId],
+      );
+    } else if (
+      event.type === 'order_failed' ||
+      event.type === 'order_put_hold'
+    ) {
+      await pool.query(
+        `UPDATE orders SET status='needs_review', notes=$2, updated_at=NOW() WHERE id = $1`,
+        [ourId, event.type],
+      );
+    }
+
+    await pool.query(
+      'UPDATE webhook_events SET processed_at = NOW() WHERE event_id = $1',
+      [eventId],
+    );
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    logger.error('printful webhook processing error', err);
+    await pool.query(
+      'UPDATE webhook_events SET error = $2 WHERE event_id = $1',
+      [eventId, err instanceof Error ? err.message : String(err)],
+    );
+    return NextResponse.json({ ok: false });
+  }
+}
