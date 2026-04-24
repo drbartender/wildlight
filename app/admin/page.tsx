@@ -254,7 +254,8 @@ export default async function AdminDashboard({
         </div>
 
         <div className="wl-adm-row2">
-          <div className="wl-adm-card">
+          {/* Atelier: bar sparkline */}
+          <div className="wl-adm-card wl-adm-revenue-atelier">
             <div className="h">
               <h3>Revenue · last 30 days</h3>
               <span
@@ -299,6 +300,78 @@ export default async function AdminDashboard({
                 <span>{midLabel}</span>
                 <span>{lastLabel}</span>
               </div>
+            </div>
+          </div>
+
+          {/* Darkroom: line + gradient */}
+          <div className="wl-adm-panel wl-adm-revenue-darkroom">
+            <div className="h2">
+              <span className="t">revenue · 30d · usd</span>
+              <div className="pills">
+                {['7d', '30d', '90d', '12m'].map((p) => (
+                  <span key={p} className={p === '30d' ? 'on' : ''}>
+                    {p}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <svg viewBox="0 0 600 140" preserveAspectRatio="none" className="chart">
+              <defs>
+                <linearGradient id="dg" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stopColor="var(--adm-green)" stopOpacity="0.3" />
+                  <stop offset="100%" stopColor="var(--adm-green)" stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              {[0, 1, 2, 3].map((i) => (
+                <line
+                  key={i}
+                  x1="0"
+                  x2="600"
+                  y1={10 + i * 35}
+                  y2={10 + i * 35}
+                  stroke="var(--adm-rule)"
+                  strokeDasharray="2 3"
+                />
+              ))}
+              <path
+                d={`M ${spark
+                  .map(
+                    (s, i) =>
+                      `${(i / (spark.length - 1)) * 600},${130 - (s.c / maxR) * 120}`,
+                  )
+                  .join(' L ')}`}
+                fill="none"
+                stroke="var(--adm-green)"
+                strokeWidth="1.5"
+              />
+              <path
+                d={`M 0,130 L ${spark
+                  .map(
+                    (s, i) =>
+                      `${(i / (spark.length - 1)) * 600},${130 - (s.c / maxR) * 120}`,
+                  )
+                  .join(' L ')} L 600,130 Z`}
+                fill="url(#dg)"
+              />
+              {spark.map((s, i) => {
+                const x = (i / (spark.length - 1)) * 600;
+                const y = 130 - (s.c / maxR) * 120;
+                const isLast = i === spark.length - 1;
+                return (
+                  <circle
+                    key={i}
+                    cx={x}
+                    cy={y}
+                    r={isLast ? 3 : 1.5}
+                    fill="var(--adm-green)"
+                  />
+                );
+              })}
+            </svg>
+            <div className="axis">
+              <span>{firstLabel}</span>
+              <span>{midLabel}</span>
+              <span>{lastLabel}</span>
             </div>
           </div>
 

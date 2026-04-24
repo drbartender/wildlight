@@ -1926,3 +1926,44 @@
 .wl-adm-kpi-d.alert .v { color: var(--adm-red); }
 .wl-adm-kpi-d.alert .d { color: var(--adm-red); }
 
+/* Dashboard revenue chart — Atelier default, Darkroom replaces */
+.wl-adm-revenue-atelier  { display: block; }
+.wl-adm-revenue-darkroom { display: none; }
+.wl-admin-surface[data-theme='dark'] .wl-adm-revenue-atelier  { display: none; }
+.wl-admin-surface[data-theme='dark'] .wl-adm-revenue-darkroom { display: block; }
+
+.wl-adm-revenue-darkroom {
+  padding: 14px;
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
+}
+.wl-adm-revenue-darkroom .h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.wl-adm-revenue-darkroom .t { font-size: 11px; color: var(--adm-ink); }
+.wl-adm-revenue-darkroom .pills {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+  font-size: 10px;
+}
+.wl-adm-revenue-darkroom .pills span {
+  padding: 2px 7px;
+  border-radius: 2px;
+  color: var(--adm-muted);
+}
+.wl-adm-revenue-darkroom .pills span.on {
+  background: var(--adm-panel-2);
+  color: var(--adm-green);
+}
+.wl-adm-revenue-darkroom .chart { width: 100%; height: 140px; margin-top: 4px; }
+.wl-adm-revenue-darkroom .axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--adm-muted);
+  margin-top: 4px;
+}
+
