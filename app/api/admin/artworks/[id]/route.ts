@@ -36,7 +36,15 @@ const Patch = z.object({
   collection_id: z.number().int().nullable().optional(),
   display_order: z.number().int().optional(),
   edition_size: z.number().int().positive().nullable().optional(),
-  image_print_url: z.string().nullable().optional(),
+  // Keys live under `artworks-print/<collection-or-id>/<slug>.<ext>`; enforce
+  // the prefix + sane characters so an admin PATCH can't stash an arbitrary
+  // string (e.g. a URL) that later gets passed to the R2 signer.
+  image_print_url: z
+    .string()
+    .regex(/^artworks-print\/[a-z0-9/_.-]+\.(jpg|jpeg|png|tif|tiff)$/i)
+    .max(300)
+    .nullable()
+    .optional(),
   applyTemplate: z.enum(['fine_art', 'canvas', 'full']).optional(),
 });
 
