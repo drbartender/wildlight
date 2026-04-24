@@ -9,10 +9,21 @@ export async function GET(
 ) {
   await requireAdmin();
   const { id } = await ctx.params;
-  const [o, items] = await Promise.all([
+  const [o, items, events] = await Promise.all([
     pool.query('SELECT * FROM orders WHERE id = $1', [id]),
     pool.query('SELECT * FROM order_items WHERE order_id = $1', [id]),
+    pool.query(
+      `SELECT id, type, who, payload, created_at
+       FROM order_events
+       WHERE order_id = $1
+       ORDER BY created_at ASC, id ASC`,
+      [id],
+    ),
   ]);
   if (!o.rowCount) return NextResponse.json({ error: 'not found' }, { status: 404 });
-  return NextResponse.json({ order: o.rows[0], items: items.rows });
+  return NextResponse.json({
+    order: o.rows[0],
+    items: items.rows,
+    events: events.rows,
+  });
 }
