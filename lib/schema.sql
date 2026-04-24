@@ -192,6 +192,24 @@ CREATE TABLE IF NOT EXISTS broadcast_log (
 CREATE INDEX IF NOT EXISTS idx_broadcast_log_sent_at
   ON broadcast_log(sent_at DESC);
 
+-- Review round: supporting indexes for hot queries added in this release.
+-- pingWebhooks() in lib/integration-health.ts runs every 60s once admin
+-- is visible — without this it seq-scans as webhook_events grows.
+CREATE INDEX IF NOT EXISTS idx_webhook_events_errored
+  ON webhook_events(created_at DESC)
+  WHERE error IS NOT NULL;
+
+-- Dashboard top-artworks query in app/admin/page.tsx joins
+-- order_items → orders → artworks on (artwork_snapshot->>'slug').
+CREATE INDEX IF NOT EXISTS idx_order_items_artwork_slug
+  ON order_items(((artwork_snapshot->>'slug')));
+
+-- order_items.order_id FK has no supporting index by default on SERIAL —
+-- add one so both the dashboard aggregation and order_items.order_id
+-- lookups stay efficient.
+CREATE INDEX IF NOT EXISTS idx_order_items_order
+  ON order_items(order_id);
+
 -- Order events (append-only lifecycle ledger) — Spec 3 --------------
 CREATE TABLE IF NOT EXISTS order_events (
   id          SERIAL PRIMARY KEY,
@@ -204,6 +222,13 @@ CREATE TABLE IF NOT EXISTS order_events (
 
 CREATE INDEX IF NOT EXISTS idx_order_events_order_created
   ON order_events(order_id, created_at);
+
+-- Dedupe the refunded event across the admin refund route and Stripe's
+-- charge.refunded webhook. Partial unique index → `INSERT … ON CONFLICT
+-- DO NOTHING` on the second writer wins the race.
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_order_events_refunded
+  ON order_events(order_id)
+  WHERE type = 'refunded';
 
 ALTER TABLE order_events DROP CONSTRAINT IF EXISTS order_events_type_chk;
 ALTER TABLE order_events ADD CONSTRAINT order_events_type_chk CHECK (type IN (
@@ -224,6 +249,10 @@ ALTER TABLE order_events ADD CONSTRAINT order_events_who_chk CHECK (who IN (
 
 -- Backfill order_events from existing orders. Each statement is guarded
 -- by NOT EXISTS so the script is safe to re-run.
+-- Historic rows collapse all lifecycle events onto o.updated_at (we don't
+-- have per-event timestamps for pre-ledger orders); the `ORDER BY
+-- created_at ASC, id ASC` at read time uses id as the tiebreaker so the
+-- timeline keeps insertion order within a collapsed clump.
 INSERT INTO order_events (order_id, type, who, payload, created_at)
 SELECT o.id, 'placed', 'customer', '{}'::jsonb, o.created_at FROM orders o
 WHERE NOT EXISTS (
