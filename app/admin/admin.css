@@ -651,6 +651,29 @@
 .wl-adm-pill[data-status='needs_review'] .dot {
   background: var(--adm-red);
 }
+.wl-adm-pill[data-status='draft'],
+.wl-adm-pill[data-status='retired'],
+.wl-adm-pill[data-status='refunded'],
+.wl-adm-pill[data-status='canceled'],
+.wl-adm-pill[data-status='unsub'] {
+  background: var(--adm-chip-track);
+  color: var(--adm-ink-2);
+}
+.wl-adm-pill[data-status='draft'] .dot,
+.wl-adm-pill[data-status='retired'] .dot,
+.wl-adm-pill[data-status='refunded'] .dot,
+.wl-adm-pill[data-status='canceled'] .dot,
+.wl-adm-pill[data-status='unsub'] .dot {
+  background: var(--adm-muted);
+}
+.wl-admin-surface[data-theme='dark'] .wl-adm-pill[data-status='draft'],
+.wl-admin-surface[data-theme='dark'] .wl-adm-pill[data-status='retired'],
+.wl-admin-surface[data-theme='dark'] .wl-adm-pill[data-status='refunded'],
+.wl-admin-surface[data-theme='dark'] .wl-adm-pill[data-status='canceled'],
+.wl-admin-surface[data-theme='dark'] .wl-adm-pill[data-status='unsub'] {
+  background: var(--adm-panel-2);
+  color: var(--adm-muted);
+}
 
 /* ─────── FIELD (form input) ─────── */
 
