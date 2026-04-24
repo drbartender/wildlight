@@ -119,15 +119,62 @@ export async function sendContactMessage(
   });
 }
 
-export async function sendBroadcast(subject: string, html: string, toEmails: string[]) {
-  if (!toEmails.length) return [];
+export interface BroadcastRecipient {
+  id: number;
+  email: string;
+}
+
+/**
+ * Send to confirmed subscribers with per-recipient unsubscribe footers +
+ * List-Unsubscribe / List-Unsubscribe-Post headers (RFC 8058 one-click).
+ * Required for CAN-SPAM / GDPR compliance before any marketing broadcast.
+ *
+ * `plainEmails` mode exists only for test-sends to arbitrary addresses that
+ * aren't in the subscribers table — those skip the footer since there's no
+ * real subscriber row to unsubscribe.
+ */
+export async function sendBroadcast(
+  subject: string,
+  html: string,
+  recipients: BroadcastRecipient[] | string[],
+  opts: { siteUrl: string; plainEmails?: boolean } = { siteUrl: '' },
+) {
+  if (!recipients.length) return [];
+  // Lazy-require to keep circular imports at bay if this lib ever ends up
+  // imported from unsubscribe-token.
+  const { unsubUrl } = await import('./unsubscribe-token');
   const r = resend();
   const results = [];
   const batchSize = 50;
-  for (let i = 0; i < toEmails.length; i += batchSize) {
-    const chunk = toEmails.slice(i, i + batchSize);
-    const batch = chunk.map((to) => ({ from: BROADCAST_FROM, to, subject, html }));
-    results.push(await r.batch.send(batch));
+
+  const messages = recipients.map((rec) => {
+    const to = typeof rec === 'string' ? rec : rec.email;
+    if (typeof rec === 'string' || opts.plainEmails) {
+      // Test-send path: no footer, no headers (no real subscriber row).
+      return { from: BROADCAST_FROM, to, subject, html };
+    }
+    const u = unsubUrl(rec.id, rec.email, opts.siteUrl);
+    const footer = `
+<hr style="margin:32px 0 16px;border:none;border-top:1px solid #e5e2dc;"/>
+<p style="font-family:Georgia,serif;color:#777;font-size:12px;text-align:center;">
+  You're receiving this because you subscribed to Wildlight Imagery.
+  <a href="${u}" style="color:#777;">Unsubscribe</a>.
+</p>`;
+    return {
+      from: BROADCAST_FROM,
+      to,
+      subject,
+      html: html + footer,
+      headers: {
+        'List-Unsubscribe': `<${u}>`,
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+      },
+    };
+  });
+
+  for (let i = 0; i < messages.length; i += batchSize) {
+    const chunk = messages.slice(i, i + batchSize);
+    results.push(await r.batch.send(chunk));
   }
   return results;
 }
