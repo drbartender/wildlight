@@ -2042,3 +2042,22 @@
   color: var(--adm-green);
 }
 
+/* ─────── SETTINGS — Atelier default / Darkroom panels ─────── */
+
+.wl-adm-settings-atelier  { display: block; }
+.wl-adm-settings-darkroom { display: none; }
+.wl-admin-surface[data-theme='dark'] .wl-adm-settings-atelier  { display: none; }
+.wl-admin-surface[data-theme='dark'] .wl-adm-settings-darkroom { display: block; }
+
+.wl-adm-settings-panel-h {
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: var(--adm-ink);
+  margin-bottom: 10px;
+}
+.wl-adm-settings-panel-note {
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
+  color: var(--adm-muted);
+  font-size: 10px;
+}
+
