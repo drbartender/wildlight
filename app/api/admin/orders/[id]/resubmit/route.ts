@@ -26,12 +26,28 @@ export async function POST(
   await requireAdmin();
   const { id } = await ctx.params;
 
-  const or = await pool.query<OrderRow>(
-    `SELECT id, customer_email, customer_name, shipping_address FROM orders WHERE id = $1`,
+  // Atomic state guard — only accept the resubmit if the order is currently
+  // in `needs_review` AND has no `printful_order_id`. Prevents double-submission
+  // when an admin double-clicks the button or the page is stale.
+  const claim = await pool.query<OrderRow>(
+    `UPDATE orders
+     SET status = 'resubmitting', updated_at = NOW()
+     WHERE id = $1 AND status = 'needs_review' AND printful_order_id IS NULL
+     RETURNING id, customer_email, customer_name, shipping_address`,
     [id],
   );
-  if (!or.rowCount) return NextResponse.json({ error: 'not found' }, { status: 404 });
-  const o = or.rows[0];
+  if (!claim.rowCount) {
+    const row = await pool.query<{ status: string }>(
+      'SELECT status FROM orders WHERE id = $1',
+      [id],
+    );
+    if (!row.rowCount) return NextResponse.json({ error: 'not found' }, { status: 404 });
+    return NextResponse.json(
+      { error: `order is in state "${row.rows[0].status}"; only needs_review orders can be resubmitted` },
+      { status: 409 },
+    );
+  }
+  const o = claim.rows[0];
 
   const items = await pool.query<ItemRow>(
     `SELECT v.printful_sync_variant_id, a.image_print_url, oi.quantity
@@ -61,12 +77,21 @@ export async function POST(
 
   const addr = o.shipping_address || {};
   try {
-    // Sign each private R2 object so Printful can download the print file.
+    // Sign each distinct private R2 key ONCE — customers who buy multiple
+    // sizes of the same artwork would otherwise cause duplicate sign calls.
+    const signCache = new Map<string, Promise<string>>();
+    const sign = (key: string) => {
+      const existing = signCache.get(key);
+      if (existing) return existing;
+      const p = signedPrivateUrl(key, 7 * 24 * 3600);
+      signCache.set(key, p);
+      return p;
+    };
     const pfItems = await Promise.all(
       items.rows.map(async (r) => ({
         sync_variant_id: r.printful_sync_variant_id!,
         quantity: r.quantity,
-        files: [{ url: await signedPrivateUrl(r.image_print_url!, 7 * 24 * 3600) }],
+        files: [{ url: await sign(r.image_print_url!) }],
       })),
     );
     const pf = await printful.createOrder({
@@ -91,6 +116,12 @@ export async function POST(
     return NextResponse.json({ ok: true });
   } catch (err) {
     logger.error('resubmit failed', err, { orderId: id });
+    // Roll back intermediate `resubmitting` state so admin can retry.
+    await pool.query(
+      `UPDATE orders SET status = 'needs_review', notes = $2, updated_at = NOW()
+       WHERE id = $1 AND status = 'resubmitting'`,
+      [id, `resubmit failed: ${err instanceof Error ? err.message : String(err)}`],
+    );
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },
       { status: 500 },

@@ -107,6 +107,18 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   );
   const byId = new Map<number, VariantInfo>(variants.map((v) => [v.id, v]));
 
+  // Sanity-check: the sum of our DB prices × quantities should match what
+  // Stripe says the customer paid for the subtotal. If it doesn't, someone
+  // edited a variant price between checkout session creation and webhook
+  // delivery — the order is still valid (Stripe's session froze the price)
+  // but our `price_cents_snapshot` would disagree with what the customer
+  // actually paid. Flag for operator review.
+  const dbSubtotal = cart.reduce((sum, l) => {
+    const v = byId.get(l.variantId);
+    return sum + (v ? v.price_cents * l.quantity : 0);
+  }, 0);
+  const priceDrift = dbSubtotal !== (session.amount_subtotal || 0);
+
   const addr = session.customer_details?.address;
   let orderId = 0;
   let orderToken = '';
@@ -167,13 +179,24 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
 
   if (!orderId) return;
 
-  // Submit to Printful (fail-closed: any error => needs_review)
-  const missingPrintFiles = cart.some((l) => !byId.get(l.variantId)?.image_print_url);
-  const missingSyncVariants = cart.some(
-    (l) => !byId.get(l.variantId)?.printful_sync_variant_id,
-  );
-
-  if (missingPrintFiles) {
+  // If price drift was detected above, hold the order for operator review
+  // instead of auto-fulfilling. Stripe already took the payment, so the
+  // customer is fine — we want a human to reconcile the price mismatch.
+  if (priceDrift) {
+    await pool.query(
+      `UPDATE orders SET status='needs_review', notes=$2, updated_at=NOW() WHERE id=$1`,
+      [
+        orderId,
+        `price drift: db subtotal ${dbSubtotal} vs stripe amount_subtotal ${
+          session.amount_subtotal || 0
+        } — verify pricing before fulfilling`,
+      ],
+    );
+    await sendNeedsReviewAlert(
+      orderId,
+      'price drift between DB and Stripe checkout — review before fulfilling',
+    );
+  } else if (cart.some((l) => !byId.get(l.variantId)?.image_print_url)) {
     await pool.query(
       `UPDATE orders SET status='needs_review', notes=$2, updated_at=NOW() WHERE id=$1`,
       [orderId, 'missing image_print_url on one or more artworks'],
@@ -182,7 +205,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
       orderId,
       'image_print_url missing — upload print file in /admin/artworks/<id>',
     );
-  } else if (missingSyncVariants) {
+  } else if (cart.some((l) => !byId.get(l.variantId)?.printful_sync_variant_id)) {
     await pool.query(
       `UPDATE orders SET status='needs_review', notes=$2, updated_at=NOW() WHERE id=$1`,
       [orderId, 'printful_sync_variant_id missing on one or more variants'],
@@ -193,16 +216,24 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     );
   } else {
     try {
-      // Printful needs to download the print file — sign each private R2 key
-      // with a window long enough to outlive Printful's fulfillment retries.
+      // Printful needs to download the print file — sign each DISTINCT private
+      // R2 key once (a customer buying multiple sizes of the same artwork
+      // would otherwise sign the same key repeatedly).
+      const signCache = new Map<string, Promise<string>>();
+      const sign = (key: string) => {
+        const existing = signCache.get(key);
+        if (existing) return existing;
+        const p = signedPrivateUrl(key, 7 * 24 * 3600);
+        signCache.set(key, p);
+        return p;
+      };
       const pfItems = await Promise.all(
         cart.map(async (l) => {
           const v = byId.get(l.variantId)!;
-          const signedUrl = await signedPrivateUrl(v.image_print_url!, 7 * 24 * 3600);
           return {
             sync_variant_id: v.printful_sync_variant_id!,
             quantity: l.quantity,
-            files: [{ url: signedUrl }],
+            files: [{ url: await sign(v.image_print_url!) }],
           };
         }),
       );
