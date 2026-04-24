@@ -110,8 +110,15 @@ export function AdminSidebar({ needsReview, email }: Props) {
   return (
     <aside className="wl-adm-sidebar">
       <div className="wl-adm-sidebar-head">
-        <div className="wordmark">Wildlight</div>
-        <div className="sub">Imagery · Studio</div>
+        <div className="atelier-head">
+          <div className="wordmark">Wildlight</div>
+          <div className="sub">Imagery · Studio</div>
+        </div>
+        <div className="darkroom-head">
+          <div className="icon" aria-hidden="true">W</div>
+          <div className="wordmark">wildlight</div>
+          <div className="version">v2.4</div>
+        </div>
       </div>
 
       <nav className="wl-adm-sidebar-nav">
