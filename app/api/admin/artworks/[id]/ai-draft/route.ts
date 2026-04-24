@@ -17,6 +17,21 @@ function isAllowedImageHost(url: string): boolean {
   }
 }
 
+/**
+ * Fetch just enough bytes to read EXIF. Most JPEGs put DateTimeOriginal + GPS
+ * within the first ~64 KB; 256 KB is a safe ceiling. If the server doesn't
+ * honor Range, it returns 200 with the full body and we still work.
+ */
+async function fetchForExif(url: string): Promise<Buffer | null> {
+  try {
+    const r = await fetch(url, { headers: { Range: 'bytes=0-262143' } });
+    if (!r.ok && r.status !== 206) return null;
+    return Buffer.from(await r.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
@@ -48,27 +63,16 @@ export async function POST(
     );
   }
 
-  let buf: Buffer;
-  try {
-    const r = await fetch(a.image_web_url);
-    if (!r.ok) throw new Error(`image fetch ${r.status}`);
-    buf = Buffer.from(await r.arrayBuffer());
-  } catch (err) {
-    return NextResponse.json(
-      { error: 'image fetch failed', detail: String(err) },
-      { status: 502 },
-    );
-  }
-
-  const mime = a.image_web_url.toLowerCase().endsWith('.png')
-    ? 'image/png'
-    : 'image/jpeg';
-  const { year_shot, gps } = await readExifFromBuffer(buf);
+  // EXIF is read locally from a small byte range. AI-draft reads the image
+  // via Anthropic's URL source (no full buffer through this route).
+  const buf = await fetchForExif(a.image_web_url);
+  const { year_shot, gps } = buf
+    ? await readExifFromBuffer(buf)
+    : { year_shot: null, gps: null };
 
   try {
     const draft = await draftArtworkMetadata({
-      imageBuf: buf,
-      mime,
+      imageUrl: a.image_web_url,
       title: a.title,
       collectionSlug: a.collection_slug,
       gps,
@@ -80,9 +84,15 @@ export async function POST(
       confidence: draft.confidence,
     });
   } catch (err) {
+    // Map rate-limit / transient upstream errors to 429 so the UI can
+    // distinguish them from other failures.
+    const status =
+      err instanceof Error && /status (?:429|529)/i.test(err.message)
+        ? 429
+        : 502;
     return NextResponse.json(
       { error: 'ai-draft failed', detail: String(err) },
-      { status: 502 },
+      { status },
     );
   }
 }

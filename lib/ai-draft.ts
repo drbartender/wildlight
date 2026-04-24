@@ -4,8 +4,8 @@ const MODEL = 'claude-sonnet-4-6';
 const MAX_NOTE_CHARS = 180;
 
 export interface DraftInput {
-  imageBuf: Buffer;
-  mime: 'image/jpeg' | 'image/png';
+  /** Public URL of the image. Must be reachable by Anthropic (R2 public, not signed). */
+  imageUrl: string;
   title: string;
   collectionSlug: string | null;
   gps: { lat: number; lon: number } | null;
@@ -27,8 +27,37 @@ Rules:
 - location: "City, State" (US) or "City, Country" (non-US). Use null when genuinely ambiguous. If GPS coordinates are provided, the location must be consistent with them.
 - confidence: "low" if you are guessing about location or the image is hard to read; otherwise "high".
 
-Respond with a single strict JSON object and nothing else:
-{"location": "City, State" | null, "artist_note": "...", "confidence": "high" | "low"}`;
+Return your answer by calling the draft_metadata tool exactly once.`;
+
+// Tool schema — structured output. Anthropic validates this on the model side
+// and returns the result as a typed tool_use block, eliminating brace-match
+// JSON extraction from prose.
+const DRAFT_TOOL = {
+  name: 'draft_metadata',
+  description:
+    'Record the location, artist_note, and confidence for the photograph.',
+  input_schema: {
+    type: 'object' as const,
+    required: ['artist_note', 'confidence'],
+    properties: {
+      location: {
+        type: ['string', 'null'] as const,
+        description:
+          'City, State (US) or City, Country (non-US); null when genuinely ambiguous.',
+      },
+      artist_note: {
+        type: 'string' as const,
+        maxLength: MAX_NOTE_CHARS,
+        description:
+          "At most 180 characters, 1-2 sentences, first-person narrator voice.",
+      },
+      confidence: {
+        type: 'string' as const,
+        enum: ['high', 'low'] as const,
+      },
+    },
+  },
+};
 
 /**
  * Strip angle brackets so an admin-controlled title cannot close the
@@ -54,7 +83,7 @@ function userPreamble(input: DraftInput): string {
 }
 
 function validate(raw: unknown): DraftResult {
-  if (!raw || typeof raw !== 'object') throw new Error('non-object response');
+  if (!raw || typeof raw !== 'object') throw new Error('non-object tool input');
   const r = raw as Record<string, unknown>;
   const loc = r.location;
   const note = r.artist_note;
@@ -67,11 +96,24 @@ function validate(raw: unknown): DraftResult {
   return { location, artist_note: note, confidence: conf };
 }
 
-export async function draftArtworkMetadata(input: DraftInput): Promise<DraftResult> {
+/**
+ * Classify an error from the Anthropic SDK as retryable. Transient upstream
+ * failures (rate limits, 5xx, overload) are worth another shot; shape
+ * violations from the model are not.
+ */
+function isRetryable(err: unknown): boolean {
+  if (err instanceof Anthropic.APIError) {
+    return err.status === 429 || err.status === 529 || err.status >= 500;
+  }
+  return false;
+}
+
+export async function draftArtworkMetadata(
+  input: DraftInput,
+): Promise<DraftResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY missing');
   const client = new Anthropic({ apiKey });
-  const image = input.imageBuf.toString('base64');
 
   let lastErr: unknown = null;
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -79,36 +121,42 @@ export async function draftArtworkMetadata(input: DraftInput): Promise<DraftResu
       const res = await client.messages.create({
         model: MODEL,
         max_tokens: 512,
-        system: SYSTEM,
+        // Cache the static system prompt so a bulk run (~50 sequential calls
+        // within the 5-minute TTL) pays for it once. Requires the array form.
+        system: [
+          {
+            type: 'text',
+            text: SYSTEM,
+            cache_control: { type: 'ephemeral' },
+          },
+        ],
+        tools: [DRAFT_TOOL],
+        tool_choice: { type: 'tool', name: DRAFT_TOOL.name },
         messages: [
           {
             role: 'user',
             content: [
               {
                 type: 'image',
-                source: {
-                  type: 'base64',
-                  media_type: input.mime,
-                  data: image,
-                },
+                source: { type: 'url', url: input.imageUrl },
               },
               { type: 'text', text: userPreamble(input) },
             ],
           },
         ],
       });
-      const text = res.content
-        .flatMap((b) => (b.type === 'text' ? [b.text] : []))
-        .join('\n')
-        .trim();
-      const firstBrace = text.indexOf('{');
-      const lastBrace = text.lastIndexOf('}');
-      if (firstBrace < 0 || lastBrace < firstBrace)
-        throw new Error('no JSON in response');
-      const parsed = JSON.parse(text.slice(firstBrace, lastBrace + 1));
-      return validate(parsed);
+
+      const toolBlock = res.content.find(
+        (b): b is Anthropic.ToolUseBlock =>
+          b.type === 'tool_use' && b.name === DRAFT_TOOL.name,
+      );
+      if (!toolBlock) throw new Error('no tool_use response');
+      return validate(toolBlock.input);
     } catch (err) {
       lastErr = err;
+      // Only retry transient upstream failures. A shape error from the model
+      // won't self-correct without a corrective turn, so fail fast.
+      if (!isRetryable(err)) break;
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error('ai-draft failed');
