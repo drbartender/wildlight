@@ -1831,3 +1831,38 @@ html[data-mood='ink'] .wl-surface::after {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Shop — order status badge (used on /orders/[token]). */
+.wl-status-badge {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 8px;
+  background: var(--paper-2, #ebe4d3);
+  color: var(--ink-3, #555);
+  font-family: var(--f-mono), ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  border-radius: 2px;
+}
+.wl-status-badge[data-status='paid'],
+.wl-status-badge[data-status='submitted'],
+.wl-status-badge[data-status='fulfilled'] {
+  background: rgba(42, 58, 42, 0.08);
+  color: #2a3a2a;
+}
+.wl-status-badge[data-status='shipped'],
+.wl-status-badge[data-status='delivered'] {
+  background: rgba(42, 58, 42, 0.12);
+  color: #1e2a1e;
+}
+.wl-status-badge[data-status='needs_review'] {
+  background: rgba(160, 60, 50, 0.1);
+  color: #9a3c32;
+}
+.wl-status-badge[data-status='refunded'],
+.wl-status-badge[data-status='refunding'],
+.wl-status-badge[data-status='canceled'] {
+  background: var(--paper-2, #ebe4d3);
+  color: var(--ink-4, #8a8474);
+}
