@@ -79,15 +79,14 @@ export async function POST(
     return NextResponse.json({ ok: true });
   } catch (err) {
     logger.error('refund failed', err, { orderId: id });
-    // Roll back the intermediate state so admin can retry.
+    // Roll back the intermediate state so admin can retry. Keep the
+    // upstream error text in `notes` (admin-visible), but don't surface
+    // Stripe/Printful internals to the browser response body.
     await pool.query(
       `UPDATE orders SET status = 'needs_review', notes = $2, updated_at = NOW()
        WHERE id = $1 AND status = 'refunding'`,
       [id, `refund failed: ${err instanceof Error ? err.message : String(err)}`],
     );
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : String(err) },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: 'refund failed' }, { status: 500 });
   }
 }

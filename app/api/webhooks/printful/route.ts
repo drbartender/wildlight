@@ -147,15 +147,19 @@ export async function POST(req: Request) {
       event.type === 'order_failed' ||
       event.type === 'order_put_hold'
     ) {
+      // event.type is a known Printful enum today, but if Printful ever
+      // starts sending a free-form reason we don't want it bypassing the
+      // 500-char note cap that admin-authored notes respect.
+      const reason = String(event.type).slice(0, 500);
       await withTransaction(async (client) => {
         await client.query(
           `UPDATE orders SET status='needs_review', notes=$2, updated_at=NOW() WHERE id = $1`,
-          [ourId, event.type],
+          [ourId, reason],
         );
         await client.query(
           `INSERT INTO order_events (order_id, type, who, payload)
            VALUES ($1, 'printful_flagged', 'printful', $2::jsonb)`,
-          [ourId, JSON.stringify({ reason: event.type })],
+          [ourId, JSON.stringify({ reason })],
         );
       });
     }

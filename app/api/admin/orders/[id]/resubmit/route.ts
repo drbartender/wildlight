@@ -148,6 +148,8 @@ export async function POST(
         [id, JSON.stringify({ outcome: 'failed', reason })],
       );
     });
-    return NextResponse.json({ error: reason }, { status: 500 });
+    // Don't leak Printful internals to the browser; the operator sees
+    // the full reason in orders.notes and the server log.
+    return NextResponse.json({ error: 'resubmit failed' }, { status: 500 });
   }
 }

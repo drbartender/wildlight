@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { pool, withTransaction } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 import { sendBroadcast } from '@/lib/email';
+import { logger } from '@/lib/logger';
 
 const Body = z.object({
   subject: z.string().min(1).max(200),
@@ -80,6 +81,7 @@ export async function POST(req: Request) {
        WHERE id = $1 AND recipient_count = 0`,
       [logId],
     );
-    throw err;
+    logger.error('broadcast send failed', err, { logId });
+    return NextResponse.json({ error: 'send failed' }, { status: 502 });
   }
 }

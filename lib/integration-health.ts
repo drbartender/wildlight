@@ -15,11 +15,11 @@ export interface HealthReport {
   webhooks: HealthPing;
 }
 
-// Module-scope cache shared across all admin requests on this server
-// instance. Gate is purely the requireAdmin() check in the consuming
-// routes — if checkHealth is ever called from an unauthenticated path,
-// the cached notes (e.g. Resend verified-domain, Printful store name)
-// would leak. All current callers are admin-gated.
+// @security:admin-only — checkHealth caches provider-detail strings
+// (Resend verified-domain, Printful store name) at module scope. All
+// callers MUST be admin-gated; see app/api/admin/integrations/health/route.ts
+// and app/admin/settings/page.tsx. Adding an unauthenticated caller
+// would leak those notes.
 let cache: { at: number; value: HealthReport } | null = null;
 const TTL_MS = 60_000;
 const PING_TIMEOUT_MS = 3_000;

@@ -9,7 +9,10 @@ interface Row {
 
 // `image_web_url` isn't schema-constrained to a prefix the way
 // `image_print_url` is, so a hypothetical bad PATCH could seed an
-// internal URL. Accept only the R2-public host or common CDN hostnames.
+// internal URL. Accept only the R2-public host or our own domains.
+// Bare domains match exactly or as strict subdomains — bare
+// `wildlight.co` matches `wildlight.co` and `cdn.wildlight.co` but
+// NOT `evilwildlight.co`.
 const ALLOWED_HOST_SUFFIXES = [
   '.r2.dev',
   '.r2.cloudflarestorage.com',
@@ -24,9 +27,10 @@ function allowedHost(url: string): boolean {
   } catch {
     return false;
   }
-  return ALLOWED_HOST_SUFFIXES.some(
-    (s) => host === s.replace(/^\./, '') || host.endsWith(s),
-  );
+  return ALLOWED_HOST_SUFFIXES.some((s) => {
+    if (s.startsWith('.')) return host.endsWith(s);
+    return host === s || host.endsWith('.' + s);
+  });
 }
 
 async function main() {
