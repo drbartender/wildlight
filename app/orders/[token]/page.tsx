@@ -1,7 +1,29 @@
 import Link from 'next/link';
 import { pool } from '@/lib/db';
 import { formatUSD } from '@/lib/money';
-import { StatusPill } from '@/components/admin/StatusPill';
+
+function OrderStatus({ status }: { status: string }) {
+  // Simple customer-facing status label — mono caps, no color coding. The
+  // admin pill is scoped to .wl-admin-surface; this page isn't that.
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        marginLeft: 10,
+        padding: '2px 8px',
+        background: 'var(--paper-2, #ebe4d3)',
+        color: 'var(--ink-3, #555)',
+        fontFamily: 'var(--f-mono), ui-monospace, Menlo, monospace',
+        fontSize: 11,
+        letterSpacing: '0.14em',
+        textTransform: 'uppercase',
+        borderRadius: 2,
+      }}
+    >
+      {status.replace('_', ' ')}
+    </span>
+  );
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -92,7 +114,7 @@ export default async function OrderPage({
     <section className="container" style={{ padding: '40px 0', maxWidth: 720, fontFamily: 'Georgia, serif' }}>
       {success && <p style={{ color: 'var(--muted)' }}>Thank you — your order has been received.</p>}
       <h1 style={{ fontWeight: 400 }}>
-        Order {order.public_token.slice(0, 8)} <StatusPill status={order.status} />
+        Order {order.public_token.slice(0, 8)} <OrderStatus status={order.status} />
       </h1>
       <p style={{ color: 'var(--muted)', fontSize: 13 }}>
         Placed {new Date(order.created_at).toLocaleString()}

@@ -7,6 +7,7 @@ import {
   Inter,
   JetBrains_Mono,
   Caveat,
+  Libre_Caslon_Text,
 } from 'next/font/google';
 
 const display = Instrument_Serif({
@@ -46,6 +47,16 @@ const hand = Caveat({
   display: 'swap',
 });
 
+// Admin-only serif (Atelier theme). Loaded at root so admin routes can use it
+// via the --f-caslon CSS variable; shop routes don't reference it.
+const caslon = Libre_Caslon_Text({
+  subsets: ['latin'],
+  weight: ['400', '700'],
+  style: ['normal', 'italic'],
+  variable: '--f-caslon',
+  display: 'swap',
+});
+
 export const metadata: Metadata = {
   title: 'Wildlight Imagery — Fine art by Dan Raby',
   description:
@@ -65,6 +76,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     ui.variable,
     mono.variable,
     hand.variable,
+    caslon.variable,
   ].join(' ');
 
   return (

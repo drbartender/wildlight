@@ -1,4 +1,5 @@
 'use client';
+
 import { formatUSD } from '@/lib/money';
 
 export interface VRow {
@@ -12,33 +13,49 @@ export interface VRow {
   printful_sync_variant_id: number | null;
 }
 
+const TYPE_LABEL: Record<string, string> = {
+  fine_art: 'Fine art',
+  canvas: 'Canvas',
+  framed: 'Framed',
+  metal: 'Metal',
+};
+
 export function VariantTable({ variants }: { variants: VRow[] }) {
   if (!variants.length) return null;
   return (
-    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+    <table className="wl-adm-table" style={{ fontSize: 12 }}>
       <thead>
-        <tr style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>
-          <th style={{ padding: 8 }}>Type</th>
-          <th style={{ padding: 8 }}>Size</th>
-          <th style={{ padding: 8 }}>Finish</th>
-          <th style={{ padding: 8 }}>Price</th>
-          <th style={{ padding: 8 }}>Cost</th>
-          <th style={{ padding: 8 }}>Printful</th>
-          <th style={{ padding: 8 }}>Active</th>
+        <tr>
+          <th>Type</th>
+          <th>Size</th>
+          <th>Finish</th>
+          <th className="right">Cost</th>
+          <th className="right">Price</th>
+          <th>Printful ID</th>
+          <th style={{ textAlign: 'center' }}>Active</th>
         </tr>
       </thead>
       <tbody>
         {variants.map((v) => (
-          <tr key={v.id} style={{ borderBottom: '1px solid #eee' }}>
-            <td style={{ padding: 8, textTransform: 'capitalize' }}>{v.type}</td>
-            <td style={{ padding: 8 }}>{v.size}</td>
-            <td style={{ padding: 8 }}>{v.finish || '—'}</td>
-            <td style={{ padding: 8 }}>{formatUSD(v.price_cents)}</td>
-            <td style={{ padding: 8, color: '#777' }}>{formatUSD(v.cost_cents)}</td>
-            <td style={{ padding: 8, color: '#777' }}>
+          <tr key={v.id}>
+            <td>{TYPE_LABEL[v.type] ?? v.type}</td>
+            <td className="mono">{v.size}</td>
+            <td>{v.finish || '—'}</td>
+            <td className="right mono muted">{formatUSD(v.cost_cents)}</td>
+            <td className="right mono">{formatUSD(v.price_cents)}</td>
+            <td className="mono muted">
               {v.printful_sync_variant_id || 'not synced'}
             </td>
-            <td style={{ padding: 8 }}>{v.active ? '✓' : '—'}</td>
+            <td
+              style={{
+                textAlign: 'center',
+                color: v.active
+                  ? 'var(--adm-green)'
+                  : 'var(--adm-muted)',
+              }}
+            >
+              {v.active ? '✓' : '—'}
+            </td>
           </tr>
         ))}
       </tbody>

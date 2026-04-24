@@ -21,10 +21,15 @@ export async function GET(req: Request) {
   }
   const where = clauses.length ? 'WHERE ' + clauses.join(' AND ') : '';
   const { rows } = await pool.query(
-    `SELECT a.id, a.slug, a.title, a.status, a.image_web_url, a.updated_at,
+    `SELECT a.id, a.slug, a.title, a.status, a.image_web_url, a.image_print_url,
+            a.updated_at,
             c.title AS collection_title, c.slug AS collection_slug,
             (SELECT COUNT(*)::int FROM artwork_variants v
-              WHERE v.artwork_id = a.id AND v.active) AS variant_count
+              WHERE v.artwork_id = a.id AND v.active) AS variant_count,
+            (SELECT MIN(price_cents) FROM artwork_variants v
+              WHERE v.artwork_id = a.id AND v.active) AS min_price_cents,
+            (SELECT MAX(price_cents) FROM artwork_variants v
+              WHERE v.artwork_id = a.id AND v.active) AS max_price_cents
      FROM artworks a
      LEFT JOIN collections c ON c.id = a.collection_id
      ${where}

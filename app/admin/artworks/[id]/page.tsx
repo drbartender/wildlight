@@ -1,9 +1,12 @@
 'use client';
+
 import { useCallback, useEffect, useState, use } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { VariantTable, type VRow } from '@/components/admin/VariantTable';
-import { StatusPill } from '@/components/admin/StatusPill';
+import { AdminPill } from '@/components/admin/AdminPill';
+import { AdminTopBar } from '@/components/admin/AdminTopBar';
+import { AdminField } from '@/components/admin/AdminField';
 
 interface Artwork {
   id: number;
@@ -14,6 +17,8 @@ interface Artwork {
   location: string | null;
   image_web_url: string;
   image_print_url: string | null;
+  image_width: number | null;
+  image_height: number | null;
   status: string;
   collection_id: number | null;
   collection_title: string | null;
@@ -55,134 +60,232 @@ export default function ArtworkEditPage({
     setSaving(false);
   }
 
-  if (!data) return <p>Loading…</p>;
+  if (!data) {
+    return (
+      <>
+        <AdminTopBar title="Artwork" subtitle="Catalog" />
+        <div className="wl-adm-page">
+          <p style={{ color: 'var(--adm-muted)' }}>Loading…</p>
+        </div>
+      </>
+    );
+  }
+
   const a = data.artwork;
+  const activeVariants = data.variants.filter((v) => v.active).length;
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '400px 1fr', gap: 32 }}>
-      <div>
-        <div style={{ position: 'relative', aspectRatio: '4/5', background: '#eee' }}>
-          <Image
-            src={a.image_web_url}
-            alt={a.title}
-            fill
-            sizes="400px"
-            style={{ objectFit: 'cover' }}
-          />
-        </div>
-        <p style={{ color: '#777', fontSize: 13, marginTop: 8 }}>
-          Print file:{' '}
-          {a.image_print_url ? (
-            <span style={{ color: '#2a8a5c' }}>uploaded</span>
-          ) : (
-            <span style={{ color: '#b33030' }}>missing (required for fulfillment)</span>
-          )}
-        </p>
-      </div>
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <h1 style={{ margin: 0, fontWeight: 400 }}>{a.title}</h1>
-          <StatusPill status={a.status} />
-        </div>
-        <p style={{ color: '#777', fontSize: 13 }}>
-          <Link href={`/artwork/${a.slug}`} target="_blank" style={{ color: 'inherit' }}>
-            /artwork/{a.slug}
-          </Link>
-        </p>
-        <Field
-          label="Title"
-          value={a.title}
-          onSave={(v) => save({ title: v })}
-        />
-        <Field
-          label="Artist note"
-          value={a.artist_note || ''}
-          multiline
-          onSave={(v) => save({ artist_note: v || null })}
-        />
-        <Field
-          label="Location"
-          value={a.location || ''}
-          onSave={(v) => save({ location: v || null })}
-        />
-        <Field
-          label="Year shot"
-          value={a.year_shot ?? ''}
-          type="number"
-          onSave={(v) => save({ year_shot: v ? Number(v) : null })}
-        />
-        <div style={{ marginTop: 16, fontSize: 14 }}>
-          <strong>Status:</strong>{' '}
-          {['draft', 'published', 'retired']
-            .filter((s) => s !== a.status)
-            .map((s) => (
-              <button
-                key={s}
-                onClick={() => save({ status: s })}
-                style={{ marginLeft: 8 }}
-              >
-                → {s}
-              </button>
-            ))}
-        </div>
-        <h3 style={{ marginTop: 32, fontWeight: 400 }}>Variants</h3>
-        <VariantTable variants={data.variants} />
-        {data.variants.filter((v) => v.active).length === 0 && (
-          <div style={{ marginTop: 12, fontSize: 14 }}>
-            Apply template:
-            {(['fine_art', 'canvas', 'full'] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => save({ applyTemplate: t })}
-                style={{ marginLeft: 8 }}
-              >
-                {t}
-              </button>
-            ))}
+    <>
+      <AdminTopBar title={a.title} subtitle="Artwork" />
+
+      <div className="wl-adm-page">
+        <Link
+          href="/admin/artworks"
+          style={{
+            color: 'var(--adm-muted)',
+            fontSize: 12,
+            marginTop: -12,
+          }}
+        >
+          ← All artworks
+        </Link>
+
+        <div className="wl-adm-art-detail">
+          <div>
+            <div className="wl-adm-art-image-card">
+              <div className="wl-adm-art-image-frame">
+                <Image
+                  src={a.image_web_url}
+                  alt={a.title}
+                  fill
+                  sizes="420px"
+                  style={{ objectFit: 'cover' }}
+                />
+              </div>
+              <div className="wl-adm-art-image-meta">
+                <span>
+                  {a.image_width && a.image_height
+                    ? `image_web · ${a.image_width}×${a.image_height}`
+                    : 'image_web_url'}
+                </span>
+                <span>R2 public</span>
+              </div>
+            </div>
+
+            <div className="wl-adm-print-card">
+              <div className="head">Print file</div>
+              {a.image_print_url ? (
+                <>
+                  <div className="state ok">
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <path d="M20 6L9 17l-5-5" />
+                    </svg>
+                    Uploaded · R2 private
+                  </div>
+                  <div className="path">{a.image_print_url}</div>
+                </>
+              ) : (
+                <div className="state miss">
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 8v5M12 16h.01" />
+                  </svg>
+                  Missing — required for fulfillment.
+                </div>
+              )}
+            </div>
           </div>
-        )}
-        {saving && <p style={{ color: '#777' }}>Saving…</p>}
-      </div>
-    </div>
-  );
-}
 
-function Field({
-  label,
-  value,
-  onSave,
-  multiline,
-  type = 'text',
-}: {
-  label: string;
-  value: string | number;
-  onSave: (v: string) => void;
-  multiline?: boolean;
-  type?: string;
-}) {
-  const [v, setV] = useState(String(value ?? ''));
-  useEffect(() => setV(String(value ?? '')), [value]);
-  return (
-    <div style={{ marginTop: 12 }}>
-      <label style={{ color: '#777', fontSize: 13 }}>{label}</label>
-      <br />
-      {multiline ? (
-        <textarea
-          value={v}
-          onChange={(e) => setV(e.target.value)}
-          onBlur={() => v !== String(value ?? '') && onSave(v)}
-          rows={4}
-          style={{ width: '100%', padding: 6, fontFamily: 'inherit' }}
-        />
-      ) : (
-        <input
-          type={type}
-          value={v}
-          onChange={(e) => setV(e.target.value)}
-          onBlur={() => v !== String(value ?? '') && onSave(v)}
-          style={{ width: '100%', padding: 6, fontFamily: 'inherit' }}
-        />
-      )}
-    </div>
+          <div>
+            <div className="wl-adm-art-head">
+              <h1>{a.title}</h1>
+              <AdminPill status={a.status} />
+              <div className="actions">
+                <Link
+                  className="wl-adm-btn small ghost"
+                  href={`/artwork/${a.slug}`}
+                  target="_blank"
+                >
+                  View on site ↗
+                </Link>
+              </div>
+            </div>
+            <div
+              className="path"
+              style={{
+                fontFamily: 'var(--f-mono), monospace',
+                fontSize: 11,
+                color: 'var(--adm-muted)',
+                marginTop: 4,
+              }}
+            >
+              /artwork/{a.slug}
+            </div>
+
+            <div style={{ marginTop: 20 }} className="wl-adm-field-grid">
+              <AdminField
+                label="Title"
+                value={a.title}
+                onSave={(v) => save({ title: v })}
+              />
+              <AdminField
+                label="Location"
+                value={a.location || ''}
+                onSave={(v) => save({ location: v || null })}
+              />
+              <AdminField
+                label="Year shot"
+                type="number"
+                value={a.year_shot ?? ''}
+                onSave={(v) => save({ year_shot: v ? Number(v) : null })}
+              />
+              <AdminField
+                label="Edition size"
+                type="number"
+                value={a.edition_size ?? ''}
+                onSave={(v) => save({ edition_size: v ? Number(v) : null })}
+              />
+            </div>
+            <div style={{ marginTop: 14 }}>
+              <AdminField
+                label="Artist note"
+                multiline
+                rows={4}
+                value={a.artist_note || ''}
+                onSave={(v) => save({ artist_note: v || null })}
+              />
+            </div>
+
+            <div className="wl-adm-status-switcher" style={{ marginTop: 18 }}>
+              <span className="lbl">Status</span>
+              {(['draft', 'published', 'retired'] as const)
+                .filter((s) => s !== a.status)
+                .map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    className="wl-adm-btn small ghost"
+                    onClick={() => save({ status: s })}
+                  >
+                    → {s}
+                  </button>
+                ))}
+            </div>
+
+            <div style={{ marginTop: 28 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  gap: 10,
+                  marginBottom: 8,
+                }}
+              >
+                <h3 style={{ fontSize: 16 }}>Variants</h3>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--adm-muted)',
+                  }}
+                >
+                  {activeVariants} active · retail = cost × 2.1, rounded to $5
+                </span>
+              </div>
+              <div className="wl-adm-card" style={{ overflow: 'hidden' }}>
+                <VariantTable variants={data.variants} />
+                {data.variants.length === 0 && (
+                  <div
+                    style={{
+                      padding: 20,
+                      fontSize: 13,
+                      color: 'var(--adm-muted)',
+                    }}
+                  >
+                    No variants yet. Apply a template:
+                    <div style={{ marginTop: 10, display: 'flex', gap: 6 }}>
+                      {(['fine_art', 'canvas', 'full'] as const).map((t) => (
+                        <button
+                          key={t}
+                          className="wl-adm-btn small"
+                          onClick={() => save({ applyTemplate: t })}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {saving && (
+              <p
+                style={{
+                  color: 'var(--adm-muted)',
+                  fontSize: 12,
+                  marginTop: 12,
+                }}
+              >
+                Saving…
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    </>
   );
 }

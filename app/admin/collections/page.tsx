@@ -1,5 +1,8 @@
 'use client';
+
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
+import { AdminTopBar } from '@/components/admin/AdminTopBar';
 
 interface Row {
   id: number;
@@ -8,15 +11,18 @@ interface Row {
   tagline: string | null;
   display_order: number;
   cover_image_url: string | null;
+  n?: number;
 }
 
 export default function AdminCollections() {
   const [rows, setRows] = useState<Row[]>([]);
+  const [loading, setLoading] = useState(true);
 
   async function reload() {
     const r = await fetch('/api/admin/collections');
     const d = (await r.json()) as { rows: Row[] };
     setRows(d.rows);
+    setLoading(false);
   }
 
   useEffect(() => {
@@ -44,59 +50,88 @@ export default function AdminCollections() {
   }
 
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-        <h1 style={{ fontWeight: 400 }}>Collections</h1>
-        <button className="button" onClick={create} style={{ marginLeft: 'auto' }}>
-          + New
-        </button>
+    <>
+      <AdminTopBar
+        title="Collections"
+        subtitle={`${rows.length} arranged`}
+      />
+
+      <div className="wl-adm-page">
+        {loading ? (
+          <p style={{ color: 'var(--adm-muted)' }}>Loading…</p>
+        ) : (
+          <div className="wl-adm-col-grid">
+            {rows
+              .slice()
+              .sort((a, b) => a.display_order - b.display_order)
+              .map((c) => (
+                <div key={c.id} className="wl-adm-col-card">
+                  <div className="wl-adm-col-cover">
+                    {c.cover_image_url && (
+                      <Image
+                        src={c.cover_image_url}
+                        alt={c.title}
+                        fill
+                        sizes="(max-width: 900px) 100vw, 33vw"
+                        style={{ objectFit: 'cover' }}
+                      />
+                    )}
+                  </div>
+                  <div className="wl-adm-col-body">
+                    <div className="h">
+                      <h3>{c.title}</h3>
+                      <span className="ord">#{c.display_order}</span>
+                    </div>
+                    {c.tagline && <div className="tag">{c.tagline}</div>}
+                    <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
+                      <label className="wl-adm-field">
+                        <span className="wl-adm-field-label">Title</span>
+                        <input
+                          className="wl-adm-field-input"
+                          defaultValue={c.title}
+                          onBlur={(e) => {
+                            if (e.target.value !== c.title)
+                              patch(c.id, { title: e.target.value });
+                          }}
+                        />
+                      </label>
+                      <label className="wl-adm-field">
+                        <span className="wl-adm-field-label">Tagline</span>
+                        <input
+                          className="wl-adm-field-input"
+                          defaultValue={c.tagline || ''}
+                          onBlur={(e) => {
+                            const next = e.target.value || null;
+                            if (next !== c.tagline) patch(c.id, { tagline: next });
+                          }}
+                        />
+                      </label>
+                      <label className="wl-adm-field">
+                        <span className="wl-adm-field-label">Display order</span>
+                        <input
+                          type="number"
+                          className="wl-adm-field-input"
+                          defaultValue={c.display_order}
+                          onBlur={(e) => {
+                            const next = Number(e.target.value);
+                            if (next !== c.display_order)
+                              patch(c.id, { display_order: next });
+                          }}
+                        />
+                      </label>
+                    </div>
+                    <div className="meta">
+                      <span className="slug">/{c.slug}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            <button className="wl-adm-col-new" onClick={create}>
+              + New collection
+            </button>
+          </div>
+        )}
       </div>
-      <table
-        style={{
-          width: '100%',
-          borderCollapse: 'collapse',
-          marginTop: 16,
-          fontSize: 14,
-        }}
-      >
-        <thead>
-          <tr style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>
-            <th style={{ padding: 8, width: 80 }}>Order</th>
-            <th style={{ padding: 8 }}>Title</th>
-            <th style={{ padding: 8 }}>Tagline</th>
-            <th style={{ padding: 8 }}>Slug</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.id} style={{ borderBottom: '1px solid #eee' }}>
-              <td style={{ padding: 8 }}>
-                <input
-                  type="number"
-                  defaultValue={r.display_order}
-                  onBlur={(e) => patch(r.id, { display_order: Number(e.target.value) })}
-                  style={{ width: 60, padding: 4 }}
-                />
-              </td>
-              <td style={{ padding: 8 }}>
-                <input
-                  defaultValue={r.title}
-                  onBlur={(e) => patch(r.id, { title: e.target.value })}
-                  style={{ width: '100%', padding: 4, fontFamily: 'inherit' }}
-                />
-              </td>
-              <td style={{ padding: 8 }}>
-                <input
-                  defaultValue={r.tagline || ''}
-                  onBlur={(e) => patch(r.id, { tagline: e.target.value || null })}
-                  style={{ width: '100%', padding: 4, fontFamily: 'inherit' }}
-                />
-              </td>
-              <td style={{ padding: 8, color: '#777' }}>{r.slug}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    </>
   );
 }

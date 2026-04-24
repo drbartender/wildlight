@@ -1,8 +1,10 @@
 'use client';
+
 import Image from 'next/image';
 import Link from 'next/link';
 import { useEffect, useState, useCallback } from 'react';
-import { StatusPill } from '@/components/admin/StatusPill';
+import { AdminPill } from '@/components/admin/AdminPill';
+import { AdminTopBar } from '@/components/admin/AdminTopBar';
 
 interface Row {
   id: number;
@@ -10,20 +12,45 @@ interface Row {
   title: string;
   status: string;
   image_web_url: string;
+  image_print_url: string | null;
   collection_title: string | null;
   variant_count: number;
+  min_price_cents: number | null;
+  max_price_cents: number | null;
+  updated_at: string;
+}
+
+function fmtRelative(iso: string): string {
+  const d = new Date(iso);
+  const now = Date.now();
+  const mins = Math.floor((now - d.getTime()) / 60000);
+  if (mins < 60) return `${Math.max(1, mins)}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days === 1) return 'yesterday';
+  if (days < 14) return `${days}d ago`;
+  if (days < 60) return `${Math.floor(days / 7)}w ago`;
+  return d.toLocaleDateString();
+}
+
+function fmtPrice(min: number | null, max: number | null): string {
+  if (min == null) return '—';
+  const a = Math.floor(min / 100);
+  if (max == null || max === min) return `$${a}`;
+  return `$${a}–$${Math.floor(max / 100)}`;
 }
 
 export default function AdminArtworksPage() {
   const [rows, setRows] = useState<Row[]>([]);
-  const [status, setStatus] = useState<string>('');
+  const [status, setStatus] = useState<string>('all');
   const [sel, setSel] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async () => {
     setLoading(true);
     const qs = new URLSearchParams();
-    if (status) qs.set('status', status);
+    if (status !== 'all') qs.set('status', status);
     const r = await fetch('/api/admin/artworks?' + qs);
     const d = (await r.json()) as { rows: Row[] };
     setRows(d.rows);
@@ -46,117 +73,163 @@ export default function AdminArtworksPage() {
     void reload();
   }
 
+  const tabs = ['all', 'published', 'draft', 'retired'] as const;
+  const counts: Record<string, number> = {
+    all: rows.length,
+    published: rows.filter((r) => r.status === 'published').length,
+    draft: rows.filter((r) => r.status === 'draft').length,
+    retired: rows.filter((r) => r.status === 'retired').length,
+  };
+
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-        <h1 style={{ fontWeight: 400 }}>Artworks ({rows.length})</h1>
-        <Link className="button" href="/admin/artworks/new" style={{ marginLeft: 'auto' }}>
-          + New
-        </Link>
-      </div>
-      <div
-        style={{
-          display: 'flex',
-          gap: 12,
-          alignItems: 'center',
-          margin: '16px 0',
-          fontSize: 14,
-        }}
-      >
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-          style={{ padding: 6 }}
-        >
-          <option value="">All statuses</option>
-          <option value="draft">Draft</option>
-          <option value="published">Published</option>
-          <option value="retired">Retired</option>
-        </select>
-        <span style={{ marginLeft: 'auto' }}>{sel.size} selected</span>
-        <button onClick={() => bulk('publish')} disabled={!sel.size}>
-          Publish
-        </button>
-        <button onClick={() => bulk('retire')} disabled={!sel.size}>
-          Retire
-        </button>
-        <button
-          onClick={() => bulk('delete')}
-          disabled={!sel.size}
-          style={{ color: '#b22' }}
-        >
-          Delete
-        </button>
-      </div>
-      {loading ? (
-        <p>Loading…</p>
-      ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>
-              <th style={{ padding: 8, width: 30 }}></th>
-              <th style={{ padding: 8 }}>Title</th>
-              <th style={{ padding: 8 }}>Collection</th>
-              <th style={{ padding: 8 }}>Status</th>
-              <th style={{ padding: 8 }}>Variants</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id} style={{ borderBottom: '1px solid #eee' }}>
-                <td style={{ padding: 8 }}>
-                  <input
-                    type="checkbox"
-                    checked={sel.has(r.id)}
-                    onChange={(e) => {
-                      const n = new Set(sel);
-                      if (e.target.checked) n.add(r.id);
-                      else n.delete(r.id);
-                      setSel(n);
-                    }}
-                  />
-                </td>
-                <td style={{ padding: 8 }}>
-                  <Link
-                    href={`/admin/artworks/${r.id}`}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 12,
-                      textDecoration: 'none',
-                      color: 'inherit',
-                    }}
-                  >
-                    <div
-                      style={{
-                        position: 'relative',
-                        width: 48,
-                        height: 48,
-                        background: '#eee',
-                        flexShrink: 0,
-                      }}
-                    >
-                      <Image
-                        src={r.image_web_url}
-                        alt=""
-                        fill
-                        sizes="48px"
-                        style={{ objectFit: 'cover' }}
-                      />
-                    </div>
-                    <span>{r.title}</span>
-                  </Link>
-                </td>
-                <td style={{ padding: 8 }}>{r.collection_title || '—'}</td>
-                <td style={{ padding: 8 }}>
-                  <StatusPill status={r.status} />
-                </td>
-                <td style={{ padding: 8 }}>{r.variant_count}</td>
-              </tr>
+    <>
+      <AdminTopBar
+        title="Artworks"
+        subtitle={`Catalog · ${rows.length} ${rows.length === 1 ? 'piece' : 'pieces'}`}
+      />
+
+      <div className="wl-adm-page tight">
+        <div className="wl-adm-subhead">
+          <div className="wl-adm-seg">
+            {tabs.map((f) => (
+              <button
+                key={f}
+                className={status === f ? 'on' : ''}
+                onClick={() => setStatus(f)}
+              >
+                {f === 'all' ? 'All' : f}
+                <span className="sub">{counts[f] ?? 0}</span>
+              </button>
             ))}
-          </tbody>
-        </table>
-      )}
-    </div>
+          </div>
+          <span className="spacer" />
+          {sel.size > 0 && (
+            <>
+              <span className="selcount">{sel.size} selected</span>
+              <button className="wl-adm-btn small" onClick={() => bulk('publish')}>
+                Publish
+              </button>
+              <button className="wl-adm-btn small" onClick={() => bulk('retire')}>
+                Retire
+              </button>
+              <button
+                className="wl-adm-btn small danger"
+                onClick={() => bulk('delete')}
+              >
+                Delete
+              </button>
+              <span style={{ width: 1, height: 18, background: 'var(--adm-rule)' }} />
+            </>
+          )}
+          <Link
+            href="/admin/artworks/new"
+            className="wl-adm-btn small primary"
+          >
+            + New artwork
+          </Link>
+        </div>
+
+        <div className="wl-adm-card" style={{ overflow: 'hidden' }}>
+          {loading ? (
+            <div
+              style={{
+                padding: 20,
+                color: 'var(--adm-muted)',
+                fontSize: 13,
+              }}
+            >
+              Loading…
+            </div>
+          ) : rows.length === 0 ? (
+            <div
+              style={{
+                padding: 40,
+                textAlign: 'center',
+                color: 'var(--adm-muted)',
+                fontSize: 13,
+              }}
+            >
+              No artworks{status !== 'all' ? ` in "${status}"` : ''}.
+            </div>
+          ) : (
+            <table className="wl-adm-table">
+              <thead>
+                <tr>
+                  <th style={{ width: 34, paddingLeft: 16 }}>
+                    <input type="checkbox" disabled aria-label="select all" />
+                  </th>
+                  <th>Artwork</th>
+                  <th>Collection</th>
+                  <th>Status</th>
+                  <th className="right">Variants</th>
+                  <th className="right">Price</th>
+                  <th>Updated</th>
+                  <th style={{ width: 36 }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id} className={sel.has(r.id) ? 'selected' : ''}>
+                    <td style={{ paddingLeft: 16 }}>
+                      <input
+                        type="checkbox"
+                        checked={sel.has(r.id)}
+                        onChange={(e) => {
+                          const n = new Set(sel);
+                          if (e.target.checked) n.add(r.id);
+                          else n.delete(r.id);
+                          setSel(n);
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <Link
+                        href={`/admin/artworks/${r.id}`}
+                        className="wl-adm-art-row-title"
+                      >
+                        <div className="wl-adm-art-row-thumb">
+                          <Image
+                            src={r.image_web_url}
+                            alt=""
+                            fill
+                            sizes="40px"
+                            style={{ objectFit: 'cover' }}
+                          />
+                        </div>
+                        <div>
+                          <div className="t">{r.title}</div>
+                          <div className="s">
+                            {r.slug}
+                            {!r.image_print_url && (
+                              <span className="noprint">· no print file</span>
+                            )}
+                          </div>
+                        </div>
+                      </Link>
+                    </td>
+                    <td style={{ color: 'var(--adm-ink-2)' }}>
+                      {r.collection_title || '—'}
+                    </td>
+                    <td>
+                      <AdminPill status={r.status} />
+                    </td>
+                    <td className="right mono muted">{r.variant_count || '—'}</td>
+                    <td className="right mono">
+                      {fmtPrice(r.min_price_cents, r.max_price_cents)}
+                    </td>
+                    <td className="muted" style={{ fontSize: 12 }}>
+                      {fmtRelative(r.updated_at)}
+                    </td>
+                    <td className="muted right" style={{ paddingRight: 16 }}>
+                      ⋯
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </>
   );
 }

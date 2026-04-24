@@ -1,4 +1,5 @@
 'use client';
+
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
@@ -28,49 +29,48 @@ export default function LoginPage() {
   }
 
   return (
-    <div
-      style={{
-        maxWidth: 360,
-        margin: '10vh auto',
-        fontFamily: 'Georgia, serif',
-        padding: 24,
-      }}
-    >
-      <h1 style={{ fontWeight: 400 }}>Admin</h1>
-      <form onSubmit={submit} style={{ display: 'grid', gap: 12 }}>
-        <label>
-          Email
-          <br />
-          <input
-            type="email"
-            required
-            autoComplete="username"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            style={{ width: '100%', padding: 8, fontFamily: 'inherit' }}
-          />
-        </label>
-        <label>
-          Password
-          <br />
-          <input
-            type="password"
-            required
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            style={{ width: '100%', padding: 8, fontFamily: 'inherit' }}
-          />
-        </label>
-        {error && <p style={{ color: '#b22' }}>{error}</p>}
-        <button
-          className="button"
-          disabled={loading}
-          style={{ marginTop: 4 }}
-        >
-          {loading ? 'Signing in…' : 'Sign in'}
-        </button>
-      </form>
+    <div className="wl-adm-login">
+      <div className="stack">
+        <div className="brand">
+          <div className="w">Wildlight</div>
+          <div className="s">Imagery · Studio</div>
+        </div>
+        <form onSubmit={submit} className="card">
+          <label className="wl-adm-field">
+            <span className="wl-adm-field-label">Email</span>
+            <input
+              className="wl-adm-field-input"
+              type="email"
+              required
+              autoComplete="username"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@wildlight.co"
+            />
+          </label>
+          <label className="wl-adm-field">
+            <span className="wl-adm-field-label">Password</span>
+            <input
+              className="wl-adm-field-input"
+              type="password"
+              required
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </label>
+          {error && <p className="err">{error}</p>}
+          <button
+            type="submit"
+            className="wl-adm-btn primary"
+            disabled={loading}
+            style={{ justifyContent: 'center', padding: '10px' }}
+          >
+            {loading ? 'Signing in…' : 'Sign in'}
+          </button>
+        </form>
+        <div className="foot">Trouble signing in? Contact Dallas.</div>
+      </div>
     </div>
   );
 }
