@@ -28,16 +28,18 @@ interface ItemRow {
   quantity: number;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 async function findOrder(tokenOrSession: string) {
-  const r = await pool.query<OrderRow>(
-    `SELECT id, public_token, stripe_session_id, status, customer_email,
-            subtotal_cents, shipping_cents, tax_cents, total_cents,
-            tracking_url, tracking_number, created_at
-     FROM orders
-     WHERE public_token::text = $1 OR stripe_session_id = $1
-     LIMIT 1`,
-    [tokenOrSession],
-  );
+  // Index-efficient lookup: the OR-on-cast version forced a seq scan because
+  // `public_token::text = $1` defeats the btree. Route by input shape instead.
+  const sql = `SELECT id, public_token, stripe_session_id, status, customer_email,
+                      subtotal_cents, shipping_cents, tax_cents, total_cents,
+                      tracking_url, tracking_number, created_at
+               FROM orders
+               WHERE ${UUID_RE.test(tokenOrSession) ? 'public_token' : 'stripe_session_id'} = $1
+               LIMIT 1`;
+  const r = await pool.query<OrderRow>(sql, [tokenOrSession]);
   return r.rows[0] || null;
 }
 

@@ -18,16 +18,27 @@ interface CollectionRow {
 }
 
 export default async function HomePage() {
-  const [featured, collections] = await Promise.all([
-    pool.query<Featured>(
-      `SELECT slug, title, image_web_url FROM artworks
-       WHERE status='published'
-       ORDER BY random() LIMIT 1`,
+  // Pick a hero by OFFSET instead of ORDER BY random() — random() forces a
+  // full-table scan that scales badly as the catalog grows. Two fast queries
+  // is cheaper than one slow one.
+  const [countRes, collections] = await Promise.all([
+    pool.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM artworks WHERE status='published'`,
     ),
     pool.query<CollectionRow>(
       `SELECT slug, title, tagline, cover_image_url FROM collections ORDER BY display_order`,
     ),
   ]);
+  const total = countRes.rows[0]?.n ?? 0;
+  const offset = total > 0 ? Math.floor(Math.random() * total) : 0;
+  const featured =
+    total > 0
+      ? await pool.query<Featured>(
+          `SELECT slug, title, image_web_url FROM artworks
+           WHERE status='published' ORDER BY id LIMIT 1 OFFSET $1`,
+          [offset],
+        )
+      : { rows: [] as Featured[] };
   const hero = featured.rows[0];
 
   return (
