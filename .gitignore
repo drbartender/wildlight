@@ -1,0 +1,7 @@
+node_modules/
+scraped/
+.env
+.env.local
+*.log
+.DS_Store
+.claude/
