@@ -1325,6 +1325,18 @@
   word-break: break-all;
 }
 
+/* Order timeline — dual-DOM per skin.
+   Atelier default; Darkroom hides Atelier + shows event_log. */
+.wl-adm-timeline-atelier { display: block; }
+.wl-adm-event-log        { display: none; }
+.wl-admin-surface[data-theme='dark'] .wl-adm-timeline-atelier { display: none; }
+.wl-admin-surface[data-theme='dark'] .wl-adm-event-log        { display: block; }
+
+/* Atelier hides the Darkroom-only Printful sidebar panel. */
+.wl-admin-surface:not([data-theme='dark']) .wl-adm-side-printful {
+  display: none;
+}
+
 .wl-adm-timeline {
   display: flex;
   flex-direction: column;
@@ -2125,5 +2137,90 @@
   color: var(--adm-muted);
   font-family: var(--f-mono), 'JetBrains Mono', monospace;
   font-size: 10px;
+}
+
+/* ─────── ORDER DETAIL — Darkroom event_log ─────── */
+
+.wl-adm-event-log {
+  background: var(--adm-panel);
+  border: 1px solid var(--adm-rule);
+  border-radius: 4px;
+}
+.wl-adm-event-log .h {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--adm-rule);
+  color: var(--adm-ink);
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+.wl-adm-event-log-rows {
+  padding: 8px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+.wl-adm-event-log-rows .row {
+  display: grid;
+  grid-template-columns: 54px 72px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  color: var(--adm-ink-2);
+}
+.wl-adm-event-log-rows .row .when { color: var(--adm-muted); }
+.wl-adm-event-log-rows .row .who {
+  text-transform: uppercase;
+  font-size: 10px;
+}
+.wl-adm-event-log-rows .row .who-customer { color: var(--adm-green); }
+.wl-adm-event-log-rows .row .who-admin    { color: var(--adm-ink-2); }
+.wl-adm-event-log-rows .row .who-system,
+.wl-adm-event-log-rows .row .who-stripe,
+.wl-adm-event-log-rows .row .who-printful { color: var(--adm-muted); }
+.wl-adm-event-log-rows .row.err .who,
+.wl-adm-event-log-rows .row.err .what { color: var(--adm-red); }
+
+/* ─────── ORDER DETAIL — add-note affordance ─────── */
+
+.wl-adm-note-add {
+  margin-top: 10px;
+  font-family: inherit;
+}
+.wl-adm-note-add .editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--adm-card);
+  border: 1px solid var(--adm-rule);
+  border-radius: var(--adm-radius-md);
+  padding: 10px 12px;
+}
+.wl-adm-note-add .editor textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--adm-rule);
+  background: var(--adm-paper);
+  border-radius: var(--adm-radius-sm);
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--adm-ink);
+  resize: vertical;
+  min-height: 52px;
+}
+.wl-adm-note-add .editor .row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.wl-admin-surface[data-theme='dark'] .wl-adm-note-add .editor {
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+.wl-admin-surface[data-theme='dark'] .wl-adm-note-add .editor textarea {
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
+  font-size: 11px;
+  background: var(--adm-paper);
+  border-radius: 3px;
 }
 

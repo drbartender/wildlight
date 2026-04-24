@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { formatUSD } from '@/lib/money';
 import { AdminPill } from '@/components/admin/AdminPill';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
+import { renderEventText, type OrderEvent } from '@/lib/order-event-text';
 
 interface Order {
   id: number;
@@ -36,6 +37,7 @@ interface Item {
 interface Data {
   order: Order;
   items: Item[];
+  events: OrderEvent[];
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -79,6 +81,36 @@ export default function AdminOrderDetail({
     void load();
   }, [load]);
 
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [noteText, setNoteText] = useState('');
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteError, setNoteError] = useState<string | null>(null);
+
+  async function saveNote() {
+    if (!noteText.trim()) return;
+    setNoteSaving(true);
+    setNoteError(null);
+    try {
+      const r = await fetch(`/api/admin/orders/${id}/note`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: noteText.trim() }),
+      });
+      if (!r.ok) {
+        const b = (await r.json().catch(() => ({}))) as { error?: string };
+        throw new Error(b.error || `HTTP ${r.status}`);
+      }
+      const { event } = (await r.json()) as { event: OrderEvent };
+      setData((d) => (d ? { ...d, events: [...d.events, event] } : d));
+      setNoteText('');
+      setNoteOpen(false);
+    } catch (err) {
+      setNoteError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setNoteSaving(false);
+    }
+  }
+
   async function act(path: string, confirmMsg?: string) {
     if (confirmMsg && !confirm(confirmMsg)) return;
     setBusy(true);
@@ -107,54 +139,6 @@ export default function AdminOrderDetail({
   const addr = o.shipping_address || {};
   const isNeedsReview = o.status === 'needs_review';
   const canRefund = !['refunded', 'canceled'].includes(o.status);
-
-  // Build a minimal timeline from the data we have. This isn't a proper
-  // event log yet — it's assembled from order fields so admins still get a
-  // recognizable "what happened" column.
-  interface TlEntry {
-    when: string;
-    who: string;
-    what: string;
-    tone?: 'ok' | 'err';
-  }
-  const tl: TlEntry[] = [];
-  tl.push({
-    when: fmtShort(o.created_at),
-    who: 'customer',
-    what: 'Order placed · Stripe',
-    tone: 'ok',
-  });
-  if (o.total_cents > 0) {
-    tl.push({
-      when: fmtShort(o.created_at),
-      who: 'system',
-      what: `Payment captured · ${formatUSD(o.total_cents)}`,
-      tone: 'ok',
-    });
-  }
-  if (o.printful_order_id) {
-    tl.push({
-      when: o.updated_at ? fmtShort(o.updated_at) : '—',
-      who: 'system',
-      what: `Submitted to Printful · P-${o.printful_order_id}`,
-      tone: 'ok',
-    });
-  } else if (o.status === 'needs_review' && o.notes) {
-    tl.push({
-      when: o.updated_at ? fmtShort(o.updated_at) : '—',
-      who: 'system',
-      what: 'Flagged needs_review',
-      tone: 'err',
-    });
-  }
-  if (o.tracking_number) {
-    tl.push({
-      when: o.updated_at ? fmtShort(o.updated_at) : '—',
-      who: 'system',
-      what: `Shipped · ${o.tracking_number}`,
-      tone: 'ok',
-    });
-  }
 
   return (
     <>
@@ -330,24 +314,116 @@ export default function AdminOrderDetail({
               </div>
             )}
 
-            {tl.length > 0 && (
-              <div className="wl-adm-panel" style={{ marginTop: 20 }}>
-                <h3 style={{ fontSize: 16, marginBottom: 12 }}>Timeline</h3>
-                <div className="wl-adm-timeline">
-                  {tl.map((t, i) => (
-                    <div
-                      key={i}
-                      className={`entry ${t.tone === 'err' ? 'err' : t.tone === 'ok' ? 'ok' : ''}`}
-                    >
-                      <span className="when">{t.when}</span>
-                      <span className="dot" />
-                      <span className="what">{t.what}</span>
-                    </div>
-                  ))}
+            {data.events.length > 0 && (
+              <>
+                {/* Atelier timeline */}
+                <div
+                  className="wl-adm-panel wl-adm-timeline-atelier"
+                  style={{ marginTop: 20 }}
+                >
+                  <h3 style={{ fontSize: 16, marginBottom: 12 }}>Timeline</h3>
+                  <div className="wl-adm-timeline">
+                    {data.events.map((e) => (
+                      <div
+                        key={e.id}
+                        className={`entry ${
+                          e.who === 'customer'
+                            ? 'ok'
+                            : e.type === 'printful_flagged' ||
+                                e.type === 'error'
+                              ? 'err'
+                              : ''
+                        }`}
+                      >
+                        <span className="when">{fmtShort(e.created_at)}</span>
+                        <span className="dot" />
+                        <span className="what">{renderEventText(e)}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
 
+                {/* Darkroom event_log */}
+                <div
+                  className="wl-adm-panel wl-adm-event-log"
+                  style={{ marginTop: 12 }}
+                >
+                  <div className="h">event_log</div>
+                  <div className="wl-adm-event-log-rows">
+                    {data.events.map((e) => (
+                      <div
+                        key={e.id}
+                        className={`row ${
+                          e.type === 'printful_flagged' ||
+                          e.type === 'error'
+                            ? 'err'
+                            : ''
+                        }`}
+                      >
+                        <span className="when">{fmtShort(e.created_at)}</span>
+                        <span className={`who who-${e.who}`}>{e.who}</span>
+                        <span className="what">{renderEventText(e)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Shared add-note affordance */}
+                <div className="wl-adm-note-add">
+                  {!noteOpen ? (
+                    <button
+                      type="button"
+                      className="wl-adm-btn small"
+                      onClick={() => setNoteOpen(true)}
+                    >
+                      + Add note
+                    </button>
+                  ) : (
+                    <div className="editor">
+                      <textarea
+                        value={noteText}
+                        onChange={(e) => setNoteText(e.target.value)}
+                        rows={2}
+                        maxLength={500}
+                        placeholder="Anything worth remembering about this order…"
+                      />
+                      <div className="row">
+                        <button
+                          type="button"
+                          className="wl-adm-btn small primary"
+                          disabled={noteSaving || !noteText.trim()}
+                          onClick={saveNote}
+                        >
+                          {noteSaving ? 'Saving…' : 'Save note'}
+                        </button>
+                        <button
+                          type="button"
+                          className="wl-adm-btn small"
+                          disabled={noteSaving}
+                          onClick={() => {
+                            setNoteText('');
+                            setNoteOpen(false);
+                            setNoteError(null);
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        {noteError && (
+                          <span
+                            style={{
+                              color: 'var(--adm-red)',
+                              fontSize: 12,
+                            }}
+                          >
+                            {noteError}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
             {o.tracking_url && (
               <p
                 style={{
@@ -409,13 +485,37 @@ export default function AdminOrderDetail({
                 ) : null}
               </div>
             </div>
-            <div className="wl-adm-panel">
+            {/* Darkroom-only Printful sidebar panel. */}
+            <div className="wl-adm-panel wl-adm-side-printful">
               <div className="head">Printful</div>
-              <div className="line">
-                {o.printful_order_id
-                  ? `P-${o.printful_order_id}`
-                  : 'Not submitted'}
-              </div>
+              {o.printful_order_id ? (
+                <>
+                  <div
+                    className="big"
+                    style={{ color: 'var(--adm-green)' }}
+                  >
+                    #{o.printful_order_id}
+                  </div>
+                  <div className="line">submitted</div>
+                </>
+              ) : (
+                <>
+                  <div
+                    className="big"
+                    style={{ color: 'var(--adm-red)' }}
+                  >
+                    — not submitted
+                  </div>
+                  {o.notes && (
+                    <div
+                      className="line"
+                      style={{ color: 'var(--adm-muted)' }}
+                    >
+                      {o.notes}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </div>
         </div>
