@@ -1967,3 +1967,78 @@
   margin-top: 4px;
 }
 
+/* Dashboard top-artworks — Atelier hides, Darkroom shows */
+.wl-adm-catalog-atelier { display: block; }
+.wl-adm-top-darkroom    { display: none; }
+.wl-admin-surface[data-theme='dark'] .wl-adm-catalog-atelier { display: none; }
+.wl-admin-surface[data-theme='dark'] .wl-adm-top-darkroom    { display: block; }
+
+.wl-adm-top-darkroom .h {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--adm-rule);
+  display: flex;
+  align-items: center;
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--adm-ink);
+}
+.wl-adm-top-darkroom .empty {
+  padding: 20px;
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
+  color: var(--adm-muted);
+  font-size: 11px;
+}
+.wl-adm-top-darkroom .row {
+  padding: 8px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: inherit;
+}
+.wl-adm-top-darkroom .row img {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 2px;
+}
+.wl-adm-top-darkroom .row .meta { flex: 1; overflow: hidden; }
+.wl-adm-top-darkroom .row .meta .t {
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--adm-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wl-adm-top-darkroom .row .meta .c {
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: var(--adm-muted);
+}
+.wl-adm-top-darkroom .row .n {
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--adm-ink-2);
+  text-align: right;
+}
+.wl-adm-top-darkroom .row .n .s { color: var(--adm-muted); margin-left: 2px; }
+
+.wl-adm-top-metric {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
+  font-size: 10px;
+}
+.wl-adm-top-metric span {
+  padding: 2px 7px;
+  border-radius: 2px;
+  color: var(--adm-muted);
+  cursor: pointer;
+}
+.wl-adm-top-metric span.on {
+  background: var(--adm-panel-2);
+  color: var(--adm-green);
+}
+

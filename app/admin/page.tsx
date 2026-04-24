@@ -3,6 +3,7 @@ import { pool } from '@/lib/db';
 import { formatUSD } from '@/lib/money';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
 import { AdminPill } from '@/components/admin/AdminPill';
+import { DashboardMetricToggle } from '@/components/admin/DashboardMetricToggle';
 
 export const dynamic = 'force-dynamic';
 
@@ -482,7 +483,7 @@ export default async function AdminDashboard({
             )}
           </div>
 
-          <div className="wl-adm-card">
+          <div className="wl-adm-card wl-adm-catalog-atelier">
             <div className="h">
               <h3>Catalog</h3>
               <Link
@@ -515,6 +516,46 @@ export default async function AdminDashboard({
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Darkroom: top-artworks panel (replaces Catalog card) */}
+          <div className="wl-adm-panel wl-adm-top-darkroom">
+            <div className="h">
+              <span className="t">top_artworks · 30d</span>
+              <DashboardMetricToggle />
+            </div>
+            {topArts.rows.length === 0 ? (
+              <div className="empty">Not enough sales yet.</div>
+            ) : (
+              topArts.rows.map((a, i) => (
+                <Link
+                  key={a.id}
+                  href={`/admin/artworks/${a.id}`}
+                  className="row"
+                  style={{
+                    borderTop: i ? '1px solid var(--adm-rule)' : 'none',
+                  }}
+                >
+                  <img src={a.image_web_url} alt="" />
+                  <div className="meta">
+                    <div className="t">{a.title}</div>
+                    <div className="c">
+                      {a.collection_title?.toLowerCase() ?? '—'}
+                    </div>
+                  </div>
+                  <div className="n">
+                    {topMetric === 'revenue' ? (
+                      formatUSD(a.revenue_cents)
+                    ) : (
+                      <>
+                        {a.units_sold}
+                        <span className="s"> sold</span>
+                      </>
+                    )}
+                  </div>
+                </Link>
+              ))
+            )}
           </div>
         </div>
       </div>
