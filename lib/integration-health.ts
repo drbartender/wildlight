@@ -15,6 +15,11 @@ export interface HealthReport {
   webhooks: HealthPing;
 }
 
+// Module-scope cache shared across all admin requests on this server
+// instance. Gate is purely the requireAdmin() check in the consuming
+// routes — if checkHealth is ever called from an unauthenticated path,
+// the cached notes (e.g. Resend verified-domain, Printful store name)
+// would leak. All current callers are admin-gated.
 let cache: { at: number; value: HealthReport } | null = null;
 const TTL_MS = 60_000;
 const PING_TIMEOUT_MS = 3_000;
@@ -47,13 +52,31 @@ export async function checkHealth(
   return value;
 }
 
+/**
+ * Promise.race-based timeout didn't actually cancel the wrapped work —
+ * an in-flight fetch would keep its Authorization header alive past
+ * the deadline. For fetch callers, prefer `abortSignalAfter` so the
+ * underlying socket is torn down at timeout.
+ */
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let t: NodeJS.Timeout | undefined;
+  const timer = new Promise<T>((_, rej) => {
+    t = setTimeout(() => rej(new Error(`timeout after ${ms}ms`)), ms);
+  });
   return Promise.race([
-    p,
-    new Promise<T>((_, rej) =>
-      setTimeout(() => rej(new Error(`timeout after ${ms}ms`)), ms),
-    ),
+    p.finally(() => t && clearTimeout(t)),
+    timer,
   ]);
+}
+
+/** Returns an AbortSignal that fires after `ms` ms. */
+function abortSignalAfter(ms: number): {
+  signal: AbortSignal;
+  cancel: () => void;
+} {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(new Error(`timeout after ${ms}ms`)), ms);
+  return { signal: ctl.signal, cancel: () => clearTimeout(t) };
 }
 
 function ping(state: 'ok' | 'warn' | 'error', note: string): HealthPing {
@@ -72,18 +95,16 @@ async function pingStripe(): Promise<HealthPing> {
 }
 
 async function pingPrintful(): Promise<HealthPing> {
+  const key = process.env.PRINTFUL_API_KEY;
+  if (!key) return ping('error', 'key missing');
+  const { signal, cancel } = abortSignalAfter(PING_TIMEOUT_MS);
   try {
-    const key = process.env.PRINTFUL_API_KEY;
-    if (!key) return ping('error', 'key missing');
     const storeId = process.env.PRINTFUL_STORE_ID;
     const headers: Record<string, string> = {
       Authorization: `Bearer ${key}`,
     };
     if (storeId) headers['X-PF-Store-Id'] = storeId;
-    const res = await withTimeout(
-      fetch('https://api.printful.com/store', { headers }),
-      PING_TIMEOUT_MS,
-    );
+    const res = await fetch('https://api.printful.com/store', { headers, signal });
     if (!res.ok) return ping('warn', `HTTP ${res.status}`);
     const body = (await res.json()) as {
       result?: { id?: number; name?: string };
@@ -95,19 +116,22 @@ async function pingPrintful(): Promise<HealthPing> {
       name ? `store ${name}` : id != null ? `store #${id}` : 'reachable',
     );
   } catch (err) {
+    // Never surface the raw err — err.message only, which won't include
+    // Authorization header values from undici stack traces.
     return ping('warn', err instanceof Error ? err.message : 'unknown');
+  } finally {
+    cancel();
   }
 }
 
 async function pingResend(): Promise<HealthPing> {
+  if (!process.env.RESEND_API_KEY) return ping('error', 'key missing');
+  const { signal, cancel } = abortSignalAfter(PING_TIMEOUT_MS);
   try {
-    if (!process.env.RESEND_API_KEY) return ping('error', 'key missing');
-    const r = await withTimeout(
-      fetch('https://api.resend.com/domains', {
-        headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
-      }),
-      PING_TIMEOUT_MS,
-    );
+    const r = await fetch('https://api.resend.com/domains', {
+      headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+      signal,
+    });
     if (!r.ok) return ping('warn', `HTTP ${r.status}`);
     const body = (await r.json()) as {
       data?: { name: string; status: string }[];
@@ -117,6 +141,8 @@ async function pingResend(): Promise<HealthPing> {
     return ping('ok', `${verified.name} verified`);
   } catch (err) {
     return ping('warn', err instanceof Error ? err.message : 'unknown');
+  } finally {
+    cancel();
   }
 }
 
