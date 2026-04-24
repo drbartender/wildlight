@@ -67,6 +67,10 @@ function looksLikeImageHref(href) {
   return /\.(jpe?g|png|webp)(\?|#|$)/i.test(href || '');
 }
 
+// Slugs we never want to scrape. Photojournalism's /galleries/ page is a
+// sub-gallery index with only thumbnail covers, not an actual image gallery.
+const SKIP_SLUGS = new Set(['photojournalism']);
+
 async function discoverCollections() {
   const html = await getHtml(START);
   const $ = cheerio.load(html);
@@ -79,6 +83,8 @@ async function discoverCollections() {
     if (!href) return;
     if (!href.startsWith(`${BASE}/galleries/`)) return;
     if (href.replace(/\/$/, '') === `${BASE}/galleries`) return;
+    const trailingSlug = href.replace(/\/$/, '').split('/').filter(Boolean).pop();
+    if (SKIP_SLUGS.has(trailingSlug)) return;
 
     const title = ($(el).attr('title') || $(el).text() || '').trim();
     const key = href.replace(/\/$/, '');
