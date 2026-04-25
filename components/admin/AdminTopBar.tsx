@@ -21,6 +21,13 @@ export function AdminTopBar({ title, subtitle, breadcrumb, actions }: Props) {
     if (opener) opener();
   }
 
+  function toggleSidebar() {
+    const toggle = (
+      window as unknown as { __wlAdminToggleSidebar?: () => void }
+    ).__wlAdminToggleSidebar;
+    if (toggle) toggle();
+  }
+
   async function signOut() {
     const r = await fetch('/api/auth/logout', { method: 'POST' });
     if (!r.ok) {
@@ -36,6 +43,16 @@ export function AdminTopBar({ title, subtitle, breadcrumb, actions }: Props) {
 
   return (
     <header className="wl-adm-topbar">
+      <button
+        type="button"
+        className="wl-adm-topbar-burger"
+        aria-label="Toggle navigation"
+        onClick={toggleSidebar}
+      >
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
       <div className="title-group">
         {subtitle && <div className="sub">{subtitle}</div>}
         <h1>{title}</h1>

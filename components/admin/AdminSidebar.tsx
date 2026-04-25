@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface NavDef {
   id: string;
@@ -78,12 +78,21 @@ interface HealthRow {
 const HEALTH_KEYS: readonly ['stripe', 'printful', 'resend', 'r2', 'webhooks'] =
   ['stripe', 'printful', 'resend', 'r2', 'webhooks'] as const;
 
-function Item({ n, path }: { n: NavDef; path: string }) {
+function Item({
+  n,
+  path,
+  onNavigate,
+}: {
+  n: NavDef;
+  path: string;
+  onNavigate?: () => void;
+}) {
   const active = n.match(path);
   return (
     <Link
       href={n.href}
       className={`wl-adm-nav-item ${active ? 'active' : ''}`}
+      onClick={onNavigate}
     >
       <svg
         width="15"
@@ -109,6 +118,58 @@ export function AdminSidebar({ needsReview, email }: Props) {
     n.id === 'orders' && needsReview > 0 ? { ...n, badge: needsReview } : n,
   );
   const initials = email.slice(0, 2).toUpperCase();
+
+  const [open, setOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const sidebarRef = useRef<HTMLElement>(null);
+
+  // Expose a window-global toggle so AdminTopBar's hamburger can drive
+  // the drawer without lifting state across the layout boundary —
+  // mirrors the AdminCmdK opener convention.
+  useEffect(() => {
+    const w = window as unknown as { __wlAdminToggleSidebar?: () => void };
+    w.__wlAdminToggleSidebar = () => setOpen((v) => !v);
+    return () => {
+      delete w.__wlAdminToggleSidebar;
+    };
+  }, []);
+
+  // Track whether the drawer breakpoint is active. If the user resizes
+  // from mobile to desktop with the drawer open, force-close it so the
+  // body scroll-lock unwinds and inert clears.
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 900px)');
+    setIsMobile(mq.matches);
+    function onChange(e: MediaQueryListEvent) {
+      setIsMobile(e.matches);
+      if (!e.matches) setOpen(false);
+    }
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  useEffect(() => {
+    setOpen(false);
+  }, [path]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    sidebarRef.current?.querySelector<HTMLAnchorElement>('a')?.focus();
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+      // Burger lives in AdminTopBar (sibling tree) — query for it.
+      document
+        .querySelector<HTMLButtonElement>('.wl-adm-topbar-burger')
+        ?.focus();
+    };
+  }, [open]);
 
   const [systemHealth, setSystemHealth] = useState<HealthRow[]>([]);
   useEffect(() => {
@@ -150,61 +211,92 @@ export function AdminSidebar({ needsReview, email }: Props) {
   }, []);
 
   return (
-    <aside className="wl-adm-sidebar">
-      <div className="wl-adm-sidebar-head">
-        <div className="atelier-head">
-          <div className="wordmark">Wildlight</div>
-          <div className="sub">Imagery · Studio</div>
-        </div>
-        <div className="darkroom-head">
-          <div className="icon" aria-hidden="true">W</div>
-          <div className="wordmark">wildlight</div>
-          <div className="version">v2.4</div>
-        </div>
-      </div>
-
-      <nav className="wl-adm-sidebar-nav">
-        <div className="wl-adm-sidebar-group">Catalog</div>
-        {CATALOG.map((n) => (
-          <Item key={n.id} n={n} path={path} />
-        ))}
-        <div className="wl-adm-sidebar-group second">Commerce</div>
-        {orders.map((n) => (
-          <Item key={n.id} n={n} path={path} />
-        ))}
-        <div className="wl-adm-sidebar-group second">Account</div>
-        {ACCOUNT.map((n) => (
-          <Item key={n.id} n={n} path={path} />
-        ))}
-        {systemHealth && systemHealth.length > 0 && (
-          <>
-            <div className="wl-adm-sidebar-group second wl-adm-system-health-label">
-              System
+    <>
+      <button
+        type="button"
+        className={`wl-adm-sidebar-backdrop ${open ? 'is-open' : ''}`}
+        aria-label="Close navigation"
+        tabIndex={open ? 0 : -1}
+        onClick={() => setOpen(false)}
+      />
+      <aside
+        ref={sidebarRef}
+        className={`wl-adm-sidebar ${open ? 'is-open' : ''}`}
+        aria-label="Admin navigation"
+        inert={isMobile && !open}
+      >
+        <div className="wl-adm-sidebar-head">
+          <div className="atelier-head">
+            <div className="wordmark">Wildlight</div>
+            <div className="sub">Imagery · Studio</div>
+          </div>
+          <div className="darkroom-head">
+            <div className="icon" aria-hidden="true">
+              W
             </div>
-            <div className="wl-adm-system-health">
-              {systemHealth.map((h) => (
-                <div key={h.key} className={`row state-${h.state}`}>
-                  <span className="dot" aria-hidden="true" />
-                  <span className="key">{h.key}</span>
-                  <span className="note">{h.note}</span>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </nav>
-
-      <div className="wl-adm-sidebar-foot">
-        <div className="avatar" aria-hidden="true">
-          {initials}
-        </div>
-        <div className="who">
-          <div className="who-name">Admin</div>
-          <div className="who-email" title={email}>
-            {email}
+            <div className="wordmark">wildlight</div>
+            <div className="version">v2.4</div>
           </div>
         </div>
-      </div>
-    </aside>
+
+        <nav className="wl-adm-sidebar-nav">
+          <div className="wl-adm-sidebar-group">Catalog</div>
+          {CATALOG.map((n) => (
+            <Item
+              key={n.id}
+              n={n}
+              path={path}
+              onNavigate={() => setOpen(false)}
+            />
+          ))}
+          <div className="wl-adm-sidebar-group second">Commerce</div>
+          {orders.map((n) => (
+            <Item
+              key={n.id}
+              n={n}
+              path={path}
+              onNavigate={() => setOpen(false)}
+            />
+          ))}
+          <div className="wl-adm-sidebar-group second">Account</div>
+          {ACCOUNT.map((n) => (
+            <Item
+              key={n.id}
+              n={n}
+              path={path}
+              onNavigate={() => setOpen(false)}
+            />
+          ))}
+          {systemHealth && systemHealth.length > 0 && (
+            <>
+              <div className="wl-adm-sidebar-group second wl-adm-system-health-label">
+                System
+              </div>
+              <div className="wl-adm-system-health">
+                {systemHealth.map((h) => (
+                  <div key={h.key} className={`row state-${h.state}`}>
+                    <span className="dot" aria-hidden="true" />
+                    <span className="key">{h.key}</span>
+                    <span className="note">{h.note}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </nav>
+
+        <div className="wl-adm-sidebar-foot">
+          <div className="avatar" aria-hidden="true">
+            {initials}
+          </div>
+          <div className="who">
+            <div className="who-name">Admin</div>
+            <div className="who-email" title={email}>
+              {email}
+            </div>
+          </div>
+        </div>
+      </aside>
+    </>
   );
 }

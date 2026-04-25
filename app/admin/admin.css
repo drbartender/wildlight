@@ -1706,39 +1706,11 @@
   font-size: 12px;
 }
 
-/* ─────── RESPONSIVE: collapse sidebar below 900 ─────── */
+/* ─────── RESPONSIVE: content-grid collapses below 900 ─────── */
+/* Sidebar/topbar drawer behavior lives in the MOBILE block at the foot
+   of this file — keep this block to content layouts only. */
 
 @media (max-width: 900px) {
-  .wl-admin-surface {
-    flex-direction: column;
-  }
-  .wl-adm-sidebar {
-    width: 100%;
-    height: auto;
-    position: static;
-    border-right: 0;
-    border-bottom: 1px solid var(--adm-rule);
-  }
-  .wl-adm-sidebar-nav {
-    display: flex;
-    gap: 4px;
-    padding: 8px 12px;
-    overflow-x: auto;
-  }
-  .wl-adm-sidebar-group {
-    display: none;
-  }
-  .wl-adm-sidebar-head,
-  .wl-adm-sidebar-foot {
-    display: none;
-  }
-  .wl-adm-nav-item {
-    flex-shrink: 0;
-    padding: 6px 10px;
-  }
-  .wl-adm-topbar {
-    padding: 14px 16px;
-  }
   .wl-adm-page {
     padding: 16px;
   }
@@ -2329,4 +2301,148 @@
 .wl-admin-surface[data-theme='dark'] .wl-adm-orders-filters-darkroom { display: flex; }
 .wl-admin-surface[data-theme='dark'] .wl-adm-orders-atelier          { display: none; }
 .wl-admin-surface[data-theme='dark'] .wl-adm-orders-darkroom         { display: block; }
+
+/* ─────── MOBILE ─────── */
+
+/* Topbar hamburger and the sidebar backdrop are noop above 900px — the
+   sidebar is statically docked and these elements never render. The
+   ≤900px block below pulls them into the layout. */
+.wl-adm-topbar-burger {
+  display: none;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--adm-ink);
+  border-radius: var(--adm-radius-md);
+}
+.wl-adm-topbar-burger span {
+  display: block;
+  width: 18px;
+  height: 1.5px;
+  background: currentColor;
+}
+.wl-adm-topbar-burger:hover {
+  background: var(--adm-hover);
+}
+.wl-adm-topbar-burger:focus-visible {
+  outline: 1px solid var(--adm-ink-2);
+  outline-offset: 2px;
+}
+
+.wl-adm-sidebar-backdrop {
+  display: none;
+  appearance: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .wl-admin-surface {
+    display: block;
+  }
+
+  .wl-adm-topbar-burger {
+    display: inline-flex;
+  }
+
+  .wl-adm-sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 260px;
+    height: 100vh;
+    z-index: 30;
+    transform: translateX(-100%);
+    transition: transform 240ms ease;
+    box-shadow: 0 0 0 0 transparent;
+  }
+  .wl-adm-sidebar.is-open {
+    transform: translateX(0);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.18);
+  }
+  .wl-admin-surface[data-theme='dark'] .wl-adm-sidebar {
+    width: 240px;
+  }
+  .wl-admin-surface[data-theme='dark'] .wl-adm-sidebar.is-open {
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+  }
+
+  .wl-adm-sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    background: rgba(0, 0, 0, 0.42);
+    visibility: hidden;
+    opacity: 0;
+    /* Asymmetric visibility — flip instantly on open so the fade plays;
+       wait for the fade-out before hiding on close. */
+    transition:
+      opacity 240ms ease,
+      visibility 0s linear 240ms;
+  }
+  .wl-adm-sidebar-backdrop.is-open {
+    visibility: visible;
+    opacity: 1;
+    transition:
+      opacity 240ms ease,
+      visibility 0s linear 0s;
+  }
+  .wl-adm-sidebar-backdrop:focus-visible {
+    outline: 1px solid rgba(255, 255, 255, 0.7);
+    outline-offset: -3px;
+  }
+
+  .wl-adm-main {
+    width: 100%;
+  }
+
+  .wl-adm-topbar {
+    padding: 12px 16px;
+    gap: 10px;
+    align-items: center;
+  }
+  .wl-adm-topbar h1 {
+    font-size: 18px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .wl-adm-topbar .sub {
+    margin-bottom: 2px;
+    font-size: 9.5px;
+  }
+  .wl-adm-topbar-crumbs {
+    display: none !important;
+  }
+  .wl-adm-search {
+    display: none;
+  }
+  .wl-admin-surface[data-theme='dark'] .wl-adm-topbar {
+    padding: 8px 12px;
+  }
+  .wl-admin-surface[data-theme='dark'] .wl-adm-topbar .title-group {
+    display: block;
+  }
+  .wl-admin-surface[data-theme='dark'] .wl-adm-topbar h1 {
+    font-size: 16px;
+  }
+  .wl-adm-topbar .right {
+    gap: 6px;
+  }
+  .wl-adm-topbar-signout {
+    padding: 5px 8px;
+  }
+}
 
