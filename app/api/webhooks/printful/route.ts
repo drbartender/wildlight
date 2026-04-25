@@ -2,15 +2,23 @@ export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 import crypto from 'node:crypto';
 import { pool, withTransaction } from '@/lib/db';
-import { sendOrderShipped } from '@/lib/email';
+import { sendOrderShipped, sendNeedsReviewAlert } from '@/lib/email';
 import { logger } from '@/lib/logger';
 
-function verify(bodyRaw: string, headerSig: string | null): boolean {
-  const secret = process.env.PRINTFUL_WEBHOOK_SECRET;
-  if (!secret || !headerSig) return false;
-  const expected = crypto.createHmac('sha256', secret).update(bodyRaw).digest('hex');
+// Printful's v1 webhook API does not issue a signing secret or HMAC the body —
+// authentication is via a high-entropy token embedded in the registered URL.
+// We compare it constant-time against PRINTFUL_WEBHOOK_SECRET. Rotate by
+// re-registering the webhook (POST /webhooks) with a fresh token in the URL.
+function verify(req: Request): boolean {
+  const expected = process.env.PRINTFUL_WEBHOOK_SECRET;
+  if (!expected) return false;
+  const provided = new URL(req.url).searchParams.get('token');
+  if (!provided) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
   try {
-    return crypto.timingSafeEqual(Buffer.from(headerSig), Buffer.from(expected));
+    return crypto.timingSafeEqual(a, b);
   } catch {
     return false;
   }
@@ -29,11 +37,10 @@ interface PfEvent {
 }
 
 export async function POST(req: Request) {
-  const body = await req.text();
-  const sig = req.headers.get('x-pf-signature');
-  if (!verify(body, sig)) {
-    return NextResponse.json({ error: 'invalid signature' }, { status: 401 });
+  if (!verify(req)) {
+    return NextResponse.json({ error: 'invalid token' }, { status: 401 });
   }
+  const body = await req.text();
 
   let event: PfEvent;
   try {
@@ -162,6 +169,11 @@ export async function POST(req: Request) {
           [ourId, JSON.stringify({ reason })],
         );
       });
+      try {
+        await sendNeedsReviewAlert(ourId, `Printful: ${reason}`);
+      } catch (err) {
+        logger.warn('needs_review alert failed', { err, orderId: ourId });
+      }
     }
 
     await pool.query(
