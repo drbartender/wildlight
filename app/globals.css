@@ -308,6 +308,70 @@ html[data-mood='ink'] .wl-surface::after {
   margin-left: 6px;
 }
 
+/* Hamburger trigger — hidden on desktop, surfaces on ≤760px so mobile
+   visitors can reach the nav links the layout otherwise tucks away. */
+.wl-nav-burger {
+  display: none;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink);
+}
+.wl-nav-burger:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
+}
+.wl-nav-burger-icon {
+  position: relative;
+  display: block;
+  width: 22px;
+  height: 14px;
+}
+.wl-nav-burger-icon span {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1.5px;
+  background: currentColor;
+  transition:
+    transform 220ms ease,
+    opacity 200ms ease,
+    top 220ms ease;
+}
+.wl-nav-burger-icon span:nth-child(1) {
+  top: 0;
+}
+.wl-nav-burger-icon span:nth-child(2) {
+  top: 6px;
+}
+.wl-nav-burger-icon span:nth-child(3) {
+  top: 12px;
+}
+.wl-nav-burger-icon.is-open span:nth-child(1) {
+  top: 6px;
+  transform: rotate(45deg);
+}
+.wl-nav-burger-icon.is-open span:nth-child(2) {
+  opacity: 0;
+}
+.wl-nav-burger-icon.is-open span:nth-child(3) {
+  top: 6px;
+  transform: rotate(-45deg);
+}
+
+/* Mobile drawer — desktop renders nothing; mobile gets a paper sheet that
+   slides in below the sticky nav (z-index 9 sits under the nav at 10 so
+   the close trigger stays tappable in the same spot it opened from). */
+.wl-nav-sheet {
+  display: none;
+}
+
 /* Mobile nav */
 @media (max-width: 760px) {
   .wl-nav {
@@ -319,13 +383,118 @@ html[data-mood='ink'] .wl-surface::after {
     display: none;
   }
   .wl-nav .nav-right {
-    gap: 12px;
+    gap: 10px;
+  }
+  .wl-nav .cart-link {
+    font-size: 10px;
+    letter-spacing: 0.16em;
   }
   .wl-mark-text .w1 {
     font-size: 18px;
   }
   .wl-mark-text .w2 {
     font-size: 8.5px;
+  }
+  .wl-nav-burger {
+    display: inline-flex;
+  }
+  .wl-nav-sheet {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    inset: 0;
+    z-index: 9;
+    background: var(--paper);
+    visibility: hidden;
+    opacity: 0;
+    transform: translateY(-8px);
+    /* Asymmetric visibility timing — flips instantly on open so the
+       fade-in plays, but waits for the fade-out before going hidden. */
+    transition:
+      opacity 220ms ease,
+      transform 240ms ease,
+      visibility 0s linear 240ms;
+    overflow-y: auto;
+  }
+  .wl-nav-sheet.is-open {
+    visibility: visible;
+    opacity: 1;
+    transform: translateY(0);
+    transition:
+      opacity 220ms ease,
+      transform 240ms ease,
+      visibility 0s linear 0s;
+  }
+  .wl-nav-sheet::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(
+      90deg,
+      var(--s-red),
+      var(--s-orange),
+      var(--s-yellow),
+      var(--s-green),
+      var(--s-teal),
+      var(--s-blue),
+      var(--s-magenta)
+    );
+    opacity: 0.7;
+  }
+  .wl-nav-sheet-inner {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 84px 24px 32px;
+  }
+  .wl-nav-sheet-list {
+    display: flex;
+    flex-direction: column;
+  }
+  .wl-nav-sheet a.nav-link {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 18px 0;
+    border: 0;
+    border-bottom: 1px solid var(--rule);
+    font-family: var(--f-display);
+    font-size: 36px;
+    letter-spacing: -0.005em;
+    color: var(--ink-2);
+  }
+  .wl-nav-sheet a.nav-link::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 100px;
+    background: transparent;
+    border: 1px solid var(--rule-strong);
+    flex-shrink: 0;
+  }
+  .wl-nav-sheet a.nav-link.active {
+    color: var(--ink);
+  }
+  .wl-nav-sheet a.nav-link.active::before {
+    background: var(--s-orange);
+    border-color: var(--s-orange);
+  }
+  .wl-nav-sheet-foot {
+    margin-top: auto;
+    padding-top: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-family: var(--f-mono);
+    font-weight: 500;
+    font-size: 10.5px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-3);
   }
 }
 
@@ -545,6 +714,50 @@ html[data-mood='ink'] .wl-surface::after {
   font-size: 24px;
   color: var(--ink);
   margin-top: 16px;
+}
+
+/* Home — mobile. The masthead/lede/sheet were desktop-only grids; under
+   760px the side stats stack, padding shrinks, and the index header drops
+   the connecting rule so the title and count fit on one row. */
+@media (max-width: 760px) {
+  .wl-masthead {
+    grid-template-columns: 1fr;
+    gap: 28px;
+    padding: 40px 20px 32px;
+    align-items: start;
+  }
+  .wl-masthead h1 {
+    font-size: clamp(40px, 11vw, 64px);
+  }
+  .wl-masthead-side {
+    text-align: left;
+    min-width: 0;
+  }
+  .wl-masthead-side > div {
+    justify-content: flex-start;
+  }
+  .wl-masthead-lede {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 28px 20px 36px;
+  }
+  .wl-masthead-lede p {
+    font-size: 17px;
+  }
+  .wl-sheet {
+    padding: 36px 20px 56px;
+  }
+  .wl-sheet-h {
+    grid-template-columns: 1fr auto;
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  .wl-sheet-h h2 {
+    font-size: 32px;
+  }
+  .wl-sheet-h .wl-rule {
+    display: none;
+  }
 }
 
 /* Contact sheet — index of plates grid */
