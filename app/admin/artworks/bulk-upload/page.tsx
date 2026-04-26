@@ -112,6 +112,42 @@ export default function BulkUploadPage() {
   const [created, setCreated] = useState<CreatedRow[]>([]);
   const browseRef = useRef<HTMLInputElement>(null);
 
+  const [orphanCount, setOrphanCount] = useState<number | null>(null);
+  const [demoting, setDemoting] = useState(false);
+
+  const reloadOrphans = useCallback(async () => {
+    const r = await fetch('/api/admin/artworks/bulk-upload/cleanup-orphans');
+    if (!r.ok) return;
+    const d = (await r.json()) as { count: number };
+    setOrphanCount(d.count);
+  }, []);
+
+  useEffect(() => {
+    void reloadOrphans();
+  }, [reloadOrphans]);
+
+  async function demote() {
+    if (!orphanCount) return;
+    if (
+      !confirm(
+        `Demote ${orphanCount} artwork(s) to draft? They keep their slugs and metadata, but stop displaying publicly.`,
+      )
+    ) {
+      return;
+    }
+    setDemoting(true);
+    try {
+      const r = await fetch('/api/admin/artworks/bulk-upload/cleanup-orphans', {
+        method: 'POST',
+      });
+      if (!r.ok) throw new Error(`demote ${r.status}`);
+      await reloadOrphans();
+      void reload();
+    } finally {
+      setDemoting(false);
+    }
+  }
+
   const reload = useCallback(async () => {
     const r = await fetch('/api/admin/artworks?needs_print=1');
     const d = (await r.json()) as { rows: NeedsRow[] };
@@ -309,7 +345,7 @@ export default function BulkUploadPage() {
             />
           </div>
 
-          {created.length > 0 && (
+          {created.length === 0 ? null : (
             <ul className="wl-bulk-rows wl-bulk-created">
               {created.map((c) => (
                 <li key={c.tempId} className="wl-bulk-row" data-state={c.state.kind}>
@@ -350,6 +386,33 @@ export default function BulkUploadPage() {
                 </li>
               ))}
             </ul>
+          )}
+        </section>
+
+        <section className="wl-adm-card wl-bulk-section">
+          <header className="wl-bulk-section-header">
+            <h2>Cleanup</h2>
+          </header>
+          {orphanCount === null ? (
+            <p className="wl-bulk-empty">Checking…</p>
+          ) : orphanCount === 0 ? (
+            <p className="wl-bulk-empty">
+              No published artworks are missing a master.
+            </p>
+          ) : (
+            <div className="wl-bulk-cleanup">
+              <p>
+                <strong>{orphanCount}</strong> published artwork(s) have no
+                print master.
+              </p>
+              <button
+                className="wl-adm-btn small danger"
+                onClick={demote}
+                disabled={demoting}
+              >
+                {demoting ? 'Demoting…' : `Demote ${orphanCount} to draft`}
+              </button>
+            </div>
           )}
         </section>
       </div>

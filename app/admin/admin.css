@@ -2516,3 +2516,9 @@
 }
 .wl-bulk-error { color: var(--adm-red); }
 .wl-bulk-created { margin-top: 16px; }
+
+.wl-bulk-cleanup {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap;
+}
+.wl-bulk-cleanup p { margin: 0; }
