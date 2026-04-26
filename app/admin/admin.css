@@ -2493,3 +2493,26 @@
 }
 .wl-bulk-processing { font-size: 12px; color: var(--adm-muted); font-style: italic; }
 .wl-bulk-done { font-size: 13px; color: var(--adm-green); }
+
+.wl-bulk-drop {
+  border: 2px dashed var(--adm-rule);
+  border-radius: var(--adm-radius-lg);
+  padding: 32px;
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.wl-bulk-drop:hover,
+.wl-bulk-drop:focus-visible {
+  background: var(--adm-hover);
+  border-color: var(--adm-green);
+  outline: none;
+}
+.wl-bulk-drop p { margin: 0; }
+.wl-bulk-drop-sub {
+  font-size: 12px;
+  color: var(--adm-muted);
+  margin-top: 6px !important;
+}
+.wl-bulk-error { color: var(--adm-red); }
+.wl-bulk-created { margin-top: 16px; }

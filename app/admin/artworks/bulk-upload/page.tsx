@@ -74,10 +74,43 @@ async function finalizeUpdate(
   return r.json();
 }
 
+async function finalizeCreate(
+  stagedKey: string,
+  collectionId: number | null,
+): Promise<{ artworkId: number; slug: string; image_web_url: string }> {
+  const r = await fetch('/api/admin/artworks/bulk-upload/finalize', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: 'create', stagedKey, collectionId }),
+  });
+  if (!r.ok) {
+    const body = (await r.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error || `finalize ${r.status}`);
+  }
+  return r.json();
+}
+
+interface CreatedRow {
+  tempId: string;
+  filename: string;
+  state:
+    | { kind: 'uploading'; pct: number }
+    | { kind: 'processing' }
+    | { kind: 'done'; artworkId: number; slug: string; title: string }
+    | { kind: 'error'; message: string };
+}
+
 export default function BulkUploadPage() {
   const [rows, setRows] = useState<NeedsRow[]>([]);
   const [states, setStates] = useState<Record<number, RowState>>({});
   const [hideDone, setHideDone] = useState(false);
+
+  const [collections, setCollections] = useState<
+    Array<{ id: number; title: string }>
+  >([]);
+  const [defaultCollection, setDefaultCollection] = useState<number | null>(null);
+  const [created, setCreated] = useState<CreatedRow[]>([]);
+  const browseRef = useRef<HTMLInputElement>(null);
 
   const reload = useCallback(async () => {
     const r = await fetch('/api/admin/artworks?needs_print=1');
@@ -89,14 +122,27 @@ export default function BulkUploadPage() {
     void reload();
   }, [reload]);
 
+  useEffect(() => {
+    void (async () => {
+      const r = await fetch('/api/admin/collections');
+      const d = (await r.json()) as { rows: Array<{ id: number; title: string }> };
+      setCollections(d.rows.map((c) => ({ id: c.id, title: c.title })));
+      if (d.rows.length) setDefaultCollection(d.rows[0].id);
+    })();
+  }, []);
+
   const setRowState = useCallback((id: number, s: RowState) => {
     setStates((prev) => ({ ...prev, [id]: s }));
   }, []);
 
   useEffect(() => {
-    const inFlight = Object.values(states).some(
-      (s) => s.kind === 'uploading' || s.kind === 'processing',
-    );
+    const inFlight =
+      Object.values(states).some(
+        (s) => s.kind === 'uploading' || s.kind === 'processing',
+      ) ||
+      created.some(
+        (c) => c.state.kind === 'uploading' || c.state.kind === 'processing',
+      );
     if (!inFlight) return;
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
@@ -104,7 +150,7 @@ export default function BulkUploadPage() {
     };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
-  }, [states]);
+  }, [states, created]);
 
   async function uploadOne(row: NeedsRow, file: File) {
     setRowState(row.id, { kind: 'uploading', pct: 0 });
@@ -122,6 +168,48 @@ export default function BulkUploadPage() {
         message: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  async function uploadNew(file: File) {
+    const tempId = crypto.randomUUID();
+    const updateState = (state: CreatedRow['state']) =>
+      setCreated((prev) =>
+        prev.map((p) => (p.tempId === tempId ? { ...p, state } : p)),
+      );
+    setCreated((prev) => [
+      ...prev,
+      { tempId, filename: file.name, state: { kind: 'uploading', pct: 0 } },
+    ]);
+    try {
+      const { key, url } = await presign(file.name, file.type, file.size);
+      await putWithProgress(url, file, (pct) =>
+        updateState({ kind: 'uploading', pct }),
+      );
+      updateState({ kind: 'processing' });
+      const res = await finalizeCreate(key, defaultCollection);
+      const title = await fetch(`/api/admin/artworks/${res.artworkId}`)
+        .then((r) => r.json())
+        .then((d: { artwork: { title: string } }) => d.artwork.title)
+        .catch(() => res.slug);
+      updateState({
+        kind: 'done',
+        artworkId: res.artworkId,
+        slug: res.slug,
+        title,
+      });
+      void reload();
+    } catch (err) {
+      updateState({
+        kind: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  function onDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    const files = Array.from(e.dataTransfer.files);
+    files.forEach(uploadNew);
   }
 
   const visibleRows = hideDone
@@ -166,6 +254,103 @@ export default function BulkUploadPage() {
               />
             ))}
           </ul>
+        </section>
+
+        <section className="wl-adm-card wl-bulk-section">
+          <header className="wl-bulk-section-header">
+            <h2>Add new artworks</h2>
+            <label className="wl-bulk-toggle">
+              Default collection:
+              <select
+                value={defaultCollection ?? ''}
+                onChange={(e) =>
+                  setDefaultCollection(
+                    e.target.value ? Number(e.target.value) : null,
+                  )
+                }
+              >
+                <option value="">(none)</option>
+                {collections.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </header>
+
+          <div
+            className="wl-bulk-drop"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={onDrop}
+            onClick={() => browseRef.current?.click()}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') browseRef.current?.click();
+            }}
+          >
+            <p>Drop files here, or click to browse</p>
+            <p className="wl-bulk-drop-sub">
+              Each file becomes a new draft artwork — AI drafts the title and
+              description on upload.
+            </p>
+            <input
+              ref={browseRef}
+              type="file"
+              accept="image/jpeg,image/png,image/tiff"
+              multiple
+              hidden
+              onChange={(e) => {
+                const files = Array.from(e.target.files ?? []);
+                files.forEach(uploadNew);
+                e.target.value = '';
+              }}
+            />
+          </div>
+
+          {created.length > 0 && (
+            <ul className="wl-bulk-rows wl-bulk-created">
+              {created.map((c) => (
+                <li key={c.tempId} className="wl-bulk-row" data-state={c.state.kind}>
+                  <div className="wl-bulk-row-thumb">
+                    <div className="wl-bulk-row-thumb-placeholder">+</div>
+                  </div>
+                  <div className="wl-bulk-row-meta">
+                    <div className="wl-bulk-row-title">{c.filename}</div>
+                    <div className="wl-bulk-row-sub">
+                      {c.state.kind === 'done' && (
+                        <a href={`/admin/artworks/${c.state.artworkId}`}>
+                          → &ldquo;{c.state.title}&rdquo; ({c.state.slug}) — review &amp; publish
+                        </a>
+                      )}
+                      {c.state.kind === 'error' && c.state.message}
+                    </div>
+                  </div>
+                  <div className="wl-bulk-row-state">
+                    {c.state.kind === 'uploading' && (
+                      <div className="wl-bulk-progress">
+                        <div
+                          className="wl-bulk-progress-bar"
+                          style={{ width: `${c.state.pct}%` }}
+                        />
+                        <span>{c.state.pct}%</span>
+                      </div>
+                    )}
+                    {c.state.kind === 'processing' && (
+                      <span className="wl-bulk-processing">processing…</span>
+                    )}
+                    {c.state.kind === 'done' && (
+                      <span className="wl-bulk-done">✓ created</span>
+                    )}
+                    {c.state.kind === 'error' && (
+                      <span className="wl-bulk-error">✗</span>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       </div>
     </>
