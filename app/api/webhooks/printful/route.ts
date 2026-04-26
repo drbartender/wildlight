@@ -136,7 +136,7 @@ export async function POST(req: Request) {
         });
       }
     } else if (event.type === 'package_delivered') {
-      await withTransaction(async (client) => {
+      const updated = await withTransaction(async (client) => {
         const r = await client.query<{ id: number }>(
           `UPDATE orders SET status='delivered', updated_at=NOW()
            WHERE id = $1 AND printful_attempt = $2 RETURNING id`,
@@ -149,12 +149,20 @@ export async function POST(req: Request) {
             [ourId],
           );
         }
+        return r.rowCount ?? 0;
       });
+      if (!updated) {
+        logger.warn('printful webhook ignored: stale attempt', {
+          orderId: ourId,
+          attempt,
+          type: event.type,
+        });
+      }
     } else if (
       event.type === 'package_returned' ||
       event.type === 'order_canceled'
     ) {
-      await withTransaction(async (client) => {
+      const updated = await withTransaction(async (client) => {
         const r = await client.query(
           `UPDATE orders SET status='canceled', updated_at=NOW()
            WHERE id = $1 AND printful_attempt = $2`,
@@ -167,7 +175,15 @@ export async function POST(req: Request) {
             [ourId, JSON.stringify({ via: event.type })],
           );
         }
+        return r.rowCount ?? 0;
       });
+      if (!updated) {
+        logger.warn('printful webhook ignored: stale attempt', {
+          orderId: ourId,
+          attempt,
+          type: event.type,
+        });
+      }
     } else if (
       event.type === 'order_failed' ||
       event.type === 'order_put_hold'
@@ -191,6 +207,13 @@ export async function POST(req: Request) {
         }
         return r.rowCount ?? 0;
       });
+      if (!updated) {
+        logger.warn('printful webhook ignored: stale attempt', {
+          orderId: ourId,
+          attempt,
+          type: event.type,
+        });
+      }
       if (updated) {
         try {
           await sendNeedsReviewAlert(ourId, `Printful: ${reason}`);

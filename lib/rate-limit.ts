@@ -67,10 +67,11 @@ export async function recordAndCheckRateLimit(
   const keyHash = hashKey(scope, key);
 
   const count = await withTransaction(async (client) => {
-    // Two-arg advisory lock with hashtext gives a stable bigint per key.
-    // Released automatically at txn end.
+    // Two-arg advisory lock with hashtext partitions scope and key into the
+    // two halves of the bigint, so unrelated scopes can't collide on the
+    // same lock slot under hashtext's 32-bit space. Released at txn end.
     await client.query(
-      `SELECT pg_advisory_xact_lock(hashtext($1 || ':' || $2))`,
+      `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`,
       [scope, keyHash],
     );
     await client.query(

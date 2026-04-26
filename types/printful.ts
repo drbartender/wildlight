@@ -57,15 +57,3 @@ export interface PrintfulOrder {
   }>;
 }
 
-export interface PrintfulWebhookEvent {
-  type: string;
-  data: {
-    id?: number;
-    external_id?: string;
-    order?: PrintfulOrder;
-    shipment?: {
-      tracking_url?: string;
-      tracking_number?: string;
-    };
-  };
-}

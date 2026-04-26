@@ -130,11 +130,13 @@ export async function POST(req: Request) {
   // checkout-creation and webhook delivery can't silently rewrite the
   // customer's order. Fail-soft: if the insert fails the webhook falls back
   // to the live catalog and flags needs_review.
+  // Quantity lives in session.metadata.cart_json, so the snapshot only
+  // needs catalog-derived fields. Keeping the snapshot shape aligned with
+  // VariantInfo means no field drift between writer and webhook reader.
   const snapshot = lines.map((l) => {
     const v = byId.get(l.variantId)!;
     return {
       id: v.id,
-      quantity: l.quantity,
       artwork_id: v.artwork_id,
       artwork_title: v.artwork_title,
       artwork_slug: v.artwork_slug,
