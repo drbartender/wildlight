@@ -258,6 +258,12 @@ export default function AdminArtworksPage() {
               : `Apply full template to ${emptyVariants.length} empty`}
           </button>
           <Link
+            href="/admin/artworks/bulk-upload"
+            className="wl-adm-btn small"
+          >
+            Bulk upload
+          </Link>
+          <Link
             href="/admin/artworks/new"
             className="wl-adm-btn small primary"
           >
