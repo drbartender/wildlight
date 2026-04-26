@@ -43,6 +43,8 @@ Scripts:
 | `npm run curate:build` | Regenerate `scraped/curate.html` (the 50-pick review page) from the manifest |
 | `npm run publish:selections [-- --apply]` | Flip selected drafts to `published`; dry-run by default |
 | `npm run sync:printful <id \| all>` | Create Printful sync_products for artwork(s) |
+| `npm run demote:orphans [-- --apply]` | Demote published artworks missing a print master to draft (dry-run by default) |
+| `npm run cleanup:staged [-- --apply]` | Reap R2 `incoming/*` staging keys older than 24h (private + public buckets, dry-run by default) |
 
 ## Deploy
 
@@ -56,4 +58,5 @@ Scripts:
 - **Money** lives as integer cents everywhere; `lib/money.ts` is the single source of truth for formatting and rounding.
 - **Webhooks** are authenticated (Stripe via HMAC body signature, Printful via token-in-URL — see Deploy section), idempotent-per-`event_id` via the `webhook_events` table, and fail-closed (any Printful error marks the order `needs_review` + alerts admins rather than silently dropping).
 - **Admin UI** has a single role; API keys and env vars are NOT editable in the UI — rotate via Vercel dashboard.
-- **Image tiers**: `image_web_url` (R2 public, 1600–2000px) for catalog display, `image_print_url` (R2 private, full resolution) for Printful fulfillment. The print URL is nullable — artworks can be published before a print file is ready, and orders that arrive for prints without files are held in `needs_review`.
+- **Image tiers**: `image_web_url` (R2 public, 2000px on long edge, sRGB JPEG q85) for catalog display; `image_print_url` (R2 private, full resolution) for Printful fulfillment. The web tier is **derived from the master at upload time** via `lib/image-derive.ts` (`sharp`) — admins deliver one file per artwork, not two. The PATCH and bulk-publish routes both reject `status='published'` when `image_print_url IS NULL`; the Stripe webhook keeps a `needs_review` defensive branch as a backstop.
+- **Bulk uploader**: `/admin/artworks/bulk-upload` adds masters to existing artworks (Section A), creates new draft artworks from masters via the AI-draft pipeline (Section B), and demotes orphan published-without-master rows to draft (Section C). Browser uploads directly to R2 via presigned PUT — file bytes never traverse Vercel.
