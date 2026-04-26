@@ -22,10 +22,13 @@ Next.js 16 App Router · Postgres (Neon) · Stripe · Printful · Vercel.
 - **Raw SQL via `pg`** (`lib/db.ts`). No ORM, no query-builder. Use
   `withTransaction` for multi-statement writes. `statement_timeout = 15s` —
   any single query that needs longer is a bug.
-- **Webhook handlers** must be signature-verified and idempotent via the
-  `webhook_events` table. Canonical example:
-  `app/api/webhooks/stripe/route.ts`. Fail closed — a Printful error marks
-  the order `needs_review` + alerts admins, it does not silently drop.
+- **Webhook handlers** must be authenticated and idempotent via the
+  `webhook_events` table. Stripe uses HMAC-SHA256 body signature
+  (canonical example: `app/api/webhooks/stripe/route.ts`); Printful uses
+  a self-generated token in the registered URL (`?token=…` checked
+  constant-time against `PRINTFUL_WEBHOOK_SECRET` — Printful's v1 API
+  doesn't issue HMAC secrets). Fail closed — a Printful error marks the
+  order `needs_review` + alerts admins, it does not silently drop.
 - **Two image tiers.** `image_web_url` (R2 public, ~1600–2000px) is for
   catalog display. `image_print_url` (R2 private, full-res) is signed at
   fulfillment time, not at publish time. Print URL is a path key matching

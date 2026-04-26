@@ -15,10 +15,17 @@ export async function register() {
 }
 
 export const onRequestError: typeof import('@sentry/nextjs').captureRequestError = async (
-  ...args
+  error,
+  request,
+  errorContext,
 ) => {
   const dsn = process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN;
   if (!dsn) return;
   const Sentry = await import('@sentry/nextjs');
-  return Sentry.captureRequestError(...args);
+  // Webhook URLs carry the auth token in `?token=` (Printful) — scrub before
+  // forwarding so the secret doesn't end up in Sentry events.
+  const safe = request?.path
+    ? { ...request, path: request.path.replace(/([?&])token=[^&]*/gi, '$1token=[redacted]') }
+    : request;
+  return Sentry.captureRequestError(error, safe, errorContext);
 };

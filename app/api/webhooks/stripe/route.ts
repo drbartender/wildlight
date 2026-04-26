@@ -213,25 +213,28 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     });
   };
 
+  // Wrap alert sends so a Resend hiccup is logged distinctly from a real
+  // processing failure (which is what `webhook_events.error` is for).
+  const alert = async (reason: string) => {
+    try {
+      await sendNeedsReviewAlert(orderId, reason);
+    } catch (err) {
+      logger.warn('needs_review alert failed', { err, orderId });
+    }
+  };
+
   if (priceDrift) {
     const reason = `price drift: db subtotal ${dbSubtotal} vs stripe amount_subtotal ${
       session.amount_subtotal || 0
     } — verify pricing before fulfilling`;
     await flagOrder(reason);
-    await sendNeedsReviewAlert(
-      orderId,
-      'price drift between DB and Stripe checkout — review before fulfilling',
-    );
+    await alert('price drift between DB and Stripe checkout — review before fulfilling');
   } else if (cart.some((l) => !byId.get(l.variantId)?.image_print_url)) {
     await flagOrder('missing image_print_url on one or more artworks');
-    await sendNeedsReviewAlert(
-      orderId,
-      'image_print_url missing — upload print file in /admin/artworks/<id>',
-    );
+    await alert('image_print_url missing — upload print file in /admin/artworks/<id>');
   } else if (cart.some((l) => !byId.get(l.variantId)?.printful_sync_variant_id)) {
     await flagOrder('printful_sync_variant_id missing on one or more variants');
-    await sendNeedsReviewAlert(
-      orderId,
+    await alert(
       'printful_sync_variant_id missing — run `npm run sync:printful <artworkId>`',
     );
   } else {
@@ -294,7 +297,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
       const reason = err instanceof Error ? err.message : String(err);
       logger.error('printful submit failed', err, { orderId });
       await flagOrder(reason);
-      await sendNeedsReviewAlert(orderId, reason);
+      await alert(reason);
     }
   }
 
