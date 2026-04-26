@@ -7,6 +7,7 @@ export interface PrintfulSyncProduct {
 
 export interface PrintfulSyncVariant {
   id: number;
+  external_id?: string;
   variant_id: number;
   retail_price: string;
   name: string;

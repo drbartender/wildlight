@@ -95,19 +95,48 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   if (!cart.length) throw new Error('empty cart metadata');
   const ids = cart.map((l) => l.variantId);
 
-  const { rows: variants } = await pool.query<VariantInfo>(
-    `SELECT v.id, v.artwork_id, v.printful_sync_variant_id, v.type, v.size, v.finish,
-            v.price_cents, v.cost_cents,
-            a.title AS artwork_title, a.slug AS artwork_slug,
-            a.image_web_url, a.image_print_url,
-            c.title AS collection_title
-     FROM artwork_variants v
-     JOIN artworks a ON a.id = v.artwork_id
-     LEFT JOIN collections c ON c.id = a.collection_id
-     WHERE v.id = ANY($1)`,
-    [ids],
+  // Prefer the immutable snapshot written by /api/checkout. A catalog edit
+  // between checkout creation and webhook delivery cannot rewrite the
+  // order under us if the snapshot is present.
+  const intent = await pool.query<{ snapshot: VariantInfo[] }>(
+    `SELECT snapshot FROM checkout_intents WHERE stripe_session_id = $1`,
+    [session.id],
   );
-  const byId = new Map<number, VariantInfo>(variants.map((v) => [v.id, v]));
+
+  let byId: Map<number, VariantInfo>;
+  let snapshotIsLive = false;
+  const snap = intent.rows[0]?.snapshot;
+  // Spot-check the first row so a JSONB shape drift surfaces here instead
+  // of in the Printful submit with bad data. A fuller Zod parse is overkill
+  // for a hot path we wrote; one structural check catches real drift.
+  const snapshotLooksValid =
+    Array.isArray(snap) &&
+    snap.length > 0 &&
+    typeof (snap[0] as { id?: unknown }).id === 'number' &&
+    typeof (snap[0] as { price_cents?: unknown }).price_cents === 'number';
+  if (intent.rowCount && snapshotLooksValid) {
+    byId = new Map<number, VariantInfo>(
+      (snap as VariantInfo[]).map((v) => [v.id, v]),
+    );
+  } else {
+    // Fallback: pre-snapshot orders, or a write that failed at checkout
+    // creation. Read live and flag for review since the catalog may have
+    // drifted between checkout and webhook delivery.
+    snapshotIsLive = true;
+    const { rows: variants } = await pool.query<VariantInfo>(
+      `SELECT v.id, v.artwork_id, v.printful_sync_variant_id, v.type, v.size, v.finish,
+              v.price_cents, v.cost_cents,
+              a.title AS artwork_title, a.slug AS artwork_slug,
+              a.image_web_url, a.image_print_url,
+              c.title AS collection_title
+       FROM artwork_variants v
+       JOIN artworks a ON a.id = v.artwork_id
+       LEFT JOIN collections c ON c.id = a.collection_id
+       WHERE v.id = ANY($1)`,
+      [ids],
+    );
+    byId = new Map<number, VariantInfo>(variants.map((v) => [v.id, v]));
+  }
 
   // Sanity-check: the sum of our DB prices × quantities should match what
   // Stripe says the customer paid for the subtotal. If it doesn't, someone
@@ -223,6 +252,17 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     }
   };
 
+  if (snapshotIsLive) {
+    // Telemetry only — priceDrift below covers monetary correctness, and a
+    // legacy pre-migration order can hit this path legitimately. Worth
+    // surfacing in logs so a sudden uptick after deploy signals a broken
+    // snapshot write at /api/checkout.
+    logger.warn('checkout_intent snapshot missing — fell back to live catalog', {
+      orderId,
+      sessionId: session.id,
+    });
+  }
+
   if (priceDrift) {
     const reason = `price drift: db subtotal ${dbSubtotal} vs stripe amount_subtotal ${
       session.amount_subtotal || 0
@@ -260,8 +300,25 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
           };
         }),
       );
+      // Bump attempt counter so external_id encodes which submit this
+      // webhook belongs to. Stale webhooks for older attempts will fail
+      // the (id, attempt) match in the Printful webhook handler and be
+      // silently ignored.
+      const bump = await pool.query<{ printful_attempt: number }>(
+        `UPDATE orders SET printful_attempt = printful_attempt + 1 WHERE id = $1
+         RETURNING printful_attempt`,
+        [orderId],
+      );
+      if (!bump.rowCount) {
+        // Should never happen — orderId was just inserted in the same
+        // function. A null fallback would silently submit `order_<id>_1`
+        // against a non-existent row; better to fail loud and let the
+        // outer catch flag the order.
+        throw new Error(`order ${orderId} disappeared between insert and attempt bump`);
+      }
+      const attempt = bump.rows[0].printful_attempt;
       const pfOrder = await printful.createOrder({
-        external_id: `order_${orderId}`,
+        external_id: `order_${orderId}_${attempt}`,
         recipient: {
           name: session.customer_details?.name || '',
           address1: addr?.line1 || '',

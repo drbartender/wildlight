@@ -35,9 +35,9 @@ export const printful = {
     call<PrintfulOrder>(`/orders/${id}`, { method: 'DELETE' }),
   listSyncProducts: () => call<unknown[]>('/store/products'),
   createSyncProduct: (body: unknown) =>
-    call<{ sync_variants?: Array<{ id: number }> }>('/store/products', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
+    call<{ sync_variants?: Array<{ id: number; external_id?: string }> }>(
+      '/store/products',
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
   getSyncProduct: (id: number) => call<unknown>(`/store/products/${id}`),
 };

@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { pool } from '@/lib/db';
 import { getStripe } from '@/lib/stripe';
+import { qualifiesForFreeShipping, subtotalCents } from '@/lib/pricing';
+import { logger } from '@/lib/logger';
 
 const Body = z.object({
   lines: z
@@ -19,6 +21,8 @@ const Body = z.object({
 interface VariantRow {
   id: number;
   price_cents: number;
+  cost_cents: number;
+  printful_sync_variant_id: number | null;
   type: string;
   size: string;
   finish: string | null;
@@ -26,6 +30,7 @@ interface VariantRow {
   artwork_title: string;
   artwork_slug: string;
   image_web_url: string;
+  image_print_url: string | null;
   collection_title: string | null;
 }
 
@@ -38,8 +43,10 @@ export async function POST(req: Request) {
   const ids = lines.map((l) => l.variantId);
 
   const { rows } = await pool.query<VariantRow>(
-    `SELECT v.id, v.price_cents, v.type, v.size, v.finish, v.artwork_id,
-            a.title AS artwork_title, a.slug AS artwork_slug, a.image_web_url,
+    `SELECT v.id, v.price_cents, v.cost_cents, v.printful_sync_variant_id,
+            v.type, v.size, v.finish, v.artwork_id,
+            a.title AS artwork_title, a.slug AS artwork_slug,
+            a.image_web_url, a.image_print_url,
             c.title AS collection_title
      FROM artwork_variants v
      JOIN artworks a ON a.id = v.artwork_id
@@ -54,6 +61,17 @@ export async function POST(req: Request) {
 
   const byId = new Map<number, VariantRow>(rows.map((r) => [r.id, r]));
   const siteUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+
+  // Free shipping threshold lives in lib/pricing.ts so the storefront can
+  // show the "$X away from free shipping" hint with the same number.
+  const subtotal = subtotalCents(
+    lines.map((l) => ({
+      price_cents: byId.get(l.variantId)!.price_cents,
+      quantity: l.quantity,
+    })),
+  );
+  const freeShipping = qualifiesForFreeShipping(subtotal);
+  const shippingAmount = freeShipping ? 0 : 900;
 
   const stripe = getStripe();
   const session = await stripe.checkout.sessions.create({
@@ -88,8 +106,8 @@ export async function POST(req: Request) {
       {
         shipping_rate_data: {
           type: 'fixed_amount',
-          display_name: 'Standard shipping',
-          fixed_amount: { amount: 900, currency: 'usd' },
+          display_name: freeShipping ? 'Free shipping' : 'Standard shipping',
+          fixed_amount: { amount: shippingAmount, currency: 'usd' },
           delivery_estimate: {
             minimum: { unit: 'business_day', value: 4 },
             maximum: { unit: 'business_day', value: 10 },
@@ -97,12 +115,54 @@ export async function POST(req: Request) {
         },
       },
     ],
-    success_url: `${siteUrl}/orders/{CHECKOUT_SESSION_ID}?success=1`,
+    // Land on a redirector so the customer's browser only ever sees the
+    // public_token URL — the Stripe session id stays out of address bars,
+    // bookmarks, and outbound Referer headers.
+    success_url: `${siteUrl}/api/orders/by-session/{CHECKOUT_SESSION_ID}`,
     cancel_url: `${siteUrl}/cart?canceled=1`,
     metadata: {
       cart_json: JSON.stringify(lines),
     },
   });
+
+  // Persist an immutable per-line snapshot keyed by the Stripe session id.
+  // The webhook reads this to write order_items so a catalog edit between
+  // checkout-creation and webhook delivery can't silently rewrite the
+  // customer's order. Fail-soft: if the insert fails the webhook falls back
+  // to the live catalog and flags needs_review.
+  const snapshot = lines.map((l) => {
+    const v = byId.get(l.variantId)!;
+    return {
+      id: v.id,
+      quantity: l.quantity,
+      artwork_id: v.artwork_id,
+      artwork_title: v.artwork_title,
+      artwork_slug: v.artwork_slug,
+      image_web_url: v.image_web_url,
+      image_print_url: v.image_print_url,
+      collection_title: v.collection_title,
+      printful_sync_variant_id: v.printful_sync_variant_id,
+      type: v.type,
+      size: v.size,
+      finish: v.finish,
+      price_cents: v.price_cents,
+      cost_cents: v.cost_cents,
+    };
+  });
+  try {
+    await pool.query(
+      `INSERT INTO checkout_intents (stripe_session_id, snapshot)
+       VALUES ($1, $2)
+       ON CONFLICT (stripe_session_id) DO NOTHING`,
+      [session.id, JSON.stringify(snapshot)],
+    );
+  } catch (err) {
+    // Logging only — checkout already succeeded. Webhook falls back to
+    // live catalog if the intent row is missing.
+    logger.error('checkout_intents persist failed', err, {
+      sessionId: session.id,
+    });
+  }
 
   return NextResponse.json({ id: session.id, url: session.url });
 }

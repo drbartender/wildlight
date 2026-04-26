@@ -8,7 +8,7 @@
  *    a real, non-zero `printful_catalog_variant_id` (one-time lookup against
  *    the Printful Products API)
  */
-import { pool } from './db';
+import { pool, withTransaction } from './db';
 import { printful } from './printful';
 import { signedPrivateUrl } from './r2';
 import { findVariantSpec, type VariantType } from './variant-templates';
@@ -47,6 +47,7 @@ export async function syncArtworkProducts(artworkId: number): Promise<{ created:
   // the shared variant-templates table. Bail loud if anything is missing —
   // Printful will reject a sync_product with variant_id: 0 anyway.
   const syncVariants: Array<{
+    external_id: string;
     variant_id: number;
     retail_price: string;
     files: Array<{ url: string }>;
@@ -66,6 +67,11 @@ export async function syncArtworkProducts(artworkId: number): Promise<{ created:
       continue;
     }
     syncVariants.push({
+      // external_id is what Printful echoes back per sync_variant in the
+      // response. Joining on it (instead of array index) means a reordered
+      // response can't silently misassign printful_sync_variant_id and
+      // ship the wrong size/finish for the rest of the artwork's life.
+      external_id: `var_${v.id}`,
       variant_id: spec.printful_catalog_variant_id,
       retail_price: (v.price_cents / 100).toFixed(2),
       files: [{ url: signedUrl }],
@@ -84,12 +90,46 @@ export async function syncArtworkProducts(artworkId: number): Promise<{ created:
     sync_variants: syncVariants,
   });
 
+  // Build a Map keyed by Printful's echoed external_id, fall back to the
+  // numeric local id parsed from "var_<id>". If a returned row is missing
+  // external_id entirely, we have no safe way to assign — fail loud.
   const returned = result.sync_variants || [];
-  for (let i = 0; i < variants.rows.length && i < returned.length; i++) {
-    await pool.query(
-      `UPDATE artwork_variants SET printful_sync_variant_id = $1 WHERE id = $2`,
-      [returned[i].id, variants.rows[i].id],
-    );
+  const byVariantId = new Map<number, number>();
+  for (const r of returned) {
+    if (!r.external_id) continue;
+    const m = /^var_(\d+)$/.exec(r.external_id);
+    if (!m) continue;
+    byVariantId.set(parseInt(m[1], 10), r.id);
   }
-  return { created: returned.length };
+
+  // Atomic write: either every local variant gets its sync id stamped,
+  // or none of them do. A mismatch under the old per-variant pool.query
+  // loop left half-written rows that admin had to manually clean up.
+  const created = await withTransaction(async (client) => {
+    let n = 0;
+    const unmatched: number[] = [];
+    for (const v of variants.rows) {
+      const printfulSyncVariantId = byVariantId.get(v.id);
+      if (printfulSyncVariantId == null) {
+        unmatched.push(v.id);
+        continue;
+      }
+      await client.query(
+        `UPDATE artwork_variants SET printful_sync_variant_id = $1 WHERE id = $2`,
+        [printfulSyncVariantId, v.id],
+      );
+      n++;
+    }
+    if (unmatched.length) {
+      // Throw rolls back the partial UPDATEs above. Admin re-runs after
+      // fixing the catalog mismatch.
+      throw new ExternalServiceError(
+        'printful',
+        'sync_response_missing_external_id',
+        `Printful returned sync_variants with no external_id match for local variant ids: ${unmatched.join(', ')}`,
+      );
+    }
+    return n;
+  });
+  return { created };
 }

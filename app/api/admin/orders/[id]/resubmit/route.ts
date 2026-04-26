@@ -11,6 +11,7 @@ interface OrderRow {
   customer_email: string;
   customer_name: string | null;
   shipping_address: Record<string, string> | null;
+  printful_attempt: number;
 }
 
 interface ItemRow {
@@ -30,12 +31,16 @@ export async function POST(
 
   // Atomic state guard — only accept the resubmit if the order is currently
   // in `needs_review` AND has no `printful_order_id`. Prevents double-submission
-  // when an admin double-clicks the button or the page is stale.
+  // when an admin double-clicks the button or the page is stale. We also bump
+  // printful_attempt here so the new submit's external_id can't collide with
+  // any in-flight webhooks from the prior attempt.
   const claim = await pool.query<OrderRow>(
     `UPDATE orders
-     SET status = 'resubmitting', updated_at = NOW()
+     SET status = 'resubmitting',
+         printful_attempt = printful_attempt + 1,
+         updated_at = NOW()
      WHERE id = $1 AND status = 'needs_review' AND printful_order_id IS NULL
-     RETURNING id, customer_email, customer_name, shipping_address`,
+     RETURNING id, customer_email, customer_name, shipping_address, printful_attempt`,
     [id],
   );
   if (!claim.rowCount) {
@@ -106,7 +111,7 @@ export async function POST(
       })),
     );
     const pf = await printful.createOrder({
-      external_id: `order_${o.id}`,
+      external_id: `order_${o.id}_${o.printful_attempt}`,
       recipient: {
         name: o.customer_name || '',
         address1: addr.line1 || '',

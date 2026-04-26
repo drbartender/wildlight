@@ -66,9 +66,15 @@ export async function POST(req: Request) {
   }
 
   try {
-    const externalId = event?.data?.external_id; // our "order_<id>"
-    const idStr = String(externalId || '').replace(/^order_/, '');
-    const ourId = /^\d+$/.test(idStr) ? parseInt(idStr, 10) : 0;
+    // external_id formats:
+    //   order_<id>_<attempt>   — current (post-attempt-counter)
+    //   order_<id>             — legacy (pre-counter; matches attempt=0)
+    // Mismatched (id, attempt) pairs mean a stale Printful order is firing
+    // for an order that has since been resubmitted — ignore silently.
+    const externalId = String(event?.data?.external_id || '');
+    const m = /^order_(\d+)(?:_(\d+))?$/.exec(externalId);
+    const ourId = m ? parseInt(m[1], 10) : 0;
+    const attempt = m && m[2] != null ? parseInt(m[2], 10) : 0;
     if (!ourId || !Number.isSafeInteger(ourId)) {
       await pool.query(
         'UPDATE webhook_events SET processed_at = NOW() WHERE event_id = $1',
@@ -82,16 +88,18 @@ export async function POST(req: Request) {
       const trackingUrl = shipment?.tracking_url || null;
       const trackingNumber = shipment?.tracking_number || null;
       // UPDATE + event INSERT share one txn so a crash can't leave orders
-      // as shipped without a matching ledger row.
+      // as shipped without a matching ledger row. The (id, attempt) match
+      // ensures a stale shipment event doesn't mark a resubmitted order
+      // as shipped against the wrong Printful order id.
       const emailCtx = await withTransaction(async (client) => {
         const r = await client.query<{
           customer_email: string;
           public_token: string;
         }>(
-          `UPDATE orders SET status='shipped', tracking_url=$2, tracking_number=$3, updated_at=NOW()
-           WHERE id = $1
+          `UPDATE orders SET status='shipped', tracking_url=$3, tracking_number=$4, updated_at=NOW()
+           WHERE id = $1 AND printful_attempt = $2
            RETURNING customer_email, public_token`,
-          [ourId, trackingUrl, trackingNumber],
+          [ourId, attempt, trackingUrl, trackingNumber],
         );
         if (!r.rowCount) return null;
         await client.query(
@@ -120,12 +128,19 @@ export async function POST(req: Request) {
         } catch (err) {
           logger.warn('shipped email failed', { err, orderId: ourId });
         }
+      } else {
+        logger.warn('printful webhook ignored: stale attempt', {
+          orderId: ourId,
+          attempt,
+          type: event.type,
+        });
       }
     } else if (event.type === 'package_delivered') {
       await withTransaction(async (client) => {
         const r = await client.query<{ id: number }>(
-          `UPDATE orders SET status='delivered', updated_at=NOW() WHERE id = $1 RETURNING id`,
-          [ourId],
+          `UPDATE orders SET status='delivered', updated_at=NOW()
+           WHERE id = $1 AND printful_attempt = $2 RETURNING id`,
+          [ourId, attempt],
         );
         if (r.rowCount) {
           await client.query(
@@ -140,15 +155,18 @@ export async function POST(req: Request) {
       event.type === 'order_canceled'
     ) {
       await withTransaction(async (client) => {
-        await client.query(
-          `UPDATE orders SET status='canceled', updated_at=NOW() WHERE id = $1`,
-          [ourId],
+        const r = await client.query(
+          `UPDATE orders SET status='canceled', updated_at=NOW()
+           WHERE id = $1 AND printful_attempt = $2`,
+          [ourId, attempt],
         );
-        await client.query(
-          `INSERT INTO order_events (order_id, type, who, payload)
-           VALUES ($1, 'canceled', 'printful', $2::jsonb)`,
-          [ourId, JSON.stringify({ via: event.type })],
-        );
+        if (r.rowCount) {
+          await client.query(
+            `INSERT INTO order_events (order_id, type, who, payload)
+             VALUES ($1, 'canceled', 'printful', $2::jsonb)`,
+            [ourId, JSON.stringify({ via: event.type })],
+          );
+        }
       });
     } else if (
       event.type === 'order_failed' ||
@@ -158,21 +176,27 @@ export async function POST(req: Request) {
       // starts sending a free-form reason we don't want it bypassing the
       // 500-char note cap that admin-authored notes respect.
       const reason = String(event.type).slice(0, 500);
-      await withTransaction(async (client) => {
-        await client.query(
-          `UPDATE orders SET status='needs_review', notes=$2, updated_at=NOW() WHERE id = $1`,
-          [ourId, reason],
+      const updated = await withTransaction(async (client) => {
+        const r = await client.query(
+          `UPDATE orders SET status='needs_review', notes=$3, updated_at=NOW()
+           WHERE id = $1 AND printful_attempt = $2`,
+          [ourId, attempt, reason],
         );
-        await client.query(
-          `INSERT INTO order_events (order_id, type, who, payload)
-           VALUES ($1, 'printful_flagged', 'printful', $2::jsonb)`,
-          [ourId, JSON.stringify({ reason })],
-        );
+        if (r.rowCount) {
+          await client.query(
+            `INSERT INTO order_events (order_id, type, who, payload)
+             VALUES ($1, 'printful_flagged', 'printful', $2::jsonb)`,
+            [ourId, JSON.stringify({ reason })],
+          );
+        }
+        return r.rowCount ?? 0;
       });
-      try {
-        await sendNeedsReviewAlert(ourId, `Printful: ${reason}`);
-      } catch (err) {
-        logger.warn('needs_review alert failed', { err, orderId: ourId });
+      if (updated) {
+        try {
+          await sendNeedsReviewAlert(ourId, `Printful: ${reason}`);
+        } catch (err) {
+          logger.warn('needs_review alert failed', { err, orderId: ourId });
+        }
       }
     }
 
