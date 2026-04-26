@@ -9,6 +9,7 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const status = url.searchParams.get('status');
   const collection = url.searchParams.get('collection');
+  const needsPrint = url.searchParams.get('needs_print') === '1';
   const clauses: string[] = [];
   const params: unknown[] = [];
   if (status) {
@@ -18,6 +19,9 @@ export async function GET(req: Request) {
   if (collection) {
     clauses.push(`c.slug = $${params.length + 1}`);
     params.push(collection);
+  }
+  if (needsPrint) {
+    clauses.push('a.image_print_url IS NULL');
   }
   const where = clauses.length ? 'WHERE ' + clauses.join(' AND ') : '';
   // Return `has_note` as a boolean instead of the full artist_note text.

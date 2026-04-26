@@ -1,0 +1,247 @@
+'use client';
+
+import Image from 'next/image';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AdminTopBar } from '@/components/admin/AdminTopBar';
+
+interface NeedsRow {
+  id: number;
+  slug: string;
+  title: string;
+  status: string;
+  image_web_url: string | null;
+  collection_title: string | null;
+}
+
+type RowState =
+  | { kind: 'idle' }
+  | { kind: 'uploading'; pct: number }
+  | { kind: 'processing' }
+  | { kind: 'done'; webUrl: string }
+  | { kind: 'error'; message: string };
+
+async function presign(
+  filename: string,
+  contentType: string,
+  size: number,
+): Promise<{ key: string; url: string }> {
+  const r = await fetch('/api/admin/artworks/bulk-upload/presign', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename, contentType, size }),
+  });
+  if (!r.ok) {
+    const body = (await r.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error || `presign ${r.status}`);
+  }
+  return r.json();
+}
+
+function putWithProgress(
+  url: string,
+  file: File,
+  onProgress: (pct: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () =>
+      xhr.status >= 200 && xhr.status < 300
+        ? resolve()
+        : reject(new Error(`PUT ${xhr.status}`));
+    xhr.onerror = () => reject(new Error('PUT network error'));
+    xhr.open('PUT', url);
+    xhr.setRequestHeader('Content-Type', file.type);
+    xhr.send(file);
+  });
+}
+
+async function finalizeUpdate(
+  artworkId: number,
+  stagedKey: string,
+): Promise<{ image_web_url: string }> {
+  const r = await fetch('/api/admin/artworks/bulk-upload/finalize', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: 'update', artworkId, stagedKey }),
+  });
+  if (!r.ok) {
+    const body = (await r.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error || `finalize ${r.status}`);
+  }
+  return r.json();
+}
+
+export default function BulkUploadPage() {
+  const [rows, setRows] = useState<NeedsRow[]>([]);
+  const [states, setStates] = useState<Record<number, RowState>>({});
+  const [hideDone, setHideDone] = useState(false);
+
+  const reload = useCallback(async () => {
+    const r = await fetch('/api/admin/artworks?needs_print=1');
+    const d = (await r.json()) as { rows: NeedsRow[] };
+    setRows(d.rows);
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const setRowState = useCallback((id: number, s: RowState) => {
+    setStates((prev) => ({ ...prev, [id]: s }));
+  }, []);
+
+  useEffect(() => {
+    const inFlight = Object.values(states).some(
+      (s) => s.kind === 'uploading' || s.kind === 'processing',
+    );
+    if (!inFlight) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [states]);
+
+  async function uploadOne(row: NeedsRow, file: File) {
+    setRowState(row.id, { kind: 'uploading', pct: 0 });
+    try {
+      const { key, url } = await presign(file.name, file.type, file.size);
+      await putWithProgress(url, file, (pct) =>
+        setRowState(row.id, { kind: 'uploading', pct }),
+      );
+      setRowState(row.id, { kind: 'processing' });
+      const res = await finalizeUpdate(row.id, key);
+      setRowState(row.id, { kind: 'done', webUrl: res.image_web_url });
+    } catch (err) {
+      setRowState(row.id, {
+        kind: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  const visibleRows = hideDone
+    ? rows.filter((r) => states[r.id]?.kind !== 'done')
+    : rows;
+
+  return (
+    <>
+      <AdminTopBar
+        title="Bulk upload"
+        subtitle="Add print masters, create new artworks, clean up orphans"
+      />
+
+      <div className="wl-adm-page">
+        <section className="wl-adm-card wl-bulk-section">
+          <header className="wl-bulk-section-header">
+            <h2>
+              Print masters needed{' '}
+              <span className="wl-bulk-count">({rows.length})</span>
+            </h2>
+            <label className="wl-bulk-toggle">
+              <input
+                type="checkbox"
+                checked={hideDone}
+                onChange={(e) => setHideDone(e.target.checked)}
+              />
+              Hide artworks already in this batch
+            </label>
+          </header>
+
+          {!rows.length && (
+            <p className="wl-bulk-empty">No artworks need a print master.</p>
+          )}
+
+          <ul className="wl-bulk-rows">
+            {visibleRows.map((row) => (
+              <BulkRow
+                key={row.id}
+                row={row}
+                state={states[row.id] || { kind: 'idle' }}
+                onPick={uploadOne}
+              />
+            ))}
+          </ul>
+        </section>
+      </div>
+    </>
+  );
+}
+
+function BulkRow({
+  row,
+  state,
+  onPick,
+}: {
+  row: NeedsRow;
+  state: RowState;
+  onPick: (row: NeedsRow, file: File) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <li className="wl-bulk-row" data-state={state.kind}>
+      <div className="wl-bulk-row-thumb">
+        {row.image_web_url ? (
+          <Image src={row.image_web_url} alt="" width={48} height={48} unoptimized />
+        ) : (
+          <div className="wl-bulk-row-thumb-placeholder">—</div>
+        )}
+      </div>
+      <div className="wl-bulk-row-meta">
+        <div className="wl-bulk-row-title">{row.title}</div>
+        <div className="wl-bulk-row-sub">
+          {row.collection_title || 'no collection'} · {row.slug}
+        </div>
+      </div>
+      <div className="wl-bulk-row-state">
+        {state.kind === 'idle' && (
+          <>
+            <button
+              className="wl-adm-btn small"
+              onClick={() => inputRef.current?.click()}
+            >
+              Choose file…
+            </button>
+            <input
+              ref={inputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/tiff"
+              hidden
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) onPick(row, f);
+                e.target.value = '';
+              }}
+            />
+          </>
+        )}
+        {state.kind === 'uploading' && (
+          <div className="wl-bulk-progress">
+            <div
+              className="wl-bulk-progress-bar"
+              style={{ width: `${state.pct}%` }}
+            />
+            <span>{state.pct}%</span>
+          </div>
+        )}
+        {state.kind === 'processing' && (
+          <span className="wl-bulk-processing">processing…</span>
+        )}
+        {state.kind === 'done' && <span className="wl-bulk-done">✓ uploaded</span>}
+        {state.kind === 'error' && (
+          <button
+            className="wl-adm-btn small ghost"
+            onClick={() => inputRef.current?.click()}
+            title={state.message}
+          >
+            Retry
+          </button>
+        )}
+      </div>
+    </li>
+  );
+}
