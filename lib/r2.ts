@@ -139,7 +139,8 @@ export async function deletePublic(key: string): Promise<void> {
   await c.send(new DeleteObjectCommand({ Bucket: publicBucket(), Key: key }));
 }
 
-export async function listPrivatePrefix(
+async function listPrefix(
+  bucket: string,
   prefix: string,
 ): Promise<Array<{ key: string; lastModified: Date | null; size: number }>> {
   const c = client();
@@ -148,7 +149,7 @@ export async function listPrivatePrefix(
   do {
     const res = await c.send(
       new ListObjectsV2Command({
-        Bucket: privateBucket(),
+        Bucket: bucket,
         Prefix: prefix,
         ContinuationToken: continuationToken,
       }),
@@ -164,4 +165,12 @@ export async function listPrivatePrefix(
     continuationToken = res.NextContinuationToken;
   } while (continuationToken);
   return out;
+}
+
+export function listPrivatePrefix(prefix: string) {
+  return listPrefix(privateBucket(), prefix);
+}
+
+export function listPublicPrefix(prefix: string) {
+  return listPrefix(publicBucket(), prefix);
 }
