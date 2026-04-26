@@ -1,5 +1,7 @@
 import * as Sentry from '@sentry/nextjs';
 
+// Webhook URLs carry the auth token in `?token=` (Printful) — defense-in-depth
+// scrub so it can't leak via breadcrumbs / transactions / unhandled paths.
 const TOKEN_QS = /([?&])token=[^&]*/gi;
 
 Sentry.init({
