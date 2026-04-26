@@ -4,7 +4,7 @@ export const maxDuration = 300;
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { fileTypeFromBuffer } from 'file-type';
-import { pool, withTransaction } from '@/lib/db';
+import { pool } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 import {
   getPrivateBuffer,
@@ -14,7 +14,7 @@ import {
   deletePublic,
 } from '@/lib/r2';
 import { deriveWebFromPrint } from '@/lib/image-derive';
-import { slugify, uniqueSlug } from '@/lib/slug';
+import { slugify } from '@/lib/slug';
 import { draftArtworkMetadata } from '@/lib/ai-draft';
 import { readExifFromBuffer } from '@/lib/exif';
 import { logger } from '@/lib/logger';
@@ -119,10 +119,19 @@ export async function POST(req: Request) {
     );
   }
 
-  // 4. Resolve target slug + collection folder for the canonical keys.
+  // 4. Resolve target slug + collection folder + reserve artwork row.
+  //
+  // Both modes pre-reserve the artwork row before any canonical R2 writes,
+  // then commit the URLs in a single UPDATE in step 7. If steps 5–7 fail,
+  // a single rollback path (catch at the bottom) cleans up files at the
+  // canonical keys + deletes the reserved row in create mode. This avoids
+  // the prior "row inserted with empty URLs, R2 fails, broken row hidden
+  // by IS NULL filter" failure mode.
   let artworkId: number;
   let slug: string;
   let collectionFolder: string;
+  let createdRowId: number | null = null;
+  let tempWebKey: string | null = null;
 
   if (input.mode === 'update') {
     const a = await loadArtwork(input.artworkId);
@@ -135,12 +144,13 @@ export async function POST(req: Request) {
     collectionFolder =
       a.collection_slug || (a.collection_id ? String(a.collection_id) : 'misc');
   } else {
-    // CREATE: AI-draft a title first; we need the slug before we can store
-    // either file at its canonical key. AI-draft requires a public URL;
-    // upload the web tier to a temporary public key keyed by the staging
-    // uuid so it's reachable, then move/overwrite once we have the slug.
+    // CREATE: write the derived web JPEG to a temp public key so AI-draft
+    // can fetch it; then EXIF + AI-draft to seed the title; then atomically
+    // reserve the artwork row via INSERT ON CONFLICT (slug). The temp web
+    // file is best-effort deleted; any leftover gets reaped by
+    // scripts/cleanup-staged.ts.
     const stagedUuid = input.stagedKey.split('/')[1].split('.')[0];
-    const tempWebKey = `incoming/${stagedUuid}.jpg`;
+    tempWebKey = `incoming/${stagedUuid}.jpg`;
     const tempWebUrl = await uploadPublic(
       tempWebKey,
       derived.buf,
@@ -152,13 +162,23 @@ export async function POST(req: Request) {
     let artistNote: string | null = null;
     let location: string | null = null;
     let yearShot: number | null = null;
+
+    // EXIF and AI-draft are independent — splitting the try blocks so an
+    // EXIF read failure doesn't skip the AI path (or vice versa). Both
+    // failures fall back to placeholder values and a logged warning.
+    let gps: { lat: number; lon: number } | null = null;
     try {
       const exif = await readExifFromBuffer(masterBuf);
       yearShot = exif.year_shot;
+      gps = exif.gps;
+    } catch (err) {
+      logger.warn('finalize create: exif read failed', { err });
+    }
+    try {
       const draft = await draftArtworkMetadata({
         imageUrl: tempWebUrl,
         collectionSlug,
-        gps: exif.gps,
+        gps,
       });
       title = draft.title;
       artistNote = draft.artist_note;
@@ -169,50 +189,83 @@ export async function POST(req: Request) {
       });
     }
 
-    const taken = new Set<string>(
-      (
-        await pool.query<{ slug: string }>('SELECT slug FROM artworks')
-      ).rows.map((r) => r.slug),
-    );
-    slug = uniqueSlug(slugify(title) || 'untitled', taken);
     collectionFolder =
       collectionSlug ||
       (input.collectionId ? String(input.collectionId) : 'misc');
 
-    const r = await pool.query<{ id: number }>(
-      `INSERT INTO artworks
-         (collection_id, slug, title, artist_note, location, year_shot,
-          image_web_url, image_print_url, status)
-       VALUES ($1, $2, $3, $4, $5, $6, '', '', 'draft')
-       RETURNING id`,
-      [input.collectionId, slug, title, artistNote, location, yearShot],
-    );
-    artworkId = r.rows[0].id;
-
-    try {
-      await deletePublic(tempWebKey);
-    } catch {
-      /* fall through — orphan reaping handles it */
+    // Atomic slug reservation via INSERT ON CONFLICT loop. Replaces the
+    // SELECT-then-INSERT TOCTOU race that could 500 on concurrent creates
+    // with similar AI-drafted titles.
+    const baseSlug = slugify(title) || 'untitled';
+    let reserved: { id: number; slug: string } | null = null;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const candidate = attempt === 0 ? baseSlug : `${baseSlug}-${attempt + 1}`;
+      const r = await pool.query<{ id: number }>(
+        `INSERT INTO artworks
+           (collection_id, slug, title, artist_note, location, year_shot,
+            image_web_url, image_print_url, status)
+         VALUES ($1, $2, $3, $4, $5, $6, '', '', 'draft')
+         ON CONFLICT (slug) DO NOTHING
+         RETURNING id`,
+        [input.collectionId, candidate, title, artistNote, location, yearShot],
+      );
+      if (r.rowCount) {
+        reserved = { id: r.rows[0].id, slug: candidate };
+        break;
+      }
     }
+    if (!reserved) {
+      await deletePrivate(input.stagedKey).catch(() => {});
+      await deletePublic(tempWebKey).catch(() => {});
+      return NextResponse.json(
+        { error: 'too many slug collisions; please retry' },
+        { status: 409 },
+      );
+    }
+    artworkId = reserved.id;
+    slug = reserved.slug;
+    createdRowId = reserved.id;
   }
 
-  // 5. Upload the derived web image at its canonical key.
+  // 5–7. Canonical R2 writes + DB URL update — wrapped so partial failures
+  // can be rolled back. In update mode we leave the existing row alone; in
+  // create mode we delete the row we just reserved so we don't leak rows
+  // with empty URLs.
   const webKey = `artworks/${collectionFolder}/${slug}.jpg`;
-  const webUrl = await uploadPublic(webKey, derived.buf, derived.contentType);
-
-  // 6. Move the master from incoming/ to its canonical key.
   const printKey = `artworks-print/${collectionFolder}/${slug}.${printExt}`;
-  await copyAndDeletePrivate(input.stagedKey, printKey);
+  let webUrl: string;
 
-  // 7. Record the URLs on the artwork row.
-  await withTransaction(async (client) => {
-    await client.query(
+  try {
+    webUrl = await uploadPublic(webKey, derived.buf, derived.contentType);
+    await copyAndDeletePrivate(input.stagedKey, printKey);
+    await pool.query(
       `UPDATE artworks
        SET image_web_url = $1, image_print_url = $2, updated_at = NOW()
        WHERE id = $3`,
       [webUrl, printKey, artworkId],
     );
-  });
+  } catch (err) {
+    logger.error('finalize: canonical write or DB update failed', err, {
+      mode: input.mode,
+      artworkId,
+    });
+    if (createdRowId != null) {
+      await pool
+        .query('DELETE FROM artworks WHERE id = $1', [createdRowId])
+        .catch(() => {});
+    }
+    await deletePublic(webKey).catch(() => {});
+    await deletePrivate(printKey).catch(() => {});
+    await deletePrivate(input.stagedKey).catch(() => {});
+    return NextResponse.json(
+      { error: 'finalize failed; please retry' },
+      { status: 500 },
+    );
+  } finally {
+    if (tempWebKey) {
+      await deletePublic(tempWebKey).catch(() => {});
+    }
+  }
 
   return NextResponse.json({
     artworkId,
