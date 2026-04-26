@@ -17,6 +17,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Pool, type PoolClient } from 'pg';
 import { slugify } from '@/lib/slug';
+import { publishArtworks } from '@/lib/publish-artworks';
 
 // Load .env.local first, let .env.production.local override when present.
 // Pull prod env with:
@@ -171,12 +172,16 @@ async function main() {
     return;
   }
 
+  let publishSkipped = 0;
   await withTransaction(async (client) => {
     if (toPublish.length) {
-      await client.query(
-        `UPDATE artworks SET status='published', updated_at=NOW() WHERE id = ANY($1::int[])`,
-        [toPublish.map((r) => r.id)],
+      // Shared gate enforces image_print_url IS NOT NULL + stamps
+      // published_at on first-publish, matching the API surface.
+      const out = await publishArtworks(
+        client,
+        toPublish.map((r) => r.id),
       );
+      publishSkipped = out.skipped;
     }
     if (toUnpublish.length) {
       await client.query(
@@ -186,7 +191,12 @@ async function main() {
     }
   });
 
-  console.log(`\nApplied. ${toPublish.length} published, ${toUnpublish.length} reverted to draft.`);
+  if (publishSkipped > 0) {
+    console.warn(
+      `\n! ${publishSkipped} of ${toPublish.length} could not publish (missing print master).`,
+    );
+  }
+  console.log(`\nApplied. ${toPublish.length - publishSkipped} published, ${toUnpublish.length} reverted to draft.`);
   await pool.end();
 }
 

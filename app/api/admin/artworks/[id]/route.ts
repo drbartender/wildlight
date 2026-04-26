@@ -1,14 +1,11 @@
 export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { pool, withTransaction } from '@/lib/db';
+import { pool, parsePathId, withTransaction } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 import { applyTemplate, type TemplateKey } from '@/lib/variant-templates';
-
-function parseId(raw: string): number | null {
-  const n = Number(raw);
-  return Number.isInteger(n) && n > 0 ? n : null;
-}
+import { publishArtworks } from '@/lib/publish-artworks';
+import { ConflictError, NotFoundError } from '@/lib/errors';
 
 export async function GET(
   _req: Request,
@@ -16,7 +13,7 @@ export async function GET(
 ) {
   await requireAdmin();
   const { id: raw } = await ctx.params;
-  const id = parseId(raw);
+  const id = parsePathId(raw);
   if (id == null) return NextResponse.json({ error: 'invalid id' }, { status: 400 });
   const [a, v] = await Promise.all([
     pool.query(
@@ -61,7 +58,7 @@ export async function PATCH(
 ) {
   await requireAdmin();
   const { id: raw } = await ctx.params;
-  const id = parseId(raw);
+  const id = parsePathId(raw);
   if (id == null) return NextResponse.json({ error: 'invalid id' }, { status: 400 });
   const parsed = Patch.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
@@ -69,75 +66,65 @@ export async function PATCH(
   }
   const d = parsed.data;
 
-  // Reject status='published' if the artwork has no print master. The
-  // invariant: nothing publishable without a master. This closes off the
-  // prior "publish first, fulfill later" path that the Stripe webhook had
-  // to compensate for.
-  if (d.status === 'published') {
-    const cur = await pool.query<{ image_print_url: string | null }>(
-      'SELECT image_print_url FROM artworks WHERE id = $1',
-      [id],
-    );
-    if (!cur.rowCount) {
+  try {
+    await withTransaction(async (client) => {
+      // status='published' goes through the shared publish gate so the
+      // print-master invariant + first-publish published_at stamp stay in
+      // one place (also used by the bulk endpoint and publish-selections).
+      if (d.status === 'published') {
+        const out = await publishArtworks(client, [id]);
+        if (out.skipped > 0) {
+          throw new ConflictError('cannot publish: print master required');
+        }
+      }
+
+      const updateCols: string[] = [];
+      const vals: unknown[] = [];
+      for (const [k, v] of Object.entries(d)) {
+        if (k === 'applyTemplate' || v === undefined) continue;
+        // Helper already wrote status + published_at + updated_at.
+        if (k === 'status' && v === 'published') continue;
+        updateCols.push(`${k} = $${vals.length + 1}`);
+        vals.push(v);
+      }
+      if (updateCols.length) {
+        vals.push(id);
+        const u = await client.query(
+          `UPDATE artworks SET ${updateCols.join(', ')}, updated_at=NOW()
+           WHERE id = $${vals.length}`,
+          vals,
+        );
+        if (!u.rowCount && d.status !== 'published') {
+          // No row matched and the publish helper didn't already prove the row
+          // exists — surface 404 rather than a silent no-op.
+          throw new NotFoundError();
+        }
+      }
+      if (d.applyTemplate) {
+        const variants = applyTemplate(d.applyTemplate as TemplateKey);
+        await client.query(
+          'UPDATE artwork_variants SET active = FALSE WHERE artwork_id = $1',
+          [id],
+        );
+        for (const v of variants) {
+          await client.query(
+            `INSERT INTO artwork_variants
+               (artwork_id, type, size, finish, price_cents, cost_cents, active)
+             VALUES ($1, $2, $3, $4, $5, $6, TRUE)`,
+            [id, v.type, v.size, v.finish, v.price_cents, v.cost_cents],
+          );
+        }
+      }
+    });
+  } catch (err) {
+    if (err instanceof ConflictError) {
+      return NextResponse.json({ error: err.message }, { status: 409 });
+    }
+    if (err instanceof NotFoundError) {
       return NextResponse.json({ error: 'not found' }, { status: 404 });
     }
-    if (!cur.rows[0].image_print_url) {
-      return NextResponse.json(
-        { error: 'cannot publish: print master required' },
-        { status: 409 },
-      );
-    }
+    throw err;
   }
-
-  await withTransaction(async (client) => {
-    // If status is transitioning to 'published', stamp published_at.
-    // We don't clear published_at when going back to draft/retired —
-    // it's the last-published timestamp, not a current-state flag.
-    let stampPublishedAt = false;
-    if (d.status === 'published') {
-      const prev = await client.query<{ status: string }>(
-        'SELECT status FROM artworks WHERE id = $1 FOR UPDATE',
-        [id],
-      );
-      if (prev.rowCount && prev.rows[0].status !== 'published') {
-        stampPublishedAt = true;
-      }
-    }
-
-    const updateCols: string[] = [];
-    const vals: unknown[] = [];
-    for (const [k, v] of Object.entries(d)) {
-      if (k === 'applyTemplate' || v === undefined) continue;
-      updateCols.push(`${k} = $${vals.length + 1}`);
-      vals.push(v);
-    }
-    if (stampPublishedAt) {
-      updateCols.push(`published_at = NOW()`);
-    }
-    if (updateCols.length) {
-      vals.push(id);
-      await client.query(
-        `UPDATE artworks SET ${updateCols.join(', ')}, updated_at=NOW()
-         WHERE id = $${vals.length}`,
-        vals,
-      );
-    }
-    if (d.applyTemplate) {
-      const variants = applyTemplate(d.applyTemplate as TemplateKey);
-      await client.query(
-        'UPDATE artwork_variants SET active = FALSE WHERE artwork_id = $1',
-        [id],
-      );
-      for (const v of variants) {
-        await client.query(
-          `INSERT INTO artwork_variants
-             (artwork_id, type, size, finish, price_cents, cost_cents, active)
-           VALUES ($1, $2, $3, $4, $5, $6, TRUE)`,
-          [id, v.type, v.size, v.finish, v.price_cents, v.cost_cents],
-        );
-      }
-    }
-  });
 
   return NextResponse.json({ ok: true });
 }
@@ -148,7 +135,7 @@ export async function DELETE(
 ) {
   await requireAdmin();
   const { id: raw } = await ctx.params;
-  const id = parseId(raw);
+  const id = parsePathId(raw);
   if (id == null) return NextResponse.json({ error: 'invalid id' }, { status: 400 });
   await pool.query('DELETE FROM artworks WHERE id = $1', [id]);
   return NextResponse.json({ ok: true });
