@@ -68,11 +68,25 @@ export default function AdminArtworksPage() {
   async function bulk(action: string) {
     if (!sel.size) return;
     if (action === 'delete' && !confirm(`Delete ${sel.size} artworks?`)) return;
-    await fetch('/api/admin/artworks', {
+    const r = await fetch('/api/admin/artworks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids: [...sel], action }),
     });
+    // The publish action silently filters out artworks missing a print
+    // master (server-side gate). Surface the skip count so the admin
+    // doesn't think every selected row was published.
+    if (action === 'publish' && r.ok) {
+      const body = (await r.json().catch(() => null)) as
+        | { published?: number; skipped?: number }
+        | null;
+      if (body && (body.skipped ?? 0) > 0) {
+        alert(
+          `Published ${body.published ?? 0} of ${sel.size}. ` +
+            `${body.skipped} skipped (no print master uploaded — see /admin/artworks/bulk-upload).`,
+        );
+      }
+    }
     void reload();
   }
 
