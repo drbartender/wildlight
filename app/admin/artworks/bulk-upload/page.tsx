@@ -15,6 +15,7 @@ interface NeedsRow {
 
 type RowState =
   | { kind: 'idle' }
+  | { kind: 'queued' }
   | { kind: 'uploading'; pct: number }
   | { kind: 'processing' }
   | { kind: 'done'; webUrl: string }
@@ -90,10 +91,34 @@ async function finalizeCreate(
   return r.json();
 }
 
+// 3-wide concurrency limiter shared by Section A and Section B uploads.
+// Without it, finalize calls fan out unbounded — sharp + a 500MB master in
+// memory means 5+ concurrent uploads can OOM the Vercel function (1GB).
+const MAX_CONCURRENT_UPLOADS = 3;
+
+function createLimiter(max: number) {
+  let active = 0;
+  const queue: Array<() => void> = [];
+  return async function run<T>(fn: () => Promise<T>): Promise<T> {
+    if (active >= max) {
+      await new Promise<void>((resolve) => queue.push(resolve));
+    }
+    active++;
+    try {
+      return await fn();
+    } finally {
+      active--;
+      const next = queue.shift();
+      if (next) next();
+    }
+  };
+}
+
 interface CreatedRow {
   tempId: string;
   filename: string;
   state:
+    | { kind: 'queued' }
     | { kind: 'uploading'; pct: number }
     | { kind: 'processing' }
     | { kind: 'done'; artworkId: number; slug: string; title: string }
@@ -111,6 +136,10 @@ export default function BulkUploadPage() {
   const [defaultCollection, setDefaultCollection] = useState<number | null>(null);
   const [created, setCreated] = useState<CreatedRow[]>([]);
   const browseRef = useRef<HTMLInputElement>(null);
+
+  // Single shared limiter so Section A + Section B together never exceed
+  // the cap. useRef so the queue persists across renders.
+  const limiterRef = useRef(createLimiter(MAX_CONCURRENT_UPLOADS));
 
   const [orphanCount, setOrphanCount] = useState<number | null>(null);
   const [demoting, setDemoting] = useState(false);
@@ -174,10 +203,16 @@ export default function BulkUploadPage() {
   useEffect(() => {
     const inFlight =
       Object.values(states).some(
-        (s) => s.kind === 'uploading' || s.kind === 'processing',
+        (s) =>
+          s.kind === 'queued' ||
+          s.kind === 'uploading' ||
+          s.kind === 'processing',
       ) ||
       created.some(
-        (c) => c.state.kind === 'uploading' || c.state.kind === 'processing',
+        (c) =>
+          c.state.kind === 'queued' ||
+          c.state.kind === 'uploading' ||
+          c.state.kind === 'processing',
       );
     if (!inFlight) return;
     const handler = (e: BeforeUnloadEvent) => {
@@ -189,21 +224,24 @@ export default function BulkUploadPage() {
   }, [states, created]);
 
   async function uploadOne(row: NeedsRow, file: File) {
-    setRowState(row.id, { kind: 'uploading', pct: 0 });
-    try {
-      const { key, url } = await presign(file.name, file.type, file.size);
-      await putWithProgress(url, file, (pct) =>
-        setRowState(row.id, { kind: 'uploading', pct }),
-      );
-      setRowState(row.id, { kind: 'processing' });
-      const res = await finalizeUpdate(row.id, key);
-      setRowState(row.id, { kind: 'done', webUrl: res.image_web_url });
-    } catch (err) {
-      setRowState(row.id, {
-        kind: 'error',
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
+    setRowState(row.id, { kind: 'queued' });
+    await limiterRef.current(async () => {
+      setRowState(row.id, { kind: 'uploading', pct: 0 });
+      try {
+        const { key, url } = await presign(file.name, file.type, file.size);
+        await putWithProgress(url, file, (pct) =>
+          setRowState(row.id, { kind: 'uploading', pct }),
+        );
+        setRowState(row.id, { kind: 'processing' });
+        const res = await finalizeUpdate(row.id, key);
+        setRowState(row.id, { kind: 'done', webUrl: res.image_web_url });
+      } catch (err) {
+        setRowState(row.id, {
+          kind: 'error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    });
   }
 
   async function uploadNew(file: File) {
@@ -214,32 +252,35 @@ export default function BulkUploadPage() {
       );
     setCreated((prev) => [
       ...prev,
-      { tempId, filename: file.name, state: { kind: 'uploading', pct: 0 } },
+      { tempId, filename: file.name, state: { kind: 'queued' } },
     ]);
-    try {
-      const { key, url } = await presign(file.name, file.type, file.size);
-      await putWithProgress(url, file, (pct) =>
-        updateState({ kind: 'uploading', pct }),
-      );
-      updateState({ kind: 'processing' });
-      const res = await finalizeCreate(key, defaultCollection);
-      const title = await fetch(`/api/admin/artworks/${res.artworkId}`)
-        .then((r) => r.json())
-        .then((d: { artwork: { title: string } }) => d.artwork.title)
-        .catch(() => res.slug);
-      updateState({
-        kind: 'done',
-        artworkId: res.artworkId,
-        slug: res.slug,
-        title,
-      });
-      void reload();
-    } catch (err) {
-      updateState({
-        kind: 'error',
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
+    await limiterRef.current(async () => {
+      try {
+        updateState({ kind: 'uploading', pct: 0 });
+        const { key, url } = await presign(file.name, file.type, file.size);
+        await putWithProgress(url, file, (pct) =>
+          updateState({ kind: 'uploading', pct }),
+        );
+        updateState({ kind: 'processing' });
+        const res = await finalizeCreate(key, defaultCollection);
+        const title = await fetch(`/api/admin/artworks/${res.artworkId}`)
+          .then((r) => r.json())
+          .then((d: { artwork: { title: string } }) => d.artwork.title)
+          .catch(() => res.slug);
+        updateState({
+          kind: 'done',
+          artworkId: res.artworkId,
+          slug: res.slug,
+          title,
+        });
+        void reload();
+      } catch (err) {
+        updateState({
+          kind: 'error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    });
   }
 
   function onDrop(e: React.DragEvent<HTMLDivElement>) {
@@ -364,6 +405,9 @@ export default function BulkUploadPage() {
                     </div>
                   </div>
                   <div className="wl-bulk-row-state">
+                    {c.state.kind === 'queued' && (
+                      <span className="wl-bulk-processing">queued…</span>
+                    )}
                     {c.state.kind === 'uploading' && (
                       <div className="wl-bulk-progress">
                         <div
@@ -467,6 +511,7 @@ function BulkRow({
             />
           </>
         )}
+        {state.kind === 'queued' && <span className="wl-bulk-processing">queued…</span>}
         {state.kind === 'uploading' && (
           <div className="wl-bulk-progress">
             <div
