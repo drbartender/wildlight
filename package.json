@@ -19,6 +19,8 @@
     "seed:admins": "tsx scripts/seed-admins.ts",
     "sync:printful": "tsx scripts/sync-printful-products.ts",
     "backfill:image-dims": "tsx scripts/backfill-image-dims.ts",
+    "demote:orphans": "tsx scripts/demote-orphan-publishes.ts",
+    "cleanup:staged": "tsx scripts/cleanup-staged.ts",
     "migrate": "tsx lib/migrate.ts"
   },
   "dependencies": {
