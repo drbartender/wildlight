@@ -15,7 +15,7 @@ const JPEG_QUALITY = 85;
  * before stripping.
  */
 export async function deriveWebFromPrint(
-  source: Buffer | NodeJS.ReadableStream,
+  source: Buffer,
 ): Promise<DerivedImage> {
   const buf = await sharp(source)
     .rotate()

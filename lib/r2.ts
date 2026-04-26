@@ -1,4 +1,11 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  CopyObjectCommand,
+  DeleteObjectCommand,
+  ListObjectsV2Command,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 function client(): S3Client {
@@ -74,4 +81,87 @@ export async function signedPrivateUrl(key: string, expiresInSec = 3600): Promis
     new GetObjectCommand({ Bucket: privateBucket(), Key: key }),
     { expiresIn: expiresInSec },
   );
+}
+
+export async function signedPrivateUploadUrl(
+  key: string,
+  contentType: string,
+  expiresInSec = 900,
+): Promise<string> {
+  const c = client();
+  return getSignedUrl(
+    c,
+    new PutObjectCommand({
+      Bucket: privateBucket(),
+      Key: key,
+      ContentType: contentType,
+    }),
+    { expiresIn: expiresInSec },
+  );
+}
+
+export async function copyAndDeletePrivate(
+  srcKey: string,
+  dstKey: string,
+): Promise<void> {
+  const c = client();
+  const bucket = privateBucket();
+  await c.send(
+    new CopyObjectCommand({
+      Bucket: bucket,
+      Key: dstKey,
+      CopySource: `${bucket}/${encodeURIComponent(srcKey)}`,
+    }),
+  );
+  await c.send(new DeleteObjectCommand({ Bucket: bucket, Key: srcKey }));
+}
+
+export async function getPrivateBuffer(key: string): Promise<Buffer> {
+  const c = client();
+  const res = await c.send(
+    new GetObjectCommand({ Bucket: privateBucket(), Key: key }),
+  );
+  if (!res.Body) throw new Error(`r2 get: empty body for ${key}`);
+  const chunks: Buffer[] = [];
+  for await (const chunk of res.Body as AsyncIterable<Uint8Array>) {
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
+export async function deletePrivate(key: string): Promise<void> {
+  const c = client();
+  await c.send(new DeleteObjectCommand({ Bucket: privateBucket(), Key: key }));
+}
+
+export async function deletePublic(key: string): Promise<void> {
+  const c = client();
+  await c.send(new DeleteObjectCommand({ Bucket: publicBucket(), Key: key }));
+}
+
+export async function listPrivatePrefix(
+  prefix: string,
+): Promise<Array<{ key: string; lastModified: Date | null; size: number }>> {
+  const c = client();
+  const out: Array<{ key: string; lastModified: Date | null; size: number }> = [];
+  let continuationToken: string | undefined;
+  do {
+    const res = await c.send(
+      new ListObjectsV2Command({
+        Bucket: privateBucket(),
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      }),
+    );
+    for (const obj of res.Contents ?? []) {
+      if (!obj.Key) continue;
+      out.push({
+        key: obj.Key,
+        lastModified: obj.LastModified ?? null,
+        size: obj.Size ?? 0,
+      });
+    }
+    continuationToken = res.NextContinuationToken;
+  } while (continuationToken);
+  return out;
 }
