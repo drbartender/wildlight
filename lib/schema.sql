@@ -81,6 +81,26 @@ CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_stripe ON orders(stripe_session_id);
 CREATE INDEX IF NOT EXISTS idx_orders_printful ON orders(printful_order_id);
 
+-- printful_attempt: monotonic per-order counter bumped on every Printful
+-- submit. Embedded in external_id as `order_<id>_<attempt>` so a stale
+-- webhook from a prior attempt fails the (id, attempt) match in
+-- app/api/webhooks/printful/route.ts and is silently ignored. Default 0
+-- so legacy rows whose pending webhooks lack the suffix still match.
+ALTER TABLE orders
+  ADD COLUMN IF NOT EXISTS printful_attempt INT NOT NULL DEFAULT 0;
+
+-- Immutable checkout snapshot keyed by stripe_session_id. Written at
+-- checkout-session creation, read by the Stripe webhook so an admin
+-- editing title/size/price/print-file/sync-id between checkout and webhook
+-- delivery cannot silently rewrite order history.
+CREATE TABLE IF NOT EXISTS checkout_intents (
+  stripe_session_id TEXT PRIMARY KEY,
+  snapshot          JSONB NOT NULL,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_checkout_intents_created_at
+  ON checkout_intents(created_at);
+
 -- Order items -------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS order_items (
   id                   SERIAL PRIMARY KEY,
@@ -177,6 +197,46 @@ ALTER TABLE admin_users
 ALTER TABLE admin_users DROP CONSTRAINT IF EXISTS admin_users_role_chk;
 ALTER TABLE admin_users ADD CONSTRAINT admin_users_role_chk
   CHECK (role IN ('owner', 'operator'));
+
+-- Session revocation — bumped on password change so stolen cookies expire
+-- the moment the owner rotates their password. Embedded in the JWT and
+-- compared per-request in lib/session.ts:getAdminSession.
+ALTER TABLE admin_users
+  ADD COLUMN IF NOT EXISTS session_version INT NOT NULL DEFAULT 1;
+ALTER TABLE admin_users
+  ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ;
+
+-- Login rate limit — rolling-window per (ip_hash, email_normalized) to
+-- defang credential stuffing on /api/auth/login. Read by
+-- lib/login-rate-limit.ts.
+CREATE TABLE IF NOT EXISTS login_attempts (
+  id               SERIAL PRIMARY KEY,
+  ip_hash          TEXT NOT NULL,
+  email_normalized TEXT NOT NULL,
+  success          BOOLEAN NOT NULL,
+  attempted_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_login_attempts_ip
+  ON login_attempts(ip_hash, attempted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_login_attempts_email
+  ON login_attempts(email_normalized, attempted_at DESC);
+
+-- Generic per-scope rate limit (subscribe, contact, etc). Read by
+-- lib/rate-limit.ts.
+CREATE TABLE IF NOT EXISTS rate_limit_events (
+  id           SERIAL PRIMARY KEY,
+  scope        TEXT NOT NULL,
+  key_hash     TEXT NOT NULL,
+  attempted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_rate_limit_lookup
+  ON rate_limit_events(scope, key_hash, attempted_at DESC);
+
+-- Double-opt-in confirmation token for newsletter signups. Cleared once
+-- the subscriber clicks the confirmation link. NULL on already-confirmed
+-- rows.
+ALTER TABLE subscribers
+  ADD COLUMN IF NOT EXISTS confirm_token TEXT;
 
 -- Broadcast log (one row per successful non-test send) — Spec 5a ----
 CREATE TABLE IF NOT EXISTS broadcast_log (
