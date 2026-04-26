@@ -5,6 +5,8 @@ import {
   verifyAdminToken,
   type AdminTokenPayload,
 } from './auth';
+import { pool } from './db';
+import { logger } from './logger';
 
 const COOKIE = 'wl_admin';
 const THIRTY_DAYS = 60 * 60 * 24 * 30;
@@ -30,11 +32,31 @@ export async function getAdminSession(): Promise<AdminTokenPayload | null> {
   const c = await cookies();
   const token = c.get(COOKIE)?.value;
   if (!token) return null;
+  let payload: AdminTokenPayload;
   try {
-    return verifyAdminToken(token);
+    payload = verifyAdminToken(token);
   } catch {
     return null;
   }
+  // Per-request lookup so a stolen cookie is invalidated the moment the
+  // owner rotates their password (which bumps session_version) or the
+  // admin row is deleted. One indexed PK query — ~1ms on a warm pool.
+  try {
+    const r = await pool.query<{ session_version: number }>(
+      'SELECT session_version FROM admin_users WHERE id = $1',
+      [payload.id],
+    );
+    if (!r.rowCount || r.rows[0].session_version !== payload.v) {
+      return null;
+    }
+  } catch (err) {
+    // Fail closed on DB error — better to log out an admin than to grant
+    // access against a stale version check. Surface in logs so a Neon
+    // outage manifests as visible warnings instead of silent unauth.
+    logger.warn('session.version_lookup_failed', { err, id: payload.id });
+    return null;
+  }
+  return payload;
 }
 
 /**

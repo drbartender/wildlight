@@ -2,7 +2,7 @@ export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { pool } from '@/lib/db';
-import { requireAdmin } from '@/lib/session';
+import { requireAdmin, setAdminSession } from '@/lib/session';
 import { hashPassword, verifyPassword } from '@/lib/auth';
 
 const Body = z.object({
@@ -25,9 +25,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'wrong password' }, { status: 401 });
   }
   const hash = await hashPassword(p.data.newPassword);
-  await pool.query('UPDATE admin_users SET password_hash = $2 WHERE id = $1', [
-    s.id,
-    hash,
-  ]);
+  // Bump session_version so every other open session (different device,
+  // stolen cookie) fails the per-request version check in getAdminSession.
+  // The current admin keeps working because we re-issue their cookie with
+  // the new version below.
+  const u = await pool.query<{ session_version: number }>(
+    `UPDATE admin_users
+     SET password_hash = $2,
+         session_version = session_version + 1,
+         password_changed_at = NOW()
+     WHERE id = $1
+     RETURNING session_version`,
+    [s.id, hash],
+  );
+  await setAdminSession({ id: s.id, email: s.email, v: u.rows[0].session_version });
   return NextResponse.json({ ok: true });
 }

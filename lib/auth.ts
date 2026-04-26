@@ -11,6 +11,8 @@ if (!SECRET) {
 export interface AdminTokenPayload {
   id: number;
   email: string;
+  /** Session version. Bumped on password change to invalidate prior tokens. */
+  v: number;
 }
 
 function requireSecret(): string {
@@ -34,10 +36,14 @@ export function signAdminToken(payload: AdminTokenPayload): string {
 export function verifyAdminToken(token: string): AdminTokenPayload {
   try {
     const decoded = jwt.verify(token, requireSecret()) as Partial<AdminTokenPayload>;
-    if (typeof decoded.id !== 'number' || typeof decoded.email !== 'string') {
+    if (
+      typeof decoded.id !== 'number' ||
+      typeof decoded.email !== 'string' ||
+      typeof decoded.v !== 'number'
+    ) {
       throw new AppError('malformed token', 401, 'BAD_TOKEN');
     }
-    return { id: decoded.id, email: decoded.email };
+    return { id: decoded.id, email: decoded.email, v: decoded.v };
   } catch (err) {
     if (err instanceof AppError) throw err;
     throw new AppError('invalid token', 401, 'BAD_TOKEN');
