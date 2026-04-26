@@ -10,7 +10,8 @@ describe('integration-health cache', () => {
     delete process.env.RESEND_API_KEY;
     delete process.env.R2_ACCESS_KEY_ID;
     delete process.env.R2_SECRET_ACCESS_KEY;
-    delete process.env.R2_BUCKET_WEB;
+    delete process.env.R2_BUCKET_PUBLIC;
+    delete process.env.R2_BUCKET_PRIVATE;
     delete process.env.R2_ACCOUNT_ID;
   });
 

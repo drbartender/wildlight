@@ -436,7 +436,8 @@ export default function AdminOrderDetail({
                 <a
                   href={o.tracking_url}
                   target="_blank"
-                  rel="noreferrer"
+                  rel="noopener noreferrer"
+                  referrerPolicy="no-referrer"
                   style={{
                     textDecoration: 'underline',
                     color: 'var(--adm-blue)',

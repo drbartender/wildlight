@@ -8,7 +8,6 @@ export const dynamic = 'force-dynamic';
 interface OrderRow {
   id: number;
   public_token: string;
-  stripe_session_id: string | null;
   status: string;
   customer_email: string;
   subtotal_cents: number;
@@ -30,16 +29,21 @@ interface ItemRow {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-async function findOrder(tokenOrSession: string) {
-  // Index-efficient lookup: the OR-on-cast version forced a seq scan because
-  // `public_token::text = $1` defeats the btree. Route by input shape instead.
-  const sql = `SELECT id, public_token, stripe_session_id, status, customer_email,
-                      subtotal_cents, shipping_cents, tax_cents, total_cents,
-                      tracking_url, tracking_number, created_at
-               FROM orders
-               WHERE ${UUID_RE.test(tokenOrSession) ? 'public_token' : 'stripe_session_id'} = $1
-               LIMIT 1`;
-  const r = await pool.query<OrderRow>(sql, [tokenOrSession]);
+async function findOrder(token: string) {
+  // public_token only — the stripe_session_id flavor used to be a second
+  // public access path that leaked through carrier Referer headers. Stripe
+  // success_url now goes through /api/orders/by-session which 302s here
+  // with the public_token, so /orders/[token] has only one canonical URL.
+  if (!UUID_RE.test(token)) return null;
+  const r = await pool.query<OrderRow>(
+    `SELECT id, public_token, status, customer_email,
+            subtotal_cents, shipping_cents, tax_cents, total_cents,
+            tracking_url, tracking_number, created_at
+     FROM orders
+     WHERE public_token = $1
+     LIMIT 1`,
+    [token],
+  );
   return r.rows[0] || null;
 }
 
@@ -100,7 +104,12 @@ export default async function OrderPage({
       {order.tracking_url && (
         <p>
           Tracking:{' '}
-          <a href={order.tracking_url}>
+          <a
+            href={order.tracking_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            referrerPolicy="no-referrer"
+          >
             {order.tracking_number || 'view tracking'}
           </a>
         </p>

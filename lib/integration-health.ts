@@ -173,18 +173,34 @@ function getR2Client(): S3Client | null {
 }
 
 async function pingR2(): Promise<HealthPing> {
-  try {
-    if (!process.env.R2_BUCKET_WEB) return ping('error', 'keys missing');
-    const client = getR2Client();
-    if (!client) return ping('error', 'keys missing');
-    await withTimeout(
-      client.send(new HeadBucketCommand({ Bucket: process.env.R2_BUCKET_WEB })),
-      PING_TIMEOUT_MS,
-    );
-    return ping('ok', '2 buckets reachable');
-  } catch (err) {
-    return ping('warn', err instanceof Error ? err.message : 'unknown');
-  }
+  const pub = process.env.R2_BUCKET_PUBLIC;
+  const priv = process.env.R2_BUCKET_PRIVATE;
+  if (!pub || !priv) return ping('error', 'keys missing');
+  const client = getR2Client();
+  if (!client) return ping('error', 'keys missing');
+
+  // Probe each bucket independently so a single broken bucket reports
+  // its own name instead of being swallowed by Promise.all rejection.
+  const probe = async (label: string, bucket: string): Promise<string | null> => {
+    try {
+      await withTimeout(
+        client.send(new HeadBucketCommand({ Bucket: bucket })),
+        PING_TIMEOUT_MS,
+      );
+      return null;
+    } catch (err) {
+      return `${label}: ${err instanceof Error ? err.message : 'unknown'}`;
+    }
+  };
+
+  const [pubErr, privErr] = await Promise.all([
+    probe('public', pub),
+    probe('private', priv),
+  ]);
+  const failures = [pubErr, privErr].filter((x): x is string => x != null);
+  if (!failures.length) return ping('ok', '2 buckets reachable');
+  if (failures.length === 1) return ping('warn', failures[0]);
+  return ping('error', failures.join('; '));
 }
 
 async function pingWebhooks(): Promise<HealthPing> {
