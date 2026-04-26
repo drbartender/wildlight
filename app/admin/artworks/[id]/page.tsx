@@ -276,16 +276,32 @@ export default function ArtworkEditPage({
               <span className="lbl">Status</span>
               {(['draft', 'published', 'retired'] as const)
                 .filter((s) => s !== a.status)
-                .map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    className="wl-adm-btn small ghost"
-                    onClick={() => save({ status: s })}
-                  >
-                    → {s}
-                  </button>
-                ))}
+                .map((s) => {
+                  const blocked = s === 'published' && !a.image_print_url;
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      className="wl-adm-btn small ghost"
+                      onClick={() => save({ status: s })}
+                      disabled={blocked}
+                      title={blocked ? 'Upload a print master before publishing.' : undefined}
+                    >
+                      → {s}
+                    </button>
+                  );
+                })}
+              {!a.image_print_url && (
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--adm-muted)',
+                    marginLeft: 8,
+                  }}
+                >
+                  Upload a print master before publishing.
+                </span>
+              )}
             </div>
 
             <div style={{ marginTop: 28 }}>
