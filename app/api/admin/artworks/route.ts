@@ -58,10 +58,20 @@ export async function POST(req: Request) {
   }
   const { ids, action, collectionId } = parsed.data;
   if (action === 'publish') {
-    await pool.query(
-      `UPDATE artworks SET status='published', updated_at=NOW() WHERE id = ANY($1)`,
+    // Same invariant as the per-artwork PATCH: never publish artworks
+    // missing a master. Filter inside the WHERE so the response can
+    // honestly report how many were skipped.
+    const u = await pool.query(
+      `UPDATE artworks
+       SET status='published', updated_at=NOW()
+       WHERE id = ANY($1) AND image_print_url IS NOT NULL`,
       [ids],
     );
+    return NextResponse.json({
+      ok: true,
+      published: u.rowCount ?? 0,
+      skipped: ids.length - (u.rowCount ?? 0),
+    });
   } else if (action === 'retire') {
     await pool.query(
       `UPDATE artworks SET status='retired', updated_at=NOW() WHERE id = ANY($1)`,

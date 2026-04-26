@@ -69,6 +69,26 @@ export async function PATCH(
   }
   const d = parsed.data;
 
+  // Reject status='published' if the artwork has no print master. The
+  // invariant: nothing publishable without a master. This closes off the
+  // prior "publish first, fulfill later" path that the Stripe webhook had
+  // to compensate for.
+  if (d.status === 'published') {
+    const cur = await pool.query<{ image_print_url: string | null }>(
+      'SELECT image_print_url FROM artworks WHERE id = $1',
+      [id],
+    );
+    if (!cur.rowCount) {
+      return NextResponse.json({ error: 'not found' }, { status: 404 });
+    }
+    if (!cur.rows[0].image_print_url) {
+      return NextResponse.json(
+        { error: 'cannot publish: print master required' },
+        { status: 409 },
+      );
+    }
+  }
+
   await withTransaction(async (client) => {
     // If status is transitioning to 'published', stamp published_at.
     // We don't clear published_at when going back to draft/retired —
