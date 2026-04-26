@@ -1,9 +1,7 @@
-import { config } from 'dotenv';
+import '@/lib/load-env';
 import readline from 'node:readline/promises';
 import { pool } from '@/lib/db';
 import { hashPassword } from '@/lib/auth';
-
-config({ path: '.env.local' });
 
 async function prompt(q: string, silent = false): Promise<string> {
   const rl = readline.createInterface({

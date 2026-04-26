@@ -1,9 +1,7 @@
+import './load-env';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { config } from 'dotenv';
 import { pool } from './db';
-
-config({ path: '.env.local' });
 
 async function main() {
   const sqlPath = resolve(process.cwd(), 'lib/schema.sql');
