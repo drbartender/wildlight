@@ -80,6 +80,33 @@ export async function sendOrderShipped(
   });
 }
 
+export async function sendSubscribeConfirmation(
+  to: string,
+  subscriberId: number,
+  token: string,
+  siteUrl: string,
+) {
+  const base = siteUrl.replace(/\/$/, '');
+  const url = `${base}/api/subscribe/confirm?id=${subscriberId}&t=${encodeURIComponent(token)}`;
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#222;">
+      <h1 style="font-weight:400;">One quick step.</h1>
+      <p>Tap below to confirm your subscription to Wildlight Imagery. New work is rare and we won't share your address.</p>
+      <p style="margin:24px 0;">
+        <a href="${url}" style="display:inline-block;padding:10px 20px;background:#1a1a1a;color:#fff;text-decoration:none;">
+          Confirm subscription
+        </a>
+      </p>
+      <p style="color:#777;font-size:12px;">If you didn't sign up, just ignore this email — no list will be created.</p>
+    </div>`;
+  return resend().emails.send({
+    from: BROADCAST_FROM,
+    to,
+    subject: 'Confirm your Wildlight Imagery subscription',
+    html,
+  });
+}
+
 export async function sendNeedsReviewAlert(orderId: number, reason: string) {
   const recipients = (process.env.ADMIN_ALERT_EMAIL || '')
     .split(',')

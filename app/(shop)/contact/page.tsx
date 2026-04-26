@@ -42,6 +42,9 @@ function ContactForm() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
+  // Honeypot: invisible to humans, filled by naive bots. Server silently
+  // accepts the submission without sending if this is non-empty.
+  const [website, setWebsite] = useState('');
   const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>(
     'idle',
   );
@@ -74,7 +77,7 @@ function ContactForm() {
     const res = await fetch('/api/contact', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, subject, message, topic }),
+      body: JSON.stringify({ name, email, subject, message, topic, website }),
     });
     setState(res.ok ? 'done' : 'error');
   }
@@ -113,6 +116,29 @@ function ContactForm() {
 
       <div className="wl-contact-grid">
         <form className="wl-contact-form" onSubmit={submit}>
+          {/* Honeypot — visually hidden, off the tab order, no autocomplete.
+              Real users never see or fill this; bots that auto-fill every
+              field get silently dropped server-side. */}
+          <label
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              left: '-9999px',
+              width: 1,
+              height: 1,
+              overflow: 'hidden',
+            }}
+          >
+            Website
+            <input
+              type="text"
+              name="website"
+              value={website}
+              onChange={(e) => setWebsite(e.target.value)}
+              tabIndex={-1}
+              autoComplete="off"
+            />
+          </label>
           {piece && (
             <div className="ref-pill">
               <span>Re:</span>
