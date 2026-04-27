@@ -16,6 +16,7 @@ interface Row {
   created_at: string;
   printful_order_id: number | null;
   item_count: number;
+  is_test: boolean;
 }
 
 const FILTERS = [
@@ -231,6 +232,11 @@ export default function AdminOrdersPage() {
                           : '—'}
                       </td>
                       <td>
+                        {r.is_test && (
+                          <span className="wl-adm-test-pill" aria-label="Test order">
+                            TEST
+                          </span>
+                        )}
                         <AdminPill status={r.status} />
                       </td>
                     </tr>
@@ -276,6 +282,11 @@ export default function AdminOrdersPage() {
                           : '—'}
                       </td>
                       <td>
+                        {r.is_test && (
+                          <span className="wl-adm-test-pill" aria-label="Test order">
+                            TEST
+                          </span>
+                        )}
                         <AdminPill status={r.status} />
                       </td>
                     </tr>

@@ -578,6 +578,30 @@
 
 /* ─────── STATUS PILL ─────── */
 
+/* Informational TEST badge for orders created via Stripe test-mode
+   checkout. Sits next to the lifecycle-status pill. Muted on purpose
+   — this is a "heads up", not a warning. */
+.wl-adm-test-pill {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 6px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--adm-rule-soft);
+  color: var(--adm-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.wl-admin-surface[data-theme='dark'] .wl-adm-test-pill {
+  border-radius: 3px;
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
+  font-size: 10px;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+
 .wl-adm-pill {
   display: inline-flex;
   align-items: center;
