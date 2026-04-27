@@ -47,27 +47,75 @@ export interface OrderConfirmationData {
   siteUrl: string;
 }
 
-// Email-safe color tokens. Mirror globals.css :root bone palette but inline
-// because remote CSS / web fonts don't load reliably in mail clients. We
-// intentionally don't try to honor the recipient's bone/ink mood — the email
-// is read in their mail client which has its own dark-mode handling.
-const E = {
-  paper: '#f2ede1',
-  paper2: '#ebe4d3',
-  ink: '#16130c',
-  ink2: '#3b362a',
-  ink3: '#6a6452',
+// Trim transactional palette. Light values are inlined on every element.
+// The <style> block in <head> overrides them for recipients in dark mode
+// via @media (prefers-color-scheme: dark). Mail clients that don't honor
+// the @media query (some Gmail configs, Outlook desktop) just see the
+// light defaults — readable in either client mode, just not adapted.
+const C = {
+  bg: '#f2ede1',
+  fg: '#16130c',
+  fg2: '#3b362a',
+  fg3: '#6a6452',
   rule: 'rgba(22, 19, 12, 0.14)',
-  font: "'EB Garamond', Georgia, 'Times New Roman', serif",
-  mono: "'JetBrains Mono', Menlo, Consolas, monospace",
+  thumbFallback: '#ebe4d3',
 };
 
-function labelStyle(extra = ''): string {
-  return `font-family:${E.mono};font-size:10px;font-weight:500;letter-spacing:0.18em;text-transform:uppercase;color:${E.ink3};${extra}`;
+// System font stack — no remote font files. Mail clients use whichever is
+// installed; Georgia is the consistent serif fallback we can rely on.
+const FONT_SERIF = "Georgia, 'Times New Roman', Times, serif";
+const FONT_MONO = "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace";
+
+// Inline aperture mark — same five-petal sweep as components/shop/ApertureMark.tsx,
+// rendered as static SVG so the email doesn't depend on a hosted asset. Apple
+// Mail / iOS Mail / Gmail / Outlook web render this crisply. Outlook desktop
+// strips inline SVG; in that case the wordmark text alongside still shows
+// brand identity, which is the fallback we want.
+const APERTURE_SVG = `<svg width="28" height="28" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="display:block;">
+  <path d="M50 50 C 54 34, 58 22, 54 10 C 46 8, 40 18, 42 30 C 44 40, 47 46, 50 50 Z" fill="#d94335"/>
+  <path d="M50 50 C 54 34, 58 22, 54 10 C 46 8, 40 18, 42 30 C 44 40, 47 46, 50 50 Z" fill="#e6892a" transform="rotate(72 50 50)"/>
+  <path d="M50 50 C 54 34, 58 22, 54 10 C 46 8, 40 18, 42 30 C 44 40, 47 46, 50 50 Z" fill="#e4bb22" transform="rotate(144 50 50)"/>
+  <path d="M50 50 C 54 34, 58 22, 54 10 C 46 8, 40 18, 42 30 C 44 40, 47 46, 50 50 Z" fill="#6eaa35" transform="rotate(216 50 50)"/>
+  <path d="M50 50 C 54 34, 58 22, 54 10 C 46 8, 40 18, 42 30 C 44 40, 47 46, 50 50 Z" fill="#2a73b3" transform="rotate(288 50 50)"/>
+</svg>`;
+
+function darkModeStyleBlock(): string {
+  // <style> in <head> with class-based @media overrides. The classes are
+  // also used as anchors for inline styles so a client that strips <style>
+  // still gets readable (light) output.
+  return `
+    <style>
+      :root { color-scheme: light dark; supported-color-schemes: light dark; }
+      @media (prefers-color-scheme: dark) {
+        body, .wl-bg { background-color: #141210 !important; }
+        .wl-fg { color: #f2ede1 !important; }
+        .wl-fg2 { color: #d8d2c1 !important; }
+        .wl-fg3 { color: #a9a390 !important; }
+        .wl-rule { border-color: rgba(242, 237, 225, 0.14) !important; }
+        .wl-thumb-fallback { background-color: #1b1814 !important; }
+        .wl-link { color: #f2ede1 !important; }
+      }
+    </style>`;
 }
 
-// Shared item-row builder. Confirmation passes `trailing` (the line total).
-// Shipped omits it — no per-item price column in the shipped recap.
+function brandHeader(): string {
+  // Mark + wordmark on one row. If Outlook strips the SVG, the wordmark
+  // text still anchors the email's identity.
+  return `
+    <tr><td class="wl-rule" style="padding:6px 0 18px;border-bottom:1px solid ${C.rule};">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td valign="middle" style="padding-right:10px;line-height:0;">${APERTURE_SVG}</td>
+          <td valign="middle" class="wl-fg2" style="font-family:${FONT_MONO};font-size:11px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:${C.fg2};">Wildlight Imagery</td>
+        </tr>
+      </table>
+    </td></tr>`;
+}
+
+function labelInline(): string {
+  return `font-family:${FONT_MONO};font-size:10px;font-weight:600;letter-spacing:0.18em;text-transform:uppercase;color:${C.fg3};`;
+}
+
 function itemRow(opts: {
   title: string;
   variant: string;
@@ -79,26 +127,23 @@ function itemRow(opts: {
   // protocol (javascript:, data:, etc.) falls back to the placeholder.
   const safeImage = safeHttpUrl(opts.imageUrl);
   const thumb = safeImage
-    ? `<img src="${escapeHtml(safeImage)}" alt="" width="72" height="72" style="display:block;border:1px solid ${E.rule};object-fit:cover;" />`
-    : `<div style="width:72px;height:72px;background:${E.paper2};border:1px solid ${E.rule};"></div>`;
+    ? `<img src="${escapeHtml(safeImage)}" alt="" width="64" height="64" style="display:block;border:1px solid ${C.rule};object-fit:cover;" />`
+    : `<div class="wl-thumb-fallback wl-rule" style="width:64px;height:64px;background:${C.thumbFallback};border:1px solid ${C.rule};"></div>`;
   const trailingCell =
     opts.trailing != null
-      ? `<td valign="top" align="right" style="padding:16px 0 16px 16px;border-bottom:1px solid ${E.rule};font-family:${E.font};font-size:18px;color:${E.ink};white-space:nowrap;">${opts.trailing}</td>`
+      ? `<td valign="top" align="right" class="wl-rule wl-fg" style="padding:14px 0 14px 12px;border-bottom:1px solid ${C.rule};font-family:${FONT_SERIF};font-size:15px;color:${C.fg};white-space:nowrap;">${opts.trailing}</td>`
       : '';
   return `
     <tr>
-      <td width="72" valign="top" style="padding:16px 16px 16px 0;">${thumb}</td>
-      <td valign="top" style="padding:16px 0;border-bottom:1px solid ${E.rule};font-family:${E.font};">
-        <div style="font-size:18px;color:${E.ink};margin-bottom:4px;line-height:1.25;">${escapeHtml(opts.title)}</div>
-        <div style="${labelStyle('color:' + E.ink3 + ';')}">${escapeHtml(opts.variant)} · ×${opts.qty}</div>
+      <td width="64" valign="top" style="padding:14px 14px 14px 0;">${thumb}</td>
+      <td valign="top" class="wl-rule" style="padding:14px 0;border-bottom:1px solid ${C.rule};font-family:${FONT_SERIF};">
+        <div class="wl-fg" style="font-size:15px;color:${C.fg};margin-bottom:4px;line-height:1.35;">${escapeHtml(opts.title)}</div>
+        <div class="wl-fg3" style="${labelInline()}">${escapeHtml(opts.variant)} · ×${opts.qty}</div>
       </td>
       ${trailingCell}
     </tr>`;
 }
 
-// Tracking presentation for the shipped email — carrier label up top, the
-// tracking number in mono caps, then a solid CTA button. Falls back gracefully
-// when carrier info isn't in the Printful payload (older events).
 function trackingBlock(opts: {
   carrier?: string | null;
   service?: string | null;
@@ -112,40 +157,21 @@ function trackingBlock(opts: {
         ? escapeHtml(opts.carrier)
         : 'Tracking';
   const numberDisplay = opts.trackingNumber
-    ? `<div style="font-family:${E.mono};font-size:14px;font-weight:500;color:${E.ink};letter-spacing:0.04em;margin-top:6px;word-break:break-all;">${escapeHtml(opts.trackingNumber)}</div>`
-    : `<div style="font-family:${E.font};font-size:14px;color:${E.ink2};margin-top:6px;font-style:italic;">Tracking details to follow shortly.</div>`;
-  // Defense-in-depth: drop the button entirely if the URL isn't http(s).
-  // The webhook's write boundary already filters, but this also covers
-  // historical rows persisted before that gate was in place.
+    ? `<div class="wl-fg" style="font-family:${FONT_MONO};font-size:14px;font-weight:500;color:${C.fg};margin-top:4px;word-break:break-all;">${escapeHtml(opts.trackingNumber)}</div>`
+    : `<div class="wl-fg2" style="font-family:${FONT_SERIF};font-size:14px;color:${C.fg2};margin-top:4px;font-style:italic;">Tracking details to follow shortly.</div>`;
+  // Defense-in-depth: drop the link entirely if the URL isn't http(s).
+  // Webhook write boundary already filters; this is a backstop for
+  // historical rows persisted before that gate.
   const safeTrackingUrl = safeHttpUrl(opts.trackingUrl);
-  const trackButton = safeTrackingUrl
-    ? `<div style="margin-top:18px;"><a href="${escapeHtml(safeTrackingUrl)}" style="display:inline-block;padding:13px 24px;background:${E.ink};color:${E.paper};text-decoration:none;font-family:${E.mono};font-size:11px;font-weight:500;letter-spacing:0.18em;text-transform:uppercase;">Track package →</a></div>`
+  const trackLink = safeTrackingUrl
+    ? `<div style="margin-top:10px;"><a class="wl-link wl-fg" href="${escapeHtml(safeTrackingUrl)}" style="color:${C.fg};text-decoration:underline;font-family:${FONT_SERIF};font-size:14px;">Track this package →</a></div>`
     : '';
   return `
-    <tr><td style="padding:32px 0 24px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${E.paper2};border:1px solid ${E.rule};">
-        <tr><td style="padding:24px 28px;">
-          <span style="${labelStyle('letter-spacing:0.22em;display:block;margin-bottom:6px;')}">${label}</span>
-          ${numberDisplay}
-          ${trackButton}
-        </td></tr>
-      </table>
+    <tr><td style="padding:24px 0 8px;">
+      <span class="wl-fg3" style="${labelInline()}display:block;margin-bottom:4px;">${label}</span>
+      ${numberDisplay}
+      ${trackLink}
     </td></tr>`;
-}
-
-function sumRow(label: string, value: string, isTotal = false): string {
-  if (isTotal) {
-    return `
-      <tr>
-        <td style="padding:14px 0 0;border-top:1px solid ${E.rule};font-family:${E.font};font-size:24px;color:${E.ink};">${escapeHtml(label)}</td>
-        <td align="right" style="padding:14px 0 0;border-top:1px solid ${E.rule};font-family:${E.font};font-size:24px;color:${E.ink};">${value}</td>
-      </tr>`;
-  }
-  return `
-    <tr>
-      <td style="padding:6px 0;font-family:${E.mono};font-size:13px;font-weight:500;color:${E.ink2};letter-spacing:0.04em;">${escapeHtml(label)}</td>
-      <td align="right" style="padding:6px 0;font-family:${E.mono};font-size:13px;font-weight:500;color:${E.ink2};letter-spacing:0.04em;">${value}</td>
-    </tr>`;
 }
 
 function shippingBlock(addr: OrderConfirmationData['shippingAddress'], name?: string | null): string {
@@ -159,14 +185,151 @@ function shippingBlock(addr: OrderConfirmationData['shippingAddress'], name?: st
   ]
     .filter(Boolean)
     // String() is defensive against schema drift in shipping_address JSONB —
-    // if a non-string truthy value ever slips past filter(Boolean), this
-    // turns it into a string instead of throwing inside .replace and
-    // breaking the email send.
+    // if a non-string truthy value slips past filter(Boolean), this turns
+    // it into a string instead of throwing inside .replace.
     .map((l) => escapeHtml(String(l)))
     .join('<br/>');
   return `
-    <tr><td style="padding:8px 0 4px;"><span style="${labelStyle()}">Ships to</span></td></tr>
-    <tr><td style="padding:0 0 32px;font-family:${E.font};font-size:15px;line-height:1.6;color:${E.ink2};">${lines}</td></tr>`;
+    <tr><td style="padding:24px 0 4px;"><span class="wl-fg3" style="${labelInline()}">Ships to</span></td></tr>
+    <tr><td class="wl-fg2" style="padding:0 0 24px;font-family:${FONT_SERIF};font-size:14px;line-height:1.55;color:${C.fg2};">${lines}</td></tr>`;
+}
+
+function plainAddress(addr: OrderConfirmationData['shippingAddress'], name?: string | null): string {
+  if (!addr || !addr.line1) return '';
+  return [
+    name,
+    addr.line1,
+    addr.line2,
+    [addr.city, addr.state, addr.postal_code].filter(Boolean).join(' ') || null,
+    addr.country,
+  ]
+    .filter(Boolean)
+    .map(String)
+    .join('\n');
+}
+
+function plainOrderConfirmation(data: OrderConfirmationData): string {
+  const orderRef = data.orderToken.slice(0, 8);
+  const orderUrl = `${data.siteUrl.replace(/\/$/, '')}/orders/${data.orderToken}`;
+  const lines: string[] = [];
+  lines.push('WILDLIGHT IMAGERY');
+  lines.push('');
+  lines.push(`Order ${orderRef} — received`);
+  lines.push('');
+  lines.push(
+    "Your order is in. Archival prints, made to order in Aurora, Colorado. Most ship in 5-7 business days. We'll send a second email with tracking the moment it's on the way.",
+  );
+  lines.push('');
+  lines.push('PLATES');
+  for (const i of data.items) {
+    lines.push(`  ${i.title}`);
+    lines.push(`    ${i.variant} · ×${i.qty}    ${i.lineTotal}`);
+  }
+  lines.push('');
+  lines.push(`Subtotal:  ${data.subtotal}`);
+  lines.push(`Shipping:  ${data.shipping}`);
+  lines.push(`Tax:       ${data.tax}`);
+  lines.push(`TOTAL:     ${data.total}`);
+  const ship = plainAddress(data.shippingAddress, data.customerName);
+  if (ship) {
+    lines.push('');
+    lines.push('SHIPS TO');
+    lines.push(ship);
+  }
+  lines.push('');
+  lines.push(`View your order: ${orderUrl}`);
+  lines.push('');
+  lines.push('—');
+  lines.push('Wildlight Imagery — work by Dan Raby, Aurora, Colorado.');
+  lines.push('Questions? Reply to this email.');
+  return lines.join('\n');
+}
+
+function plainOrderShipped(data: OrderShippedData): string {
+  const orderRef = data.orderToken.slice(0, 8);
+  const orderUrl = `${data.siteUrl.replace(/\/$/, '')}/orders/${data.orderToken}`;
+  const isFirst = data.shipmentNumber <= 1;
+  const headline = isFirst
+    ? data.moreOnTheWay
+      ? 'Part of your order is on the way.'
+      : 'Your order is on the way.'
+    : `Shipment ${data.shipmentNumber} is on the way.`;
+  const headerLabel = isFirst ? 'shipped' : `shipped — part ${data.shipmentNumber}`;
+  const lines: string[] = [];
+  lines.push('WILDLIGHT IMAGERY');
+  lines.push('');
+  lines.push(`Order ${orderRef} — ${headerLabel}`);
+  lines.push('');
+  lines.push(headline);
+  lines.push('');
+  lines.push(
+    'Your prints are out the door from Aurora, Colorado. Most US shipments arrive in 3-5 business days from the carrier scan.',
+  );
+  lines.push('');
+  const carrierLabel =
+    data.carrier && data.service
+      ? `${data.carrier} · ${data.service}`
+      : data.carrier || 'Tracking';
+  lines.push(carrierLabel);
+  if (data.trackingNumber) lines.push(data.trackingNumber);
+  else lines.push('(Tracking details to follow shortly.)');
+  const safeTracking = safeHttpUrl(data.trackingUrl);
+  if (safeTracking) {
+    lines.push(`Track this package: ${safeTracking}`);
+  }
+  if (data.moreOnTheWay) {
+    lines.push('');
+    lines.push(
+      "MORE ON THE WAY: The rest of your order is still in fulfillment. We'll send another email when that package ships.",
+    );
+  }
+  lines.push('');
+  lines.push('IN YOUR ORDER');
+  for (const i of data.items) {
+    lines.push(`  ${i.title}`);
+    lines.push(`    ${i.variant} · ×${i.qty}`);
+  }
+  const ship = plainAddress(data.shippingAddress, data.customerName);
+  if (ship) {
+    lines.push('');
+    lines.push('SHIPS TO');
+    lines.push(ship);
+  }
+  lines.push('');
+  lines.push(`View your order: ${orderUrl}`);
+  lines.push('');
+  lines.push('—');
+  lines.push('Wildlight Imagery — work by Dan Raby, Aurora, Colorado.');
+  lines.push('Questions? Reply to this email.');
+  return lines.join('\n');
+}
+
+// Build aligned totals as a plain table (no colored panel). Light-mode
+// inline styles are present; dark-mode adjusts via the .wl- classes.
+function totalsBlock(data: OrderConfirmationData): string {
+  const row = (label: string, value: string, isTotal = false): string => {
+    const labelStyle = isTotal
+      ? `padding:14px 0 0;border-top:1px solid ${C.rule};font-family:${FONT_SERIF};font-size:15px;font-weight:600;color:${C.fg};`
+      : `padding:6px 0;font-family:${FONT_SERIF};font-size:14px;color:${C.fg2};`;
+    const valueStyle = isTotal
+      ? `padding:14px 0 0;border-top:1px solid ${C.rule};font-family:${FONT_SERIF};font-size:15px;font-weight:600;color:${C.fg};`
+      : `padding:6px 0;font-family:${FONT_SERIF};font-size:14px;color:${C.fg2};`;
+    const cls = isTotal ? 'wl-rule wl-fg' : 'wl-fg2';
+    return `
+      <tr>
+        <td class="${cls}" style="${labelStyle}">${escapeHtml(label)}</td>
+        <td class="${cls}" align="right" style="${valueStyle}">${value}</td>
+      </tr>`;
+  };
+  return `
+    <tr><td style="padding:8px 0 24px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+        ${row('Subtotal', data.subtotal)}
+        ${row('Shipping', data.shipping)}
+        ${row('Tax', data.tax)}
+        ${row('Total', data.total, true)}
+      </table>
+    </td></tr>`;
 }
 
 export async function sendOrderConfirmation(data: OrderConfirmationData) {
@@ -182,57 +345,46 @@ export async function sendOrderConfirmation(data: OrderConfirmationData) {
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="color-scheme" content="light dark"/>
+  <meta name="supported-color-schemes" content="light dark"/>
   <meta name="x-apple-disable-message-reformatting"/>
   <title>Your Wildlight order</title>
+  ${darkModeStyleBlock()}
 </head>
-<body style="margin:0;padding:0;background:${E.paper};">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${E.paper};padding:32px 16px;">
+<body class="wl-bg" style="margin:0;padding:0;background:${C.bg};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="wl-bg" style="background:${C.bg};padding:24px 16px;">
     <tr><td align="center">
-      <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;background:${E.paper};">
+      <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;">
 
-        <tr><td style="padding:8px 0 24px;border-bottom:1px solid ${E.rule};">
-          <span style="${labelStyle('letter-spacing:0.22em;')}">Wildlight Imagery</span>
+        ${brandHeader()}
+
+        <tr><td style="padding:24px 0 6px;">
+          <span class="wl-fg3" style="${labelInline()}">Order ${escapeHtml(orderRef)} · received</span>
+        </td></tr>
+        <tr><td class="wl-fg" style="padding:0 0 18px;font-family:${FONT_SERIF};font-size:18px;font-weight:600;color:${C.fg};letter-spacing:-0.005em;">
+          Thank you. Your order is in.
         </td></tr>
 
-        <tr><td style="padding:32px 0 8px;">
-          <h1 style="font-family:${E.font};font-size:42px;font-weight:400;margin:0;letter-spacing:-0.01em;color:${E.ink};line-height:1.04;">Thank you<span style="color:${E.ink2};font-style:italic;">.</span></h1>
-        </td></tr>
-        <tr><td style="padding-bottom:32px;">
-          <span style="${labelStyle('letter-spacing:0.14em;')}">Order ${escapeHtml(orderRef)} · received</span>
+        <tr><td class="wl-fg2" style="padding-bottom:18px;font-family:${FONT_SERIF};font-size:14px;line-height:1.6;color:${C.fg2};">
+          Archival prints, made to order in Aurora, Colorado. Most ship in 5–7 business days. We'll send a second email with tracking the moment it's on the way.
         </td></tr>
 
-        <tr><td style="padding-bottom:32px;font-family:${E.font};font-size:15px;line-height:1.6;color:${E.ink2};">
-          Your order is in. Archival prints, made to order in Aurora, Colorado — usually shipping in 5–7 business days. We'll send a second email with tracking the moment it's on the way.
-        </td></tr>
-
-        <tr><td style="padding-bottom:8px;"><span style="${labelStyle()}">Plates</span></td></tr>
+        <tr><td style="padding:8px 0 4px;"><span class="wl-fg3" style="${labelInline()}">Plates</span></td></tr>
         <tr><td>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${itemsHtml}</table>
         </td></tr>
 
-        <tr><td style="padding:32px 0 24px;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${E.paper2};border:1px solid ${E.rule};">
-            <tr><td style="padding:24px 28px;">
-              <span style="${labelStyle('letter-spacing:0.22em;display:block;margin-bottom:14px;')}">Receipt</span>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                ${sumRow('Subtotal', data.subtotal)}
-                ${sumRow('Shipping', data.shipping)}
-                ${sumRow('Tax', data.tax)}
-                ${sumRow('Total', data.total, true)}
-              </table>
-            </td></tr>
-          </table>
-        </td></tr>
+        ${totalsBlock(data)}
 
         ${ship}
 
-        <tr><td style="padding:8px 0 32px;">
-          <a href="${escapeHtml(orderUrl)}" style="display:inline-block;padding:13px 24px;background:${E.ink};color:${E.paper};text-decoration:none;font-family:${E.mono};font-size:11px;font-weight:500;letter-spacing:0.18em;text-transform:uppercase;">View order →</a>
+        <tr><td style="padding:0 0 24px;">
+          <a class="wl-link wl-fg" href="${escapeHtml(orderUrl)}" style="color:${C.fg};text-decoration:underline;font-family:${FONT_SERIF};font-size:14px;font-weight:500;">View your order →</a>
         </td></tr>
 
-        <tr><td style="padding:24px 0 0;border-top:1px solid ${E.rule};font-family:${E.font};font-size:12px;color:${E.ink3};line-height:1.6;">
+        <tr><td class="wl-rule wl-fg3" style="padding:18px 0 0;border-top:1px solid ${C.rule};font-family:${FONT_SERIF};font-size:12px;color:${C.fg3};line-height:1.6;">
           Wildlight Imagery — work by Dan Raby, Aurora, Colorado.<br/>
-          Questions about your order? Just reply to this email.
+          Questions? Just reply to this email.
         </td></tr>
 
       </table>
@@ -246,6 +398,7 @@ export async function sendOrderConfirmation(data: OrderConfirmationData) {
     to: data.to,
     subject: `Your Wildlight order ${orderRef}`,
     html,
+    text: plainOrderConfirmation(data),
   });
 }
 
@@ -301,13 +454,8 @@ export async function sendOrderShipped(data: OrderShippedData) {
 
   const moreCallout = data.moreOnTheWay
     ? `
-      <tr><td style="padding:0 0 24px;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ${E.rule};">
-          <tr><td style="padding:16px 18px;font-family:${E.font};font-size:14px;color:${E.ink2};line-height:1.55;">
-            <span style="${labelStyle('display:block;margin-bottom:4px;')}">More on the way</span>
-            The rest of your order is still in fulfillment. We'll send another email with tracking the moment that package ships.
-          </td></tr>
-        </table>
+      <tr><td class="wl-fg2" style="padding:8px 0 16px;font-family:${FONT_SERIF};font-size:13px;color:${C.fg2};line-height:1.55;font-style:italic;">
+        The rest of your order is still in fulfillment — we'll send another email when that package ships.
       </td></tr>`
     : '';
 
@@ -320,32 +468,33 @@ export async function sendOrderShipped(data: OrderShippedData) {
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="color-scheme" content="light dark"/>
+  <meta name="supported-color-schemes" content="light dark"/>
   <meta name="x-apple-disable-message-reformatting"/>
   <title>${escapeHtml(subject)}</title>
+  ${darkModeStyleBlock()}
 </head>
-<body style="margin:0;padding:0;background:${E.paper};">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${E.paper};padding:32px 16px;">
+<body class="wl-bg" style="margin:0;padding:0;background:${C.bg};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="wl-bg" style="background:${C.bg};padding:24px 16px;">
     <tr><td align="center">
-      <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;background:${E.paper};">
+      <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;">
 
-        <tr><td style="padding:8px 0 24px;border-bottom:1px solid ${E.rule};">
-          <span style="${labelStyle('letter-spacing:0.22em;')}">Wildlight Imagery</span>
+        ${brandHeader()}
+
+        <tr><td style="padding:24px 0 6px;">
+          <span class="wl-fg3" style="${labelInline()}">Order ${escapeHtml(orderRef)} · ${escapeHtml(headerLabel)}</span>
+        </td></tr>
+        <tr><td class="wl-fg" style="padding:0 0 18px;font-family:${FONT_SERIF};font-size:18px;font-weight:600;color:${C.fg};letter-spacing:-0.005em;">
+          ${escapeHtml(headline)}
         </td></tr>
 
-        <tr><td style="padding:32px 0 8px;">
-          <h1 style="font-family:${E.font};font-size:42px;font-weight:400;margin:0;letter-spacing:-0.01em;color:${E.ink};line-height:1.04;">${escapeHtml(headline)}</h1>
-        </td></tr>
-        <tr><td style="padding-bottom:32px;">
-          <span style="${labelStyle('letter-spacing:0.14em;')}">Order ${escapeHtml(orderRef)} · ${escapeHtml(headerLabel)}</span>
-        </td></tr>
-
-        <tr><td style="padding-bottom:0;font-family:${E.font};font-size:15px;line-height:1.6;color:${E.ink2};">
-          Your prints are out the door from Aurora, Colorado. Most US shipments arrive in 3–5 business days from the carrier scan. Tracking and a recap of your order are below.
+        <tr><td class="wl-fg2" style="padding-bottom:0;font-family:${FONT_SERIF};font-size:14px;line-height:1.6;color:${C.fg2};">
+          Your prints are out the door from Aurora, Colorado. Most US shipments arrive in 3–5 business days from the carrier scan.
         </td></tr>
 
         ${tracking}
 
-        <tr><td style="padding-bottom:8px;"><span style="${labelStyle()}">In your order</span></td></tr>
+        <tr><td style="padding:24px 0 4px;"><span class="wl-fg3" style="${labelInline()}">In your order</span></td></tr>
         <tr><td>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${itemsHtml}</table>
         </td></tr>
@@ -354,13 +503,13 @@ export async function sendOrderShipped(data: OrderShippedData) {
 
         ${ship}
 
-        <tr><td style="padding:8px 0 32px;">
-          <a href="${escapeHtml(orderUrl)}" style="display:inline-block;padding:13px 24px;background:${E.ink};color:${E.paper};text-decoration:none;font-family:${E.mono};font-size:11px;font-weight:500;letter-spacing:0.18em;text-transform:uppercase;">View order →</a>
+        <tr><td style="padding:0 0 24px;">
+          <a class="wl-link wl-fg" href="${escapeHtml(orderUrl)}" style="color:${C.fg};text-decoration:underline;font-family:${FONT_SERIF};font-size:14px;font-weight:500;">View your order →</a>
         </td></tr>
 
-        <tr><td style="padding:24px 0 0;border-top:1px solid ${E.rule};font-family:${E.font};font-size:12px;color:${E.ink3};line-height:1.6;">
+        <tr><td class="wl-rule wl-fg3" style="padding:18px 0 0;border-top:1px solid ${C.rule};font-family:${FONT_SERIF};font-size:12px;color:${C.fg3};line-height:1.6;">
           Wildlight Imagery — work by Dan Raby, Aurora, Colorado.<br/>
-          Questions about your shipment? Just reply to this email.
+          Questions? Just reply to this email.
         </td></tr>
 
       </table>
@@ -374,6 +523,7 @@ export async function sendOrderShipped(data: OrderShippedData) {
     to: data.to,
     subject,
     html,
+    text: plainOrderShipped(data),
   });
 }
 
