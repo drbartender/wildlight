@@ -89,6 +89,13 @@ CREATE INDEX IF NOT EXISTS idx_orders_printful ON orders(printful_order_id);
 ALTER TABLE orders
   ADD COLUMN IF NOT EXISTS printful_attempt INT NOT NULL DEFAULT 0;
 
+-- is_test: marks orders that were created via Stripe test-mode checkout.
+-- Read by admin surfaces to render a TEST pill and by the webhook to skip
+-- operator alert emails. Default false so existing rows (all real) stay
+-- correct after migration.
+ALTER TABLE orders
+  ADD COLUMN IF NOT EXISTS is_test BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- Immutable checkout snapshot keyed by stripe_session_id. Written at
 -- checkout-session creation, read by the Stripe webhook so an admin
 -- editing title/size/price/print-file/sync-id between checkout and webhook

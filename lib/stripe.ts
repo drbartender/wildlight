@@ -11,8 +11,9 @@ function pick(): StripeConfig {
   const until = process.env.STRIPE_TEST_MODE_UNTIL;
   const forceTest = until ? new Date(until) > new Date() : false;
   if (forceTest) {
+    const secret = process.env.STRIPE_SECRET_KEY_TEST || process.env.STRIPE_SECRET_KEY || '';
     return {
-      secret: process.env.STRIPE_SECRET_KEY_TEST || process.env.STRIPE_SECRET_KEY || '',
+      secret,
       publishable:
         process.env.STRIPE_PUBLISHABLE_KEY_TEST || process.env.STRIPE_PUBLISHABLE_KEY || '',
       webhookSecret:
@@ -20,11 +21,16 @@ function pick(): StripeConfig {
       testMode: true,
     };
   }
+  // Also treat a plain `sk_test_…` secret as test mode, even without the
+  // timed STRIPE_TEST_MODE_UNTIL window. This is what's in effect when the
+  // operator just plugs test keys into the regular slots — downstream code
+  // (Printful draft submission) can rely on `testMode` to gate side effects.
+  const secret = process.env.STRIPE_SECRET_KEY || '';
   return {
-    secret: process.env.STRIPE_SECRET_KEY || '',
+    secret,
     publishable: process.env.STRIPE_PUBLISHABLE_KEY || '',
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
-    testMode: false,
+    testMode: secret.startsWith('sk_test_'),
   };
 }
 
