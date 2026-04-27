@@ -15,15 +15,16 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ]);
     return [
       { url: `${base}/`, lastModified: new Date() },
-      { url: `${base}/collections`, lastModified: new Date() },
+      { url: `${base}/shop`, lastModified: new Date() },
+      { url: `${base}/shop/collections`, lastModified: new Date() },
       { url: `${base}/about`, lastModified: new Date() },
       { url: `${base}/contact`, lastModified: new Date() },
       ...collections.rows.map((c) => ({
-        url: `${base}/collections/${c.slug}`,
+        url: `${base}/shop/collections/${c.slug}`,
         lastModified: c.created_at,
       })),
       ...artworks.rows.map((a) => ({
-        url: `${base}/artwork/${a.slug}`,
+        url: `${base}/shop/artwork/${a.slug}`,
         lastModified: a.updated_at,
       })),
     ];
@@ -31,7 +32,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     // DB may not be reachable during build/preview — fall back to the static routes only.
     return [
       { url: `${base}/`, lastModified: new Date() },
-      { url: `${base}/collections`, lastModified: new Date() },
+      { url: `${base}/shop`, lastModified: new Date() },
+      { url: `${base}/shop/collections`, lastModified: new Date() },
       { url: `${base}/about`, lastModified: new Date() },
       { url: `${base}/contact`, lastModified: new Date() },
     ];
