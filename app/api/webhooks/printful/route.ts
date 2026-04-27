@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { pool, withTransaction } from '@/lib/db';
 import { sendOrderShipped, sendNeedsReviewAlert } from '@/lib/email';
 import { logger } from '@/lib/logger';
+import { safeHttpUrl } from '@/lib/url';
 
 // Printful's v1 webhook API does not issue a signing secret or HMAC the body —
 // authentication is via a high-entropy token embedded in the registered URL.
@@ -99,7 +100,12 @@ export async function POST(req: Request) {
 
     if (event.type === 'package_shipped') {
       const shipment = event.data?.shipment;
-      const trackingUrl = shipment?.tracking_url || null;
+      // Reject anything that isn't an http(s) URL before persisting. The
+      // DB column then guarantees safe rendering downstream — emails,
+      // receipt page, admin order detail. Closes a javascript:/data: URL
+      // injection vector if Printful's webhook auth is ever compromised
+      // (their v1 API uses a static URL token, not body HMAC).
+      const trackingUrl = safeHttpUrl(shipment?.tracking_url);
       const trackingNumber = shipment?.tracking_number || null;
       const carrier = shipment?.carrier || null;
       const service = shipment?.service || null;

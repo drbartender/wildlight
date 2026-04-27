@@ -1,4 +1,5 @@
 import { Resend } from 'resend';
+import { safeHttpUrl } from './url';
 
 const FROM = process.env.RESEND_FROM_EMAIL || 'orders@wildlightimagery.shop';
 const BROADCAST_FROM = process.env.RESEND_BROADCAST_FROM || 'news@wildlightimagery.shop';
@@ -74,8 +75,11 @@ function itemRow(opts: {
   imageUrl?: string | null;
   trailing?: string;
 }): string {
-  const thumb = opts.imageUrl
-    ? `<img src="${escapeHtml(opts.imageUrl)}" alt="" width="72" height="72" style="display:block;border:1px solid ${E.rule};object-fit:cover;" />`
+  // Defense-in-depth: only http(s) URLs render as images. Any other
+  // protocol (javascript:, data:, etc.) falls back to the placeholder.
+  const safeImage = safeHttpUrl(opts.imageUrl);
+  const thumb = safeImage
+    ? `<img src="${escapeHtml(safeImage)}" alt="" width="72" height="72" style="display:block;border:1px solid ${E.rule};object-fit:cover;" />`
     : `<div style="width:72px;height:72px;background:${E.paper2};border:1px solid ${E.rule};"></div>`;
   const trailingCell =
     opts.trailing != null
@@ -110,8 +114,12 @@ function trackingBlock(opts: {
   const numberDisplay = opts.trackingNumber
     ? `<div style="font-family:${E.mono};font-size:14px;font-weight:500;color:${E.ink};letter-spacing:0.04em;margin-top:6px;word-break:break-all;">${escapeHtml(opts.trackingNumber)}</div>`
     : `<div style="font-family:${E.font};font-size:14px;color:${E.ink2};margin-top:6px;font-style:italic;">Tracking details to follow shortly.</div>`;
-  const trackButton = opts.trackingUrl
-    ? `<div style="margin-top:18px;"><a href="${escapeHtml(opts.trackingUrl)}" style="display:inline-block;padding:13px 24px;background:${E.ink};color:${E.paper};text-decoration:none;font-family:${E.mono};font-size:11px;font-weight:500;letter-spacing:0.18em;text-transform:uppercase;">Track package →</a></div>`
+  // Defense-in-depth: drop the button entirely if the URL isn't http(s).
+  // The webhook's write boundary already filters, but this also covers
+  // historical rows persisted before that gate was in place.
+  const safeTrackingUrl = safeHttpUrl(opts.trackingUrl);
+  const trackButton = safeTrackingUrl
+    ? `<div style="margin-top:18px;"><a href="${escapeHtml(safeTrackingUrl)}" style="display:inline-block;padding:13px 24px;background:${E.ink};color:${E.paper};text-decoration:none;font-family:${E.mono};font-size:11px;font-weight:500;letter-spacing:0.18em;text-transform:uppercase;">Track package →</a></div>`
     : '';
   return `
     <tr><td style="padding:32px 0 24px;">
@@ -150,7 +158,11 @@ function shippingBlock(addr: OrderConfirmationData['shippingAddress'], name?: st
     addr.country,
   ]
     .filter(Boolean)
-    .map((l) => escapeHtml(l as string))
+    // String() is defensive against schema drift in shipping_address JSONB —
+    // if a non-string truthy value ever slips past filter(Boolean), this
+    // turns it into a string instead of throwing inside .replace and
+    // breaking the email send.
+    .map((l) => escapeHtml(String(l)))
     .join('<br/>');
   return `
     <tr><td style="padding:8px 0 4px;"><span style="${labelStyle()}">Ships to</span></td></tr>
