@@ -28,7 +28,7 @@ export async function GET(
   );
 
   if (r.rowCount) {
-    const url = new URL(`/orders/${r.rows[0].public_token}`, req.url);
+    const url = new URL(`/shop/orders/${r.rows[0].public_token}`, req.url);
     url.searchParams.set('success', '1');
     return NextResponse.redirect(url);
   }
