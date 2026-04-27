@@ -33,15 +33,25 @@ export async function GET(
     return NextResponse.redirect(url);
   }
 
+  // This response is its own document — it doesn't go through app/layout.tsx
+  // and doesn't load globals.css. So we inline the same `wl_mood` pre-paint
+  // read from app/layout.tsx and define just enough CSS variables to honor
+  // the visitor's bone/ink choice. Without this, an ink-mode user lands on
+  // a hardcoded-bone page after paying — and stares at it on every 3s refresh
+  // until the webhook materializes the order.
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"/>
 <meta http-equiv="refresh" content="3"/>
 <title>Processing — Wildlight Imagery</title>
+<script>(function(){try{var m=localStorage.getItem('wl_mood');document.documentElement.dataset.mood=(m==='ink'||m==='bone')?m:'bone';}catch(e){document.documentElement.dataset.mood='bone';}})();</script>
 <style>
-  body { font-family: Georgia, serif; background: #faf9f7; color: #1a1a1a;
-         margin: 0; padding: 0; }
+  :root { --paper:#f2ede1; --ink:#16130c; --muted:#6a6452; }
+  [data-mood='ink'] { --paper:#141210; --ink:#f2ede1; --muted:#a9a390; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: Georgia, serif; background: var(--paper); color: var(--ink); }
   main { max-width: 520px; margin: 15vh auto; padding: 24px; text-align: center; }
   h1 { font-weight: 400; }
+  p { color: var(--muted); }
 </style></head>
 <body><main>
   <h1>Thank you &mdash; processing.</h1>

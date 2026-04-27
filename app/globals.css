@@ -1661,6 +1661,56 @@ html[data-mood='ink'] .wl-surface::after {
   }
 }
 
+/* ─────── RECEIPT (post-checkout /orders/[token]) ─────── */
+
+/* Receipt re-uses the cart's outer chrome (.wl-cart, .wl-cart-grid, .wl-ci,
+   .wl-summary, .wl-sum-row*) so the customer lands somewhere that visually
+   rhymes with the cart they just left. Only the blocks below are receipt-
+   specific. */
+.wl-receipt-status {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 20px;
+  flex-wrap: wrap;
+}
+.wl-receipt-status .wl-summary-label {
+  margin-bottom: 0;
+}
+.wl-receipt-tracking {
+  font-family: var(--f-mono);
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  margin-left: auto;
+}
+.wl-receipt-tracking:hover {
+  color: var(--ink);
+}
+.wl-receipt-pending {
+  margin-top: 32px;
+  padding: 32px;
+  border: 1px solid var(--rule);
+  background: var(--paper-2);
+  font-family: var(--f-serif);
+  font-size: 17px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  max-width: 560px;
+}
+.wl-receipt-pending p + p {
+  margin-top: 16px;
+}
+.wl-receipt-pending a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 /* ─────── ABOUT ─────── */
 
 .wl-about {
