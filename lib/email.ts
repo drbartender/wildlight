@@ -65,19 +65,64 @@ function labelStyle(extra = ''): string {
   return `font-family:${E.mono};font-size:10px;font-weight:500;letter-spacing:0.18em;text-transform:uppercase;color:${E.ink3};${extra}`;
 }
 
-function rowItem(i: OrderConfirmationData['items'][number]): string {
-  const thumb = i.imageUrl
-    ? `<img src="${escapeHtml(i.imageUrl)}" alt="" width="72" height="72" style="display:block;border:1px solid ${E.rule};object-fit:cover;" />`
+// Shared item-row builder. Confirmation passes `trailing` (the line total).
+// Shipped omits it — no per-item price column in the shipped recap.
+function itemRow(opts: {
+  title: string;
+  variant: string;
+  qty: number;
+  imageUrl?: string | null;
+  trailing?: string;
+}): string {
+  const thumb = opts.imageUrl
+    ? `<img src="${escapeHtml(opts.imageUrl)}" alt="" width="72" height="72" style="display:block;border:1px solid ${E.rule};object-fit:cover;" />`
     : `<div style="width:72px;height:72px;background:${E.paper2};border:1px solid ${E.rule};"></div>`;
+  const trailingCell =
+    opts.trailing != null
+      ? `<td valign="top" align="right" style="padding:16px 0 16px 16px;border-bottom:1px solid ${E.rule};font-family:${E.font};font-size:18px;color:${E.ink};white-space:nowrap;">${opts.trailing}</td>`
+      : '';
   return `
     <tr>
       <td width="72" valign="top" style="padding:16px 16px 16px 0;">${thumb}</td>
       <td valign="top" style="padding:16px 0;border-bottom:1px solid ${E.rule};font-family:${E.font};">
-        <div style="font-size:18px;color:${E.ink};margin-bottom:4px;line-height:1.25;">${escapeHtml(i.title)}</div>
-        <div style="${labelStyle('color:' + E.ink3 + ';')}">${escapeHtml(i.variant)} · ×${i.qty}</div>
+        <div style="font-size:18px;color:${E.ink};margin-bottom:4px;line-height:1.25;">${escapeHtml(opts.title)}</div>
+        <div style="${labelStyle('color:' + E.ink3 + ';')}">${escapeHtml(opts.variant)} · ×${opts.qty}</div>
       </td>
-      <td valign="top" align="right" style="padding:16px 0 16px 16px;border-bottom:1px solid ${E.rule};font-family:${E.font};font-size:18px;color:${E.ink};white-space:nowrap;">${i.lineTotal}</td>
+      ${trailingCell}
     </tr>`;
+}
+
+// Tracking presentation for the shipped email — carrier label up top, the
+// tracking number in mono caps, then a solid CTA button. Falls back gracefully
+// when carrier info isn't in the Printful payload (older events).
+function trackingBlock(opts: {
+  carrier?: string | null;
+  service?: string | null;
+  trackingNumber?: string | null;
+  trackingUrl?: string | null;
+}): string {
+  const label =
+    opts.carrier && opts.service
+      ? `${escapeHtml(opts.carrier)} · ${escapeHtml(opts.service)}`
+      : opts.carrier
+        ? escapeHtml(opts.carrier)
+        : 'Tracking';
+  const numberDisplay = opts.trackingNumber
+    ? `<div style="font-family:${E.mono};font-size:14px;font-weight:500;color:${E.ink};letter-spacing:0.04em;margin-top:6px;word-break:break-all;">${escapeHtml(opts.trackingNumber)}</div>`
+    : `<div style="font-family:${E.font};font-size:14px;color:${E.ink2};margin-top:6px;font-style:italic;">Tracking details to follow shortly.</div>`;
+  const trackButton = opts.trackingUrl
+    ? `<div style="margin-top:18px;"><a href="${escapeHtml(opts.trackingUrl)}" style="display:inline-block;padding:13px 24px;background:${E.ink};color:${E.paper};text-decoration:none;font-family:${E.mono};font-size:11px;font-weight:500;letter-spacing:0.18em;text-transform:uppercase;">Track package →</a></div>`
+    : '';
+  return `
+    <tr><td style="padding:32px 0 24px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${E.paper2};border:1px solid ${E.rule};">
+        <tr><td style="padding:24px 28px;">
+          <span style="${labelStyle('letter-spacing:0.22em;display:block;margin-bottom:6px;')}">${label}</span>
+          ${numberDisplay}
+          ${trackButton}
+        </td></tr>
+      </table>
+    </td></tr>`;
 }
 
 function sumRow(label: string, value: string, isTotal = false): string {
@@ -115,7 +160,9 @@ function shippingBlock(addr: OrderConfirmationData['shippingAddress'], name?: st
 export async function sendOrderConfirmation(data: OrderConfirmationData) {
   const orderRef = data.orderToken.slice(0, 8);
   const orderUrl = `${data.siteUrl.replace(/\/$/, '')}/orders/${data.orderToken}`;
-  const itemsHtml = data.items.map(rowItem).join('');
+  const itemsHtml = data.items
+    .map((i) => itemRow({ ...i, trailing: i.lineTotal }))
+    .join('');
   const ship = shippingBlock(data.shippingAddress, data.customerName);
 
   const html = `<!doctype html>
@@ -190,26 +237,130 @@ export async function sendOrderConfirmation(data: OrderConfirmationData) {
   });
 }
 
-export async function sendOrderShipped(
-  to: string,
-  orderToken: string,
-  trackingUrl: string | null,
-  trackingNumber: string | null,
-  siteUrl: string,
-) {
-  const tracking = trackingUrl
-    ? `<p>Tracking: <a href="${trackingUrl}">${escapeHtml(trackingNumber || 'view')}</a></p>`
-    : '<p>Tracking details to follow shortly.</p>';
-  const html = `
-    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#222;">
-      <h1 style="font-weight:400;">Your order has shipped.</h1>
-      ${tracking}
-      <p><a href="${siteUrl}/orders/${orderToken}">Order details</a></p>
-    </div>`;
+export interface OrderShippedData {
+  to: string;
+  orderToken: string;
+  customerName?: string | null;
+  /** All items in the order (not just this shipment) — the recap so the
+   *  customer remembers what they ordered. The "more on the way" line below
+   *  the items list signals when not everything is in this package. */
+  items: Array<{
+    title: string;
+    variant: string;
+    qty: number;
+    imageUrl?: string | null;
+  }>;
+  shippingAddress?: OrderConfirmationData['shippingAddress'];
+  carrier?: string | null;
+  service?: string | null;
+  trackingUrl?: string | null;
+  trackingNumber?: string | null;
+  /** 1-indexed sequence number — `1` for the first shipment, `2` for the
+   *  next, etc. Drives the "shipment N" subject line and headline copy. */
+  shipmentNumber: number;
+  /** True if Printful's shipment payload listed fewer items than the order
+   *  contains, which means another package is still in fulfillment. The
+   *  email shows a callout so the recipient isn't surprised. */
+  moreOnTheWay?: boolean;
+  siteUrl: string;
+}
+
+export async function sendOrderShipped(data: OrderShippedData) {
+  const orderRef = data.orderToken.slice(0, 8);
+  const orderUrl = `${data.siteUrl.replace(/\/$/, '')}/orders/${data.orderToken}`;
+  const itemsHtml = data.items.map((i) => itemRow(i)).join('');
+  const ship = shippingBlock(data.shippingAddress, data.customerName);
+  const tracking = trackingBlock({
+    carrier: data.carrier,
+    service: data.service,
+    trackingNumber: data.trackingNumber,
+    trackingUrl: data.trackingUrl,
+  });
+
+  const isFirst = data.shipmentNumber <= 1;
+  const headline = isFirst
+    ? data.moreOnTheWay
+      ? 'Part of your order is on the way.'
+      : 'Your order is on the way.'
+    : `Shipment ${data.shipmentNumber} is on the way.`;
+  const headerLabel = isFirst
+    ? 'shipped'
+    : `shipped · part ${data.shipmentNumber}`;
+
+  const moreCallout = data.moreOnTheWay
+    ? `
+      <tr><td style="padding:0 0 24px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ${E.rule};">
+          <tr><td style="padding:16px 18px;font-family:${E.font};font-size:14px;color:${E.ink2};line-height:1.55;">
+            <span style="${labelStyle('display:block;margin-bottom:4px;')}">More on the way</span>
+            The rest of your order is still in fulfillment. We'll send another email with tracking the moment that package ships.
+          </td></tr>
+        </table>
+      </td></tr>`
+    : '';
+
+  const subject = isFirst
+    ? `Your Wildlight order ${orderRef} has shipped`
+    : `Your Wildlight order ${orderRef} — shipment ${data.shipmentNumber}`;
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="x-apple-disable-message-reformatting"/>
+  <title>${escapeHtml(subject)}</title>
+</head>
+<body style="margin:0;padding:0;background:${E.paper};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${E.paper};padding:32px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;background:${E.paper};">
+
+        <tr><td style="padding:8px 0 24px;border-bottom:1px solid ${E.rule};">
+          <span style="${labelStyle('letter-spacing:0.22em;')}">Wildlight Imagery</span>
+        </td></tr>
+
+        <tr><td style="padding:32px 0 8px;">
+          <h1 style="font-family:${E.font};font-size:42px;font-weight:400;margin:0;letter-spacing:-0.01em;color:${E.ink};line-height:1.04;">${escapeHtml(headline)}</h1>
+        </td></tr>
+        <tr><td style="padding-bottom:32px;">
+          <span style="${labelStyle('letter-spacing:0.14em;')}">Order ${escapeHtml(orderRef)} · ${escapeHtml(headerLabel)}</span>
+        </td></tr>
+
+        <tr><td style="padding-bottom:0;font-family:${E.font};font-size:15px;line-height:1.6;color:${E.ink2};">
+          Your prints are out the door from Aurora, Colorado. Most US shipments arrive in 3–5 business days from the carrier scan. Tracking and a recap of your order are below.
+        </td></tr>
+
+        ${tracking}
+
+        <tr><td style="padding-bottom:8px;"><span style="${labelStyle()}">In your order</span></td></tr>
+        <tr><td>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${itemsHtml}</table>
+        </td></tr>
+
+        ${moreCallout}
+
+        ${ship}
+
+        <tr><td style="padding:8px 0 32px;">
+          <a href="${escapeHtml(orderUrl)}" style="display:inline-block;padding:13px 24px;background:${E.ink};color:${E.paper};text-decoration:none;font-family:${E.mono};font-size:11px;font-weight:500;letter-spacing:0.18em;text-transform:uppercase;">View order →</a>
+        </td></tr>
+
+        <tr><td style="padding:24px 0 0;border-top:1px solid ${E.rule};font-family:${E.font};font-size:12px;color:${E.ink3};line-height:1.6;">
+          Wildlight Imagery — work by Dan Raby, Aurora, Colorado.<br/>
+          Questions about your shipment? Just reply to this email.
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
   return resend().emails.send({
     from: FROM,
-    to,
-    subject: 'Your Wildlight order has shipped',
+    to: data.to,
+    subject,
     html,
   });
 }

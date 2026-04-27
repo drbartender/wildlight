@@ -32,8 +32,22 @@ interface PfEvent {
     shipment?: {
       tracking_url?: string;
       tracking_number?: string;
+      // The next four fields are present on package_shipped events but
+      // optional in this shape so we degrade gracefully on older or
+      // partial payloads. carrier+service feed the email's tracking
+      // header; items determines whether more packages are still in
+      // fulfillment ("more on the way" callout).
+      carrier?: string;
+      service?: string;
+      items?: Array<{ item_id?: number; quantity?: number }>;
     };
   };
+}
+
+interface ShipmentItemRow {
+  artwork_snapshot: { title: string; image_web_url?: string };
+  variant_snapshot: { type: string; size: string; finish: string | null };
+  quantity: number;
 }
 
 export async function POST(req: Request) {
@@ -87,21 +101,52 @@ export async function POST(req: Request) {
       const shipment = event.data?.shipment;
       const trackingUrl = shipment?.tracking_url || null;
       const trackingNumber = shipment?.tracking_number || null;
+      const carrier = shipment?.carrier || null;
+      const service = shipment?.service || null;
       // UPDATE + event INSERT share one txn so a crash can't leave orders
       // as shipped without a matching ledger row. The (id, attempt) match
       // ensures a stale shipment event doesn't mark a resubmitted order
-      // as shipped against the wrong Printful order id.
+      // as shipped against the wrong Printful order id. We also gather
+      // everything the redesigned shipped email needs (customer name,
+      // shipping address, all order items, and the prior-shipment count
+      // for the "shipment N" / "more on the way" UX) inside the same
+      // transaction so a concurrent admin edit can't change the picture
+      // between the read and the email send.
       const emailCtx = await withTransaction(async (client) => {
         const r = await client.query<{
           customer_email: string;
+          customer_name: string | null;
           public_token: string;
+          shipping_address: {
+            line1?: string | null;
+            line2?: string | null;
+            city?: string | null;
+            state?: string | null;
+            postal_code?: string | null;
+            country?: string | null;
+          } | null;
         }>(
           `UPDATE orders SET status='shipped', tracking_url=$3, tracking_number=$4, updated_at=NOW()
            WHERE id = $1 AND printful_attempt = $2
-           RETURNING customer_email, public_token`,
+           RETURNING customer_email, customer_name, public_token, shipping_address`,
           [ourId, attempt, trackingUrl, trackingNumber],
         );
         if (!r.rowCount) return null;
+
+        // Count prior shipped events BEFORE inserting this one so the
+        // current shipment is always (priorCount + 1).
+        const priorShipments = await client.query<{ count: number }>(
+          `SELECT COUNT(*)::int AS count FROM order_events
+           WHERE order_id = $1 AND type = 'shipped'`,
+          [ourId],
+        );
+
+        const itemsRes = await client.query<ShipmentItemRow>(
+          `SELECT artwork_snapshot, variant_snapshot, quantity
+           FROM order_items WHERE order_id = $1 ORDER BY id`,
+          [ourId],
+        );
+
         await client.query(
           `INSERT INTO order_events (order_id, type, who, payload)
            VALUES ($1, 'shipped', 'printful', $2::jsonb)`,
@@ -110,21 +155,55 @@ export async function POST(req: Request) {
             JSON.stringify({
               tracking_number: trackingNumber,
               tracking_url: trackingUrl,
+              carrier,
+              service,
             }),
           ],
         );
-        return r.rows[0];
+        return {
+          ...r.rows[0],
+          shipmentNumber: (priorShipments.rows[0]?.count ?? 0) + 1,
+          items: itemsRes.rows,
+        };
       });
       if (emailCtx) {
+        // Heuristic: if Printful sent us a shipment.items list and its total
+        // quantity is less than the order's total quantity, more packages
+        // are still in fulfillment. If the field is absent we assume
+        // single-shipment (most orders) and don't show the callout.
+        const totalOrderQty = emailCtx.items.reduce(
+          (sum, it) => sum + (it.quantity || 0),
+          0,
+        );
+        const shippedQty = (shipment?.items || []).reduce(
+          (sum, it) => sum + (it.quantity || 0),
+          0,
+        );
+        const moreOnTheWay = shippedQty > 0 && shippedQty < totalOrderQty;
+
         const siteUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
         try {
-          await sendOrderShipped(
-            emailCtx.customer_email,
-            emailCtx.public_token,
+          await sendOrderShipped({
+            to: emailCtx.customer_email,
+            orderToken: emailCtx.public_token,
+            customerName: emailCtx.customer_name,
+            items: emailCtx.items.map((i) => ({
+              title: i.artwork_snapshot.title,
+              variant: `${i.variant_snapshot.type}, ${i.variant_snapshot.size}${
+                i.variant_snapshot.finish ? `, ${i.variant_snapshot.finish}` : ''
+              }`,
+              qty: i.quantity,
+              imageUrl: i.artwork_snapshot.image_web_url,
+            })),
+            shippingAddress: emailCtx.shipping_address,
+            carrier,
+            service,
             trackingUrl,
             trackingNumber,
+            shipmentNumber: emailCtx.shipmentNumber,
+            moreOnTheWay,
             siteUrl,
-          );
+          });
         } catch (err) {
           logger.warn('shipped email failed', { err, orderId: ourId });
         }
