@@ -13,6 +13,26 @@ const nextConfig: NextConfig = {
   experimental: {
     serverActions: { bodySizeLimit: '25mb' },
   },
+  async redirects() {
+    return [
+      // Storefront URLs that moved (308 — preserves method, modern 301)
+      { source: '/cart',                  destination: '/shop/cart',                  permanent: true },
+      { source: '/checkout',              destination: '/shop/checkout',              permanent: true },
+      { source: '/collections',           destination: '/shop/collections',           permanent: true },
+      { source: '/collections/:slug',     destination: '/shop/collections/:slug',     permanent: true },
+      { source: '/artwork/:slug',         destination: '/shop/artwork/:slug',         permanent: true },
+      { source: '/orders/:token',         destination: '/shop/orders/:token',         permanent: true },
+
+      // Legacy WordPress shop URLs
+      { source: '/wildlight-store',       destination: '/shop',                       permanent: true },
+      { source: '/wildlight-store/:path*', destination: '/shop',                      permanent: true },
+      { source: '/shopping-cart',         destination: '/shop/cart',                  permanent: true },
+
+      // Legacy WordPress blog (sub-project #3 retargets to /journal/* later)
+      { source: '/blog',                  destination: '/',                           permanent: false },
+      { source: '/blog/:path*',           destination: '/',                           permanent: false },
+    ];
+  },
 };
 
 export default nextConfig;
