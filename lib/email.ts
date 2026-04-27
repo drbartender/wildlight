@@ -254,7 +254,7 @@ function plainOrderShipped(data: OrderShippedData): string {
       ? 'Part of your order is on the way.'
       : 'Your order is on the way.'
     : `Shipment ${data.shipmentNumber} is on the way.`;
-  const headerLabel = isFirst ? 'shipped' : `shipped — part ${data.shipmentNumber}`;
+  const headerLabel = isFirst ? 'shipped' : `shipped · part ${data.shipmentNumber}`;
   const lines: string[] = [];
   lines.push('WILDLIGHT IMAGERY');
   lines.push('');
@@ -494,12 +494,12 @@ export async function sendOrderShipped(data: OrderShippedData) {
 
         ${tracking}
 
+        ${moreCallout}
+
         <tr><td style="padding:24px 0 4px;"><span class="wl-fg3" style="${labelInline()}">In your order</span></td></tr>
         <tr><td>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${itemsHtml}</table>
         </td></tr>
-
-        ${moreCallout}
 
         ${ship}
 
