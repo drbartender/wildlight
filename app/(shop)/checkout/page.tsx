@@ -2,53 +2,164 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { loadStripe, type Stripe } from '@stripe/stripe-js';
-import {
-  EmbeddedCheckoutProvider,
-  EmbeddedCheckout,
-} from '@stripe/react-stripe-js';
+import { loadStripe, type Stripe, type Appearance } from '@stripe/stripe-js';
 import { useCart } from '@/components/shop/CartProvider';
 import { formatUSD } from '@/lib/money';
 import { plateNumber } from '@/lib/plate-number';
 
+// Resolve our CSS variables (which flip on the [data-mood] attribute) to
+// hex values that the Stripe Appearance API can ingest. Stripe doesn't
+// understand `var(...)`, so anything theme-aware has to be read from
+// computed styles at the time the SDK initializes.
+function readAppearance(): Appearance {
+  const cs = getComputedStyle(document.documentElement);
+  const v = (name: string, fallback: string) =>
+    cs.getPropertyValue(name).trim() || fallback;
+  const ink = v('--ink', '#16130c');
+  const ink2 = v('--ink-2', '#3b362a');
+  const ink3 = v('--ink-3', '#6a6452');
+  const ink4 = v('--ink-4', '#95907d');
+  const paper = v('--paper', '#f2ede1');
+  const paper2 = v('--paper-2', '#ebe4d3');
+  return {
+    theme: 'stripe',
+    variables: {
+      colorPrimary: ink,
+      colorBackground: paper,
+      colorText: ink,
+      colorTextSecondary: ink3,
+      colorDanger: '#b3261e',
+      colorIconTab: ink3,
+      colorIconTabSelected: ink,
+      fontFamily: 'Georgia, "Times New Roman", serif',
+      fontSizeBase: '15px',
+      fontWeightNormal: '400',
+      fontWeightMedium: '500',
+      fontWeightBold: '600',
+      borderRadius: '2px',
+      spacingUnit: '4px',
+      spacingGridRow: '14px',
+    },
+    rules: {
+      '.Label': {
+        fontSize: '12px',
+        fontWeight: '500',
+        textTransform: 'uppercase',
+        letterSpacing: '0.08em',
+        color: ink3,
+      },
+      '.Input': {
+        backgroundColor: paper,
+        border: `1px solid ${ink4}`,
+        color: ink,
+        boxShadow: 'none',
+        padding: '12px 14px',
+      },
+      '.Input:hover': {
+        borderColor: ink3,
+      },
+      '.Input:focus': {
+        borderColor: ink,
+        boxShadow: 'none',
+      },
+      '.Input--invalid': {
+        borderColor: '#b3261e',
+        color: ink,
+      },
+      '.Tab': {
+        backgroundColor: paper2,
+        border: `1px solid ${ink4}`,
+        color: ink2,
+        boxShadow: 'none',
+      },
+      '.Tab:hover': {
+        borderColor: ink3,
+        color: ink,
+      },
+      '.Tab--selected': {
+        borderColor: ink,
+        backgroundColor: paper,
+        color: ink,
+        boxShadow: 'none',
+      },
+      '.Block': {
+        backgroundColor: paper,
+        border: `1px solid ${ink4}`,
+        boxShadow: 'none',
+      },
+      '.AccordionItem': {
+        backgroundColor: paper,
+        border: `1px solid ${ink4}`,
+        boxShadow: 'none',
+      },
+      '.PickerItem': {
+        backgroundColor: paper,
+        border: `1px solid ${ink4}`,
+        color: ink,
+        boxShadow: 'none',
+      },
+      '.PickerItem--selected': {
+        borderColor: ink,
+        backgroundColor: paper2,
+      },
+    },
+  };
+}
+
 export default function CheckoutPage() {
   const cart = useCart();
   const router = useRouter();
-  const [clientSecret, setClientSecret] = useState<string | null>(null);
-  const [stripePromise, setStripePromise] =
-    useState<Promise<Stripe | null> | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Guard against StrictMode double-invocation creating two Stripe sessions.
+  const [submitting, setSubmitting] = useState(false);
+  const [ready, setReady] = useState(false);
+
+  // Mount points for Stripe Elements.
+  const expressMount = useRef<HTMLDivElement | null>(null);
+  const contactMount = useRef<HTMLDivElement | null>(null);
+  const shippingMount = useRef<HTMLDivElement | null>(null);
+  const paymentMount = useRef<HTMLDivElement | null>(null);
+
+  // Imperative SDK handle. Held in a ref so the confirm handler reads the
+  // latest one without forcing the effect to re-run.
+  // The exact type lives in @stripe/stripe-js but isn't re-exported by the
+  // top-level entry — we keep it loose here since we only call documented
+  // methods.
+  const sdkRef = useRef<{
+    loadActions: () => Promise<{
+      type: 'success' | 'error';
+      actions?: {
+        confirm: (a?: { returnUrl?: string }) => Promise<unknown>;
+      };
+      error?: { message: string };
+    }>;
+    changeAppearance: (a: Appearance) => void;
+  } | null>(null);
+
+  // Guard against StrictMode double-invoke creating two Stripe sessions.
   const requestedRef = useRef(false);
-  // Holds the latest clientSecret for the stable fetchClientSecret callback
-  // — Stripe's EmbeddedCheckoutProvider reads `options.fetchClientSecret`
-  // once on mount, so its identity must not change after.
-  const clientSecretRef = useRef<string | null>(null);
-  clientSecretRef.current = clientSecret;
-  // Latest cart.clear, captured by ref so the onComplete callback we hand
-  // to Stripe doesn't get re-bound when the cart re-renders.
+  // Latest cart.clear, captured by ref so the post-confirm cleanup is stable.
   const clearCartRef = useRef(cart.clear);
   clearCartRef.current = cart.clear;
 
   const lineCount = cart.lines.length;
 
-  // Empty-cart redirect: separate from the fetch effect so the dependency
-  // semantics are obvious — re-runs whenever ready/empty state changes.
   useEffect(() => {
     if (cart.ready && lineCount === 0) {
       router.replace('/cart');
     }
   }, [cart.ready, lineCount, router]);
 
-  // Create the Stripe session once on first hydrated, non-empty mount.
   useEffect(() => {
     if (!cart.ready || lineCount === 0) return;
     if (requestedRef.current) return;
     requestedRef.current = true;
 
     const ac = new AbortController();
+    let stripe: Stripe | null = null;
+    let cleanup: (() => void) | null = null;
+
     (async () => {
       try {
         const res = await fetch('/api/checkout', {
@@ -73,10 +184,74 @@ export default function CheckoutPage() {
           requestedRef.current = false;
           return;
         }
-        // loadStripe memoizes per key internally, so calling it without
-        // a wrapper cache is safe and correct.
-        setStripePromise(loadStripe(data.publishableKey));
-        setClientSecret(data.clientSecret);
+        stripe = await loadStripe(data.publishableKey);
+        if (!stripe || ac.signal.aborted) return;
+
+        // initCheckoutElementsSdk is the entry point for Custom Checkout
+        // (ui_mode: 'elements'). Returns an imperative SDK we mount
+        // elements from.
+        const sdk = (
+          stripe as unknown as {
+            initCheckoutElementsSdk: (opts: {
+              clientSecret: string;
+              elementsOptions?: { appearance?: Appearance };
+            }) => typeof sdkRef extends { current: infer S } ? S : never;
+          }
+        ).initCheckoutElementsSdk({
+          clientSecret: data.clientSecret,
+          elementsOptions: { appearance: readAppearance() },
+        }) as unknown as NonNullable<typeof sdkRef.current> & {
+          createContactDetailsElement: () => { mount: (el: HTMLElement) => void; destroy: () => void };
+          createShippingAddressElement: () => { mount: (el: HTMLElement) => void; destroy: () => void };
+          createPaymentElement: () => { mount: (el: HTMLElement) => void; destroy: () => void };
+          createExpressCheckoutElement: () => { mount: (el: HTMLElement) => void; destroy: () => void };
+        };
+        sdkRef.current = sdk;
+
+        const elements: Array<{ destroy: () => void }> = [];
+        if (expressMount.current) {
+          const ec = sdk.createExpressCheckoutElement();
+          ec.mount(expressMount.current);
+          elements.push(ec);
+        }
+        if (contactMount.current) {
+          const cd = sdk.createContactDetailsElement();
+          cd.mount(contactMount.current);
+          elements.push(cd);
+        }
+        if (shippingMount.current) {
+          const sh = sdk.createShippingAddressElement();
+          sh.mount(shippingMount.current);
+          elements.push(sh);
+        }
+        if (paymentMount.current) {
+          const pe = sdk.createPaymentElement();
+          pe.mount(paymentMount.current);
+          elements.push(pe);
+        }
+
+        // Re-skin when the user toggles Bone ↔ Ink. The button in the
+        // header sets data-mood on <html>; observing that attribute keeps
+        // the Stripe widget in lockstep without forcing a reload.
+        const obs = new MutationObserver(() => {
+          sdkRef.current?.changeAppearance(readAppearance());
+        });
+        obs.observe(document.documentElement, {
+          attributes: true,
+          attributeFilter: ['data-mood'],
+        });
+
+        cleanup = () => {
+          obs.disconnect();
+          for (const el of elements) {
+            try {
+              el.destroy();
+            } catch {
+              // already torn down
+            }
+          }
+        };
+        setReady(true);
       } catch (e) {
         if (ac.signal.aborted) return;
         setError(e instanceof Error ? e.message : 'Could not start checkout');
@@ -86,25 +261,49 @@ export default function CheckoutPage() {
 
     return () => {
       ac.abort();
+      cleanup?.();
     };
-    // cart.lines identity changes each render, but we only want to fire on
-    // initial hydration. The redirect effect above handles the empty case.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cart.ready]);
 
-  // Stable identity — Stripe's EmbeddedCheckoutProvider asserts options
-  // don't change after mount. The ref read keeps the callback's identity
-  // stable across renders even though clientSecret arrives asynchronously.
-  const fetchClientSecret = useCallback(
-    async () => clientSecretRef.current ?? '',
-    [],
-  );
-  const onComplete = useCallback(() => {
-    // Fires after Stripe confirms payment, before the return_url redirect —
-    // closes the gap where a customer's localStorage cart still held the
-    // items they just paid for.
-    clearCartRef.current();
-  }, []);
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!sdkRef.current || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await sdkRef.current.loadActions();
+      if (res.type !== 'success' || !res.actions) {
+        setError(res.error?.message || 'Checkout could not load');
+        setSubmitting(false);
+        return;
+      }
+      const siteUrl =
+        process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+      // Clear the cart now so the customer doesn't return to a stale list
+      // if they hit Back from the order page. The webhook owns truth from
+      // here on; the localStorage cart is just a UI buffer.
+      clearCartRef.current();
+      const result = (await res.actions.confirm({
+        returnUrl: `${siteUrl}/api/orders/by-session/{CHECKOUT_SESSION_ID}`,
+      })) as { type?: string; error?: { message?: string } };
+      // Stripe handles the redirect on success; reaching here means the
+      // confirm returned without redirecting, usually due to a buyer-side
+      // error.
+      if (result?.error?.message) {
+        setError(result.error.message);
+        setSubmitting(false);
+        return;
+      }
+      if (result?.type && result.type !== 'success') {
+        setError('Payment did not complete. Please try again.');
+        setSubmitting(false);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Payment failed');
+      setSubmitting(false);
+    }
+  }
 
   if (!cart.ready) {
     return (
@@ -185,28 +384,49 @@ export default function CheckoutPage() {
           </div>
         </section>
 
-        <section className="wl-checkout-payment">
+        <form className="wl-checkout-payment" onSubmit={handleSubmit}>
           <span className="wl-summary-label">Payment</span>
-          {error ? (
+
+          {!ready && !error && (
+            <div className="wl-checkout-loading">
+              Preparing secure payment…
+            </div>
+          )}
+
+          <div
+            className="wl-checkout-fields"
+            style={{ display: ready ? 'flex' : 'none' }}
+          >
+            <div ref={expressMount} className="wl-checkout-field" />
+            <div ref={contactMount} className="wl-checkout-field" />
+            <div ref={shippingMount} className="wl-checkout-field" />
+            <div ref={paymentMount} className="wl-checkout-field" />
+
+            {error && <p className="wl-sum-error">{error}</p>}
+
+            <button
+              type="submit"
+              className="wl-btn primary"
+              disabled={submitting}
+            >
+              {submitting
+                ? 'Processing…'
+                : `Pay ${formatUSD(cart.subtotalCents)}+`}
+            </button>
+            <p className="wl-checkout-fineprint">
+              Final total includes shipping and tax, computed before charging.
+            </p>
+          </div>
+
+          {error && !ready && (
             <div className="wl-checkout-error">
               <p className="wl-sum-error">{error}</p>
               <Link href="/cart" className="wl-btn ghost">
                 Back to cart
               </Link>
             </div>
-          ) : !clientSecret || !stripePromise ? (
-            <div className="wl-checkout-loading">
-              Preparing secure payment…
-            </div>
-          ) : (
-            <EmbeddedCheckoutProvider
-              stripe={stripePromise}
-              options={{ fetchClientSecret, onComplete }}
-            >
-              <EmbeddedCheckout />
-            </EmbeddedCheckoutProvider>
           )}
-        </section>
+        </form>
       </div>
     </section>
   );

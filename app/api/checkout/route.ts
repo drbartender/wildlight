@@ -84,7 +84,10 @@ export async function POST(req: Request) {
   let session;
   try {
     session = await stripe.checkout.sessions.create({
-      ui_mode: 'embedded',
+      // Custom Checkout: server still owns line_items / shipping / automatic
+      // tax, but the client renders the form via `initCheckoutElementsSdk`
+      // and the Appearance API so the widget matches our theme.
+      ui_mode: 'elements',
       mode: 'payment',
       automatic_tax: { enabled: true },
       shipping_address_collection: { allowed_countries: ['US', 'CA'] },

@@ -1568,8 +1568,21 @@ html[data-mood='ink'] .wl-surface::after {
 .wl-checkout-payment .wl-summary-label {
   margin-bottom: 12px;
 }
-.wl-checkout-payment iframe {
-  width: 100% !important;
+.wl-checkout-fields {
+  flex-direction: column;
+  gap: 20px;
+}
+.wl-checkout-field {
+  /* Stripe Elements mount here as iframes; the Appearance API styles
+     the inputs themselves. We just give each section consistent spacing. */
+  width: 100%;
+}
+.wl-checkout-fineprint {
+  font-family: var(--f-serif);
+  font-size: 12px;
+  color: var(--ink-3);
+  margin: 4px 0 0;
+  line-height: 1.5;
 }
 .wl-checkout-loading {
   padding: 40px 0;
