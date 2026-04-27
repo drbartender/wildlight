@@ -150,13 +150,14 @@ h4 {
   height: 2px;
   background: linear-gradient(
     90deg,
-    var(--s-red) 0%,
-    var(--s-orange) 16%,
-    var(--s-yellow) 33%,
-    var(--s-green) 50%,
-    var(--s-teal) 66%,
-    var(--s-blue) 83%,
-    var(--s-magenta) 100%
+    var(--s-red),
+    var(--s-orange),
+    var(--s-yellow),
+    var(--s-green),
+    var(--s-teal),
+    var(--s-blue),
+    var(--s-magenta),
+    var(--s-red)
   );
 }
 
@@ -166,13 +167,14 @@ h4 {
   align-self: stretch;
   background: linear-gradient(
     180deg,
-    var(--s-red) 0%,
-    var(--s-orange) 16%,
-    var(--s-yellow) 33%,
-    var(--s-green) 50%,
-    var(--s-teal) 66%,
-    var(--s-blue) 83%,
-    var(--s-magenta) 100%
+    var(--s-red),
+    var(--s-orange),
+    var(--s-yellow),
+    var(--s-green),
+    var(--s-teal),
+    var(--s-blue),
+    var(--s-magenta),
+    var(--s-red)
   );
 }
 
@@ -440,7 +442,8 @@ html[data-mood='ink'] .wl-surface::after {
       var(--s-green),
       var(--s-teal),
       var(--s-blue),
-      var(--s-magenta)
+      var(--s-magenta),
+      var(--s-red)
     );
     opacity: 0.7;
   }
@@ -605,13 +608,14 @@ html[data-mood='ink'] .wl-surface::after {
   height: 2px;
   background: linear-gradient(
     90deg,
-    var(--s-red) 0%,
-    var(--s-orange) 16%,
-    var(--s-yellow) 33%,
-    var(--s-green) 50%,
-    var(--s-teal) 66%,
-    var(--s-blue) 83%,
-    var(--s-magenta) 100%
+    var(--s-red),
+    var(--s-orange),
+    var(--s-yellow),
+    var(--s-green),
+    var(--s-teal),
+    var(--s-blue),
+    var(--s-magenta),
+    var(--s-red)
   );
   opacity: 0.45;
 }
@@ -835,7 +839,8 @@ html[data-mood='ink'] .wl-surface::after {
     var(--s-green),
     var(--s-teal),
     var(--s-blue),
-    var(--s-magenta)
+    var(--s-magenta),
+    var(--s-red)
   );
   opacity: 0.55;
   transition:
@@ -1213,7 +1218,8 @@ html[data-mood='ink'] .wl-surface::after {
     var(--s-green),
     var(--s-teal),
     var(--s-blue),
-    var(--s-magenta)
+    var(--s-magenta),
+    var(--s-red)
   );
   opacity: 0.85;
 }
@@ -1593,7 +1599,8 @@ html[data-mood='ink'] .wl-surface::after {
     var(--s-green),
     var(--s-teal),
     var(--s-blue),
-    var(--s-magenta)
+    var(--s-magenta),
+    var(--s-red)
   );
 }
 .wl-summary-label {
@@ -1808,7 +1815,8 @@ html[data-mood='ink'] .wl-surface::after {
     var(--s-green),
     var(--s-teal),
     var(--s-blue),
-    var(--s-magenta)
+    var(--s-magenta),
+    var(--s-red)
   );
   opacity: 0.75;
 }
@@ -1963,7 +1971,8 @@ html[data-mood='ink'] .wl-surface::after {
     var(--s-green),
     var(--s-teal),
     var(--s-blue),
-    var(--s-magenta)
+    var(--s-magenta),
+    var(--s-red)
   );
 }
 .wl-footer .top {
@@ -2138,4 +2147,61 @@ html[data-mood='ink'] .wl-surface::after {
 .wl-status-badge[data-status='canceled'] {
   background: var(--paper-2, #ebe4d3);
   color: var(--ink-4, #8a8474);
+}
+
+/* ─────── RAINBOW SCROLL ─────── */
+/* Placed at file end so background-size wins the cascade against every
+   `background:` shorthand declaration above. Each spectrum gradient wraps
+   red→red so bg-repeat tiles seamlessly with no visible loop point. */
+@keyframes wl-spectrum-scroll-h {
+  from {
+    background-position: 0% 50%;
+  }
+  to {
+    background-position: -200% 50%;
+  }
+}
+@keyframes wl-spectrum-scroll-v {
+  from {
+    background-position: 50% 0%;
+  }
+  to {
+    background-position: 50% -200%;
+  }
+}
+
+.wl-spectrum,
+.wl-nav-sheet::before,
+.wl-masthead::after,
+.wl-sheet::after,
+.wl-cindex-head::after,
+.wl-coll-head::after,
+.wl-masthead-lede::after,
+.wl-plate-frame::after,
+.wl-summary::after,
+.wl-about .letter .sig-sub::after,
+.wl-footer::before {
+  background-size: 200% 100%;
+  animation: wl-spectrum-scroll-h 12s linear infinite;
+}
+
+.wl-spectrum.vertical,
+.wl-art-card::after {
+  background-size: 100% 200%;
+  animation: wl-spectrum-scroll-v 12s linear infinite;
+}
+
+/* Phase offsets — independent rivers of color, not one synced page. */
+.wl-masthead::after,
+.wl-art-card::after,
+.wl-plate-frame::after {
+  animation-delay: -4s;
+}
+.wl-nav-sheet::before,
+.wl-about .letter .sig-sub::after,
+.wl-cindex-head::after,
+.wl-coll-head::after,
+.wl-masthead-lede::after,
+.wl-sheet::after {
+  animation-delay: -8s;
 }
