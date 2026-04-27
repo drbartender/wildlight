@@ -246,8 +246,14 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   };
 
   // Wrap alert sends so a Resend hiccup is logged distinctly from a real
-  // processing failure (which is what `webhook_events.error` is for).
+  // processing failure (which is what `webhook_events.error` is for). For
+  // test-mode orders the alert is a no-op — flagging still happens in the
+  // DB (visible in admin), but Dan's inbox stays quiet during dev pushes.
   const alert = async (reason: string) => {
+    if (testMode) {
+      logger.info('needs_review alert suppressed (test mode)', { orderId, reason });
+      return;
+    }
     try {
       await sendNeedsReviewAlert(orderId, reason);
     } catch (err) {
