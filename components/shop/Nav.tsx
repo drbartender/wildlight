@@ -14,11 +14,11 @@ interface LinkSpec {
 }
 
 const LINKS: LinkSpec[] = [
-  { href: '/', label: 'Index', match: (p) => p === '/' },
+  { href: '/shop', label: 'Index', match: (p) => p === '/shop' || p === '/' },
   {
-    href: '/collections',
+    href: '/shop/collections',
     label: 'Collections',
-    match: (p) => p.startsWith('/collections') || p.startsWith('/artwork'),
+    match: (p) => p.startsWith('/shop/collections') || p.startsWith('/shop/artwork'),
   },
   { href: '/about', label: 'Studio', match: (p) => p.startsWith('/about') },
   {

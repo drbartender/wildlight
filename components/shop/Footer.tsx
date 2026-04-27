@@ -18,10 +18,10 @@ export function Footer() {
         </div>
         <div>
           <div className="h">Shop</div>
-          <Link className="link" href="/collections">
+          <Link className="link" href="/shop/collections">
             Collections
           </Link>
-          <Link className="link" href="/">
+          <Link className="link" href="/shop">
             Index of plates
           </Link>
           <Link className="link" href="/contact?reason=corporate-gift">

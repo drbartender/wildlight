@@ -26,7 +26,7 @@ export function PlateCard({ item }: { item: PlateCardData }) {
 
   return (
     <Link
-      href={`/artwork/${item.slug}`}
+      href={`/shop/artwork/${item.slug}`}
       className="wl-plate-card"
       style={{ textDecoration: 'none', color: 'inherit' }}
     >

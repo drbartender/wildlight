@@ -11,7 +11,7 @@ export function CartCountBadge({
   const cart = useCart();
   const count = cart.lines.reduce((s, l) => s + l.quantity, 0);
   return (
-    <Link href="/cart" className={className}>
+    <Link href="/shop/cart" className={className}>
       Cart
       {count > 0 && <span className="cart-dot">{count}</span>}
     </Link>
