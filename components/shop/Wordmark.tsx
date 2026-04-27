@@ -1,4 +1,4 @@
-import { ApertureMark } from './ApertureMark';
+import { ApertureMark } from '@/components/brand/ApertureMark';
 
 export function Wordmark({
   size = 22,

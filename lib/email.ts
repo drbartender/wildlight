@@ -66,7 +66,7 @@ const C = {
 const FONT_SERIF = "Georgia, 'Times New Roman', Times, serif";
 const FONT_MONO = "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace";
 
-// Inline aperture mark — same five-petal sweep as components/shop/ApertureMark.tsx,
+// Inline aperture mark — same five-petal sweep as components/brand/ApertureMark.tsx,
 // rendered as static SVG so the email doesn't depend on a hosted asset. Apple
 // Mail / iOS Mail / Gmail / Outlook web render this crisply. Outlook desktop
 // strips inline SVG; in that case the wordmark text alongside still shows

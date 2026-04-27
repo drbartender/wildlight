@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
+import { ApertureMark } from '@/components/brand/ApertureMark';
 
 interface NavDef {
   id: string;
@@ -227,13 +228,14 @@ export function AdminSidebar({ needsReview, email }: Props) {
       >
         <div className="wl-adm-sidebar-head">
           <div className="atelier-head">
-            <div className="wordmark">Wildlight</div>
-            <div className="sub">Imagery · Studio</div>
+            <ApertureMark size={26} />
+            <div className="atelier-head-text">
+              <div className="wordmark">Wildlight</div>
+              <div className="sub">Imagery · Studio</div>
+            </div>
           </div>
           <div className="darkroom-head">
-            <div className="icon" aria-hidden="true">
-              W
-            </div>
+            <ApertureMark size={20} />
             <div className="wordmark">wildlight</div>
             <div className="version">v2.4</div>
           </div>
