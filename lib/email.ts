@@ -20,40 +20,174 @@ function escapeHtml(s: string): string {
 export interface OrderConfirmationData {
   to: string;
   orderToken: string;
+  customerName?: string | null;
   items: Array<{
     title: string;
     variant: string;
-    price: string;
+    /** Line total (unit price × quantity), already formatted as USD. */
+    lineTotal: string;
     qty: number;
-    image_url?: string;
+    imageUrl?: string;
   }>;
   subtotal: string;
   shipping: string;
   tax: string;
   total: string;
+  /** Stripe-collected shipping address. Optional so test orders without a
+   *  full address still send the email; the address block just renders empty. */
+  shippingAddress?: {
+    line1?: string | null;
+    line2?: string | null;
+    city?: string | null;
+    state?: string | null;
+    postal_code?: string | null;
+    country?: string | null;
+  } | null;
   siteUrl: string;
 }
 
+// Email-safe color tokens. Mirror globals.css :root bone palette but inline
+// because remote CSS / web fonts don't load reliably in mail clients. We
+// intentionally don't try to honor the recipient's bone/ink mood — the email
+// is read in their mail client which has its own dark-mode handling.
+const E = {
+  paper: '#f2ede1',
+  paper2: '#ebe4d3',
+  ink: '#16130c',
+  ink2: '#3b362a',
+  ink3: '#6a6452',
+  rule: 'rgba(22, 19, 12, 0.14)',
+  font: "'EB Garamond', Georgia, 'Times New Roman', serif",
+  mono: "'JetBrains Mono', Menlo, Consolas, monospace",
+};
+
+function labelStyle(extra = ''): string {
+  return `font-family:${E.mono};font-size:10px;font-weight:500;letter-spacing:0.18em;text-transform:uppercase;color:${E.ink3};${extra}`;
+}
+
+function rowItem(i: OrderConfirmationData['items'][number]): string {
+  const thumb = i.imageUrl
+    ? `<img src="${escapeHtml(i.imageUrl)}" alt="" width="72" height="72" style="display:block;border:1px solid ${E.rule};object-fit:cover;" />`
+    : `<div style="width:72px;height:72px;background:${E.paper2};border:1px solid ${E.rule};"></div>`;
+  return `
+    <tr>
+      <td width="72" valign="top" style="padding:16px 16px 16px 0;">${thumb}</td>
+      <td valign="top" style="padding:16px 0;border-bottom:1px solid ${E.rule};font-family:${E.font};">
+        <div style="font-size:18px;color:${E.ink};margin-bottom:4px;line-height:1.25;">${escapeHtml(i.title)}</div>
+        <div style="${labelStyle('color:' + E.ink3 + ';')}">${escapeHtml(i.variant)} · ×${i.qty}</div>
+      </td>
+      <td valign="top" align="right" style="padding:16px 0 16px 16px;border-bottom:1px solid ${E.rule};font-family:${E.font};font-size:18px;color:${E.ink};white-space:nowrap;">${i.lineTotal}</td>
+    </tr>`;
+}
+
+function sumRow(label: string, value: string, isTotal = false): string {
+  if (isTotal) {
+    return `
+      <tr>
+        <td style="padding:14px 0 0;border-top:1px solid ${E.rule};font-family:${E.font};font-size:24px;color:${E.ink};">${escapeHtml(label)}</td>
+        <td align="right" style="padding:14px 0 0;border-top:1px solid ${E.rule};font-family:${E.font};font-size:24px;color:${E.ink};">${value}</td>
+      </tr>`;
+  }
+  return `
+    <tr>
+      <td style="padding:6px 0;font-family:${E.mono};font-size:13px;font-weight:500;color:${E.ink2};letter-spacing:0.04em;">${escapeHtml(label)}</td>
+      <td align="right" style="padding:6px 0;font-family:${E.mono};font-size:13px;font-weight:500;color:${E.ink2};letter-spacing:0.04em;">${value}</td>
+    </tr>`;
+}
+
+function shippingBlock(addr: OrderConfirmationData['shippingAddress'], name?: string | null): string {
+  if (!addr || !addr.line1) return '';
+  const lines = [
+    name,
+    addr.line1,
+    addr.line2,
+    [addr.city, addr.state, addr.postal_code].filter(Boolean).join(' ') || null,
+    addr.country,
+  ]
+    .filter(Boolean)
+    .map((l) => escapeHtml(l as string))
+    .join('<br/>');
+  return `
+    <tr><td style="padding:8px 0 4px;"><span style="${labelStyle()}">Ships to</span></td></tr>
+    <tr><td style="padding:0 0 32px;font-family:${E.font};font-size:15px;line-height:1.6;color:${E.ink2};">${lines}</td></tr>`;
+}
+
 export async function sendOrderConfirmation(data: OrderConfirmationData) {
-  const itemsHtml = data.items
-    .map(
-      (i) =>
-        `<tr><td style="padding:4px 0;">${escapeHtml(i.title)} — ${escapeHtml(i.variant)}</td>` +
-        `<td style="padding:4px 8px;">×${i.qty}</td>` +
-        `<td style="padding:4px 0;text-align:right;">${i.price}</td></tr>`,
-    )
-    .join('');
-  const html = `
-    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#222;">
-      <h1 style="font-weight:400;">Thank you.</h1>
-      <p>Your order has been received. We'll send a second email with tracking once it ships.</p>
-      <table style="width:100%;border-collapse:collapse;margin:24px 0;">${itemsHtml}</table>
-      <p>Subtotal: ${data.subtotal}<br/>Shipping: ${data.shipping}<br/>Tax: ${data.tax}<br/><strong>Total: ${data.total}</strong></p>
-      <p><a href="${data.siteUrl}/orders/${data.orderToken}">View order status</a></p>
-      <hr style="margin-top:32px;border:none;border-top:1px solid #eee;"/>
-      <p style="color:#777;font-size:12px;">Wildlight Imagery — work by Dan Raby</p>
-    </div>`;
-  return resend().emails.send({ from: FROM, to: data.to, subject: 'Your Wildlight order', html });
+  const orderRef = data.orderToken.slice(0, 8);
+  const orderUrl = `${data.siteUrl.replace(/\/$/, '')}/orders/${data.orderToken}`;
+  const itemsHtml = data.items.map(rowItem).join('');
+  const ship = shippingBlock(data.shippingAddress, data.customerName);
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="x-apple-disable-message-reformatting"/>
+  <title>Your Wildlight order</title>
+</head>
+<body style="margin:0;padding:0;background:${E.paper};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${E.paper};padding:32px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;background:${E.paper};">
+
+        <tr><td style="padding:8px 0 24px;border-bottom:1px solid ${E.rule};">
+          <span style="${labelStyle('letter-spacing:0.22em;')}">Wildlight Imagery</span>
+        </td></tr>
+
+        <tr><td style="padding:32px 0 8px;">
+          <h1 style="font-family:${E.font};font-size:42px;font-weight:400;margin:0;letter-spacing:-0.01em;color:${E.ink};line-height:1.04;">Thank you<span style="color:${E.ink2};font-style:italic;">.</span></h1>
+        </td></tr>
+        <tr><td style="padding-bottom:32px;">
+          <span style="${labelStyle('letter-spacing:0.14em;')}">Order ${escapeHtml(orderRef)} · received</span>
+        </td></tr>
+
+        <tr><td style="padding-bottom:32px;font-family:${E.font};font-size:15px;line-height:1.6;color:${E.ink2};">
+          Your order is in. Archival prints, made to order in Aurora, Colorado — usually shipping in 5–7 business days. We'll send a second email with tracking the moment it's on the way.
+        </td></tr>
+
+        <tr><td style="padding-bottom:8px;"><span style="${labelStyle()}">Plates</span></td></tr>
+        <tr><td>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${itemsHtml}</table>
+        </td></tr>
+
+        <tr><td style="padding:32px 0 24px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${E.paper2};border:1px solid ${E.rule};">
+            <tr><td style="padding:24px 28px;">
+              <span style="${labelStyle('letter-spacing:0.22em;display:block;margin-bottom:14px;')}">Receipt</span>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                ${sumRow('Subtotal', data.subtotal)}
+                ${sumRow('Shipping', data.shipping)}
+                ${sumRow('Tax', data.tax)}
+                ${sumRow('Total', data.total, true)}
+              </table>
+            </td></tr>
+          </table>
+        </td></tr>
+
+        ${ship}
+
+        <tr><td style="padding:8px 0 32px;">
+          <a href="${escapeHtml(orderUrl)}" style="display:inline-block;padding:13px 24px;background:${E.ink};color:${E.paper};text-decoration:none;font-family:${E.mono};font-size:11px;font-weight:500;letter-spacing:0.18em;text-transform:uppercase;">View order →</a>
+        </td></tr>
+
+        <tr><td style="padding:24px 0 0;border-top:1px solid ${E.rule};font-family:${E.font};font-size:12px;color:${E.ink3};line-height:1.6;">
+          Wildlight Imagery — work by Dan Raby, Aurora, Colorado.<br/>
+          Questions about your order? Just reply to this email.
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+  return resend().emails.send({
+    from: FROM,
+    to: data.to,
+    subject: `Your Wildlight order ${orderRef}`,
+    html,
+  });
 }
 
 export async function sendOrderShipped(

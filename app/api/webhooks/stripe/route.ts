@@ -385,20 +385,31 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     await sendOrderConfirmation({
       to: session.customer_details?.email || '',
       orderToken,
+      customerName: session.customer_details?.name,
       items: cart.map((l) => {
         const v = byId.get(l.variantId)!;
         return {
           title: v.artwork_title,
           variant: `${v.type}, ${v.size}${v.finish ? `, ${v.finish}` : ''}`,
-          price: formatUSD(v.price_cents),
+          lineTotal: formatUSD(v.price_cents * l.quantity),
           qty: l.quantity,
-          image_url: v.image_web_url,
+          imageUrl: v.image_web_url,
         };
       }),
       subtotal: formatUSD(session.amount_subtotal || 0),
       shipping: formatUSD(session.shipping_cost?.amount_total || 0),
       tax: formatUSD(session.total_details?.amount_tax || 0),
       total: formatUSD(session.amount_total || 0),
+      shippingAddress: addr
+        ? {
+            line1: addr.line1,
+            line2: addr.line2,
+            city: addr.city,
+            state: addr.state,
+            postal_code: addr.postal_code,
+            country: addr.country,
+          }
+        : null,
       siteUrl,
     });
   } catch (err) {
