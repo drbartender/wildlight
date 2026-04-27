@@ -401,7 +401,9 @@ export default function BulkUploadPage() {
                           → &ldquo;{c.state.title}&rdquo; ({c.state.slug}) — review &amp; publish
                         </a>
                       )}
-                      {c.state.kind === 'error' && c.state.message}
+                      {c.state.kind === 'error' && (
+                        <span className="wl-bulk-error">{c.state.message}</span>
+                      )}
                     </div>
                   </div>
                   <div className="wl-bulk-row-state">
@@ -486,30 +488,37 @@ function BulkRow({
       <div className="wl-bulk-row-meta">
         <div className="wl-bulk-row-title">{row.title}</div>
         <div className="wl-bulk-row-sub">
-          {row.collection_title || 'no collection'} · {row.slug}
+          {state.kind === 'error' ? (
+            <span className="wl-bulk-error">{state.message}</span>
+          ) : (
+            <>
+              {row.collection_title || 'no collection'} · {row.slug}
+            </>
+          )}
         </div>
       </div>
       <div className="wl-bulk-row-state">
+        {/* Input is always rendered so Retry (in error state) can open the
+            picker too — without this, inputRef.current is null when the row
+            is showing the Retry button and the click silently no-ops. */}
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/tiff"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onPick(row, f);
+            e.target.value = '';
+          }}
+        />
         {state.kind === 'idle' && (
-          <>
-            <button
-              className="wl-adm-btn small"
-              onClick={() => inputRef.current?.click()}
-            >
-              Choose file…
-            </button>
-            <input
-              ref={inputRef}
-              type="file"
-              accept="image/jpeg,image/png,image/tiff"
-              hidden
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) onPick(row, f);
-                e.target.value = '';
-              }}
-            />
-          </>
+          <button
+            className="wl-adm-btn small"
+            onClick={() => inputRef.current?.click()}
+          >
+            Choose file…
+          </button>
         )}
         {state.kind === 'queued' && <span className="wl-bulk-processing">queued…</span>}
         {state.kind === 'uploading' && (
@@ -529,7 +538,7 @@ function BulkRow({
           <button
             className="wl-adm-btn small ghost"
             onClick={() => inputRef.current?.click()}
-            title={state.message}
+            aria-label={`Retry — ${state.message}`}
           >
             Retry
           </button>
