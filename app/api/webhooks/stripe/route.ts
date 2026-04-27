@@ -89,6 +89,7 @@ export async function POST(req: Request) {
 }
 
 async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
+  const { testMode } = getStripeConfig();
   const cart = JSON.parse(
     (session.metadata?.cart_json as string) || '[]',
   ) as CartLine[];
@@ -157,8 +158,9 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   await withTransaction(async (client) => {
     const orderRes = await client.query<{ id: number; public_token: string }>(
       `INSERT INTO orders (stripe_session_id, stripe_payment_id, customer_email, customer_name,
-                           shipping_address, subtotal_cents, shipping_cents, tax_cents, total_cents, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'paid')
+                           shipping_address, subtotal_cents, shipping_cents, tax_cents, total_cents,
+                           status, is_test)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'paid', $10)
        ON CONFLICT (stripe_session_id) DO NOTHING
        RETURNING id, public_token`,
       [
@@ -171,6 +173,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
         session.shipping_cost?.amount_total || 0,
         session.total_details?.amount_tax || 0,
         session.amount_total || 0,
+        testMode,
       ],
     );
     if (!orderRes.rowCount) return; // duplicate stripe event, silently no-op
@@ -337,8 +340,17 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
           tax: ((session.total_details?.amount_tax || 0) / 100).toFixed(2),
           total: ((session.amount_total || 0) / 100).toFixed(2),
         },
-        confirm: true,
+        // Test mode submits as a Printful draft (not auto-confirmed) so
+        // the order shows in their dashboard but is not fulfilled or
+        // charged. Manual confirm in the Printful UI promotes a draft.
+        confirm: !testMode,
       });
+      if (testMode) {
+        logger.info('printful order submitted as draft (stripe test mode)', {
+          orderId,
+          printfulOrderId: pfOrder.id,
+        });
+      }
       await withTransaction(async (client) => {
         await client.query(
           `UPDATE orders SET status='submitted', printful_order_id=$2, updated_at=NOW() WHERE id=$1`,
