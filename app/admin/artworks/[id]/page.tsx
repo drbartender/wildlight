@@ -199,7 +199,7 @@ export default function ArtworkEditPage({
               <div className="actions">
                 <Link
                   className="wl-adm-btn small ghost"
-                  href={`/artwork/${a.slug}`}
+                  href={`/shop/artwork/${a.slug}`}
                   target="_blank"
                 >
                   View on site ↗

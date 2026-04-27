@@ -54,7 +54,7 @@ export default async function CollectionsIndex() {
         {rows.map((c, i) => (
           <Link
             key={c.slug}
-            href={`/collections/${c.slug}`}
+            href={`/shop/collections/${c.slug}`}
             className="wl-cindex-row"
           >
             <span className="no">CH · {String(i + 1).padStart(2, '0')}</span>

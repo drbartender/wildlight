@@ -95,11 +95,11 @@ export default async function ArtworkPage({
       <div className="wl-art-head">
         <span>
           {art.collection_slug && art.collection_title ? (
-            <Link href={`/collections/${art.collection_slug}`}>
+            <Link href={`/shop/collections/${art.collection_slug}`}>
               ← {art.collection_title}
             </Link>
           ) : (
-            <Link href="/collections">← Collections</Link>
+            <Link href="/shop/collections">← Collections</Link>
           )}
         </span>
         <span>

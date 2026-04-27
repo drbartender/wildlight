@@ -83,7 +83,7 @@ export default async function OrderPage({
             your full order details and a link you can bookmark.
           </p>
           <p className="wl-sum-note">
-            <Link href="/collections">Back to collections →</Link>
+            <Link href="/shop/collections">Back to collections →</Link>
           </p>
         </div>
       </section>

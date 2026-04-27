@@ -61,7 +61,7 @@ export default async function CollectionDetail({
   return (
     <div>
       <header className="wl-coll-head">
-        <Link href="/collections" className="back">
+        <Link href="/shop/collections" className="back">
           ← All collections
         </Link>
         <div

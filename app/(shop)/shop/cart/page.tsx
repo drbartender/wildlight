@@ -28,7 +28,7 @@ export default function CartPage() {
           {count === 0 ? (
             <div className="wl-cart-empty">
               Browse the{' '}
-              <Link href="/collections">collections</Link> to add your first
+              <Link href="/shop/collections">collections</Link> to add your first
               plate.
             </div>
           ) : (
@@ -45,7 +45,7 @@ export default function CartPage() {
                 </div>
                 <div>
                   <Link
-                    href={`/artwork/${l.artworkSlug}`}
+                    href={`/shop/artwork/${l.artworkSlug}`}
                     style={{ color: 'inherit' }}
                   >
                     <div className="wl-ci-title">{l.artworkTitle}</div>
@@ -114,11 +114,11 @@ export default function CartPage() {
             }}
           >
             {count > 0 && (
-              <Link className="wl-btn primary" href="/checkout">
+              <Link className="wl-btn primary" href="/shop/checkout">
                 Proceed to checkout →
               </Link>
             )}
-            <Link className="wl-btn ghost" href="/collections">
+            <Link className="wl-btn ghost" href="/shop/collections">
               Continue browsing
             </Link>
           </div>

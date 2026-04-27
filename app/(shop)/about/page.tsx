@@ -55,7 +55,7 @@ export default function AboutPage() {
           <Link className="wl-btn primary" href="/contact?reason=commission">
             Commission Dan →
           </Link>
-          <Link className="wl-btn ghost" href="/collections">
+          <Link className="wl-btn ghost" href="/shop/collections">
             Browse work
           </Link>
         </div>

@@ -298,7 +298,7 @@ export default function CheckoutPage() {
         </h1>
         <div className="sub">No plates in your order.</div>
         <p className="wl-sum-note" style={{ marginTop: 24 }}>
-          <Link href="/collections">Back to collections →</Link>
+          <Link href="/shop/collections">Back to collections →</Link>
         </p>
       </section>
     );
@@ -355,7 +355,7 @@ export default function CheckoutPage() {
             Archival · printed to order. Ships direct from our print partner.
           </p>
           <div className="wl-checkout-back">
-            <Link className="wl-btn ghost" href="/cart">
+            <Link className="wl-btn ghost" href="/shop/cart">
               ← Edit cart
             </Link>
           </div>
@@ -395,7 +395,7 @@ export default function CheckoutPage() {
           {error && !ready && (
             <div className="wl-checkout-error">
               <p className="wl-sum-error">{error}</p>
-              <Link href="/cart" className="wl-btn ghost">
+              <Link href="/shop/cart" className="wl-btn ghost">
                 Back to cart
               </Link>
             </div>
