@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useReducer,
+  useState,
   type ReactNode,
 } from 'react';
 
@@ -64,6 +65,10 @@ function reducer(state: State, action: Action): State {
 interface CartApi {
   lines: CartLine[];
   subtotalCents: number;
+  /** True after the initial localStorage hydration tick. Pages that
+   *  branch on cart contents (e.g. redirect when empty) must wait for
+   *  this to flip — the reducer starts empty and SSR has no storage. */
+  ready: boolean;
   add: (item: CartItemInput) => void;
   remove: (variantId: number) => void;
   setQty: (variantId: number, q: number) => void;
@@ -73,6 +78,7 @@ const Ctx = createContext<CartApi | null>(null);
 
 export function CartProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, { lines: [] });
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     try {
@@ -81,15 +87,17 @@ export function CartProvider({ children }: { children: ReactNode }) {
     } catch {
       // storage unavailable; continue with empty cart
     }
+    setReady(true);
   }, []);
 
   useEffect(() => {
+    if (!ready) return;
     try {
       localStorage.setItem(KEY, JSON.stringify(state));
     } catch {
       // storage full or unavailable — session-only
     }
-  }, [state]);
+  }, [state, ready]);
 
   const subtotalCents = state.lines.reduce(
     (s, l) => s + l.priceCents * l.quantity,
@@ -98,6 +106,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const api: CartApi = {
     lines: state.lines,
     subtotalCents,
+    ready,
     add: (item) => dispatch({ type: 'add', item }),
     remove: (id) => dispatch({ type: 'remove', variantId: id }),
     setQty: (id, q) => dispatch({ type: 'setQty', variantId: id, quantity: q }),

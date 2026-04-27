@@ -1492,6 +1492,100 @@ html[data-mood='ink'] .wl-surface::after {
   color: var(--ink);
 }
 
+/* Checkout page — separate layout from /cart so the embedded Stripe
+   widget sits in a column sized to its own natural form width.
+   /cart still uses .wl-cart-grid; /checkout uses .wl-checkout-stack. */
+.wl-checkout {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 48px 32px 96px;
+}
+.wl-checkout > h1 {
+  font-family: var(--f-serif);
+  font-size: clamp(40px, 5vw, 56px);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  margin: 0 0 6px;
+}
+.wl-checkout > h1 em {
+  font-style: italic;
+}
+.wl-checkout > .sub {
+  font-family: var(--f-mono, var(--f-serif));
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-3);
+  margin-bottom: 40px;
+}
+.wl-checkout-stack {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 460px;
+  gap: 56px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .wl-checkout-stack {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+}
+
+.wl-checkout-summary {
+  display: flex;
+  flex-direction: column;
+}
+.wl-checkout-summary .wl-summary-label {
+  margin-bottom: 8px;
+}
+.wl-checkout-summary .wl-ci {
+  grid-template-columns: 72px 1fr auto;
+  padding: 16px 0;
+}
+.wl-checkout-summary .wl-ci-img {
+  width: 72px;
+  height: 72px;
+}
+
+.wl-checkout-totals {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--rule);
+}
+.wl-checkout-totals .wl-sum-row {
+  padding: 6px 0;
+}
+
+.wl-checkout-back {
+  margin-top: 24px;
+}
+
+.wl-checkout-payment {
+  display: flex;
+  flex-direction: column;
+  min-height: 320px;
+}
+.wl-checkout-payment .wl-summary-label {
+  margin-bottom: 12px;
+}
+.wl-checkout-payment iframe {
+  width: 100% !important;
+}
+.wl-checkout-loading {
+  padding: 40px 0;
+  color: var(--ink-3);
+  font-family: var(--f-serif);
+  font-size: 15px;
+  font-style: italic;
+}
+.wl-checkout-error {
+  padding: 24px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: flex-start;
+}
+
 .wl-ci {
   display: grid;
   grid-template-columns: 96px 1fr auto;

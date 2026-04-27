@@ -2,42 +2,12 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useState } from 'react';
 import { useCart } from '@/components/shop/CartProvider';
 import { formatUSD } from '@/lib/money';
 import { plateNumber } from '@/lib/plate-number';
 
 export default function CartPage() {
   const cart = useCart();
-  const [checkoutLoading, setCheckoutLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function checkout() {
-    setCheckoutLoading(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          lines: cart.lines.map((l) => ({
-            variantId: l.variantId,
-            quantity: l.quantity,
-          })),
-        }),
-      });
-      const data = (await res.json()) as { url?: string; error?: string };
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        setError(data.error || 'Checkout failed');
-        setCheckoutLoading(false);
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Checkout failed');
-      setCheckoutLoading(false);
-    }
-  }
 
   const count = cart.lines.length;
   const plateWord = count === 1 ? 'plate' : 'plates';
@@ -50,7 +20,7 @@ export default function CartPage() {
       <div className="sub">
         {count === 0
           ? 'No plates yet'
-          : `${count} ${plateWord} · printed to order in Aurora, CO`}
+          : `${count} ${plateWord} · printed to order`}
       </div>
 
       <div className="wl-cart-grid">
@@ -133,9 +103,8 @@ export default function CartPage() {
           <p className="wl-sum-note">
             Archival · printed to order.
             <br />
-            Ships in 5–7 days from Aurora, Colorado.
+            Ships in 5–7 days, direct from our print partner.
           </p>
-          {error && <p className="wl-sum-error">{error}</p>}
           <div
             style={{
               marginTop: 20,
@@ -144,14 +113,11 @@ export default function CartPage() {
               gap: 8,
             }}
           >
-            <button
-              type="button"
-              className="wl-btn primary"
-              onClick={checkout}
-              disabled={count === 0 || checkoutLoading}
-            >
-              {checkoutLoading ? 'Redirecting…' : 'Proceed to checkout →'}
-            </button>
+            {count > 0 && (
+              <Link className="wl-btn primary" href="/checkout">
+                Proceed to checkout →
+              </Link>
+            )}
             <Link className="wl-btn ghost" href="/collections">
               Continue browsing
             </Link>

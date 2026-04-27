@@ -3,8 +3,8 @@ import { NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
 
 /**
- * Stripe `success_url` lands here. We immediately 302 to the canonical
- * public-token URL so that:
+ * Stripe `return_url` (embedded checkout) lands here. We immediately 302 to
+ * the canonical public-token URL so that:
  *   1. The session-id flavor of the order URL is never bookmarked or
  *      shared as a long-lived public access link, and
  *   2. The carrier tracking page on /orders/[token] only ever sees the

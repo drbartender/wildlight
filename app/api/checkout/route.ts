@@ -1,8 +1,8 @@
 export const runtime = 'nodejs';
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { z } from 'zod';
 import { pool } from '@/lib/db';
-import { getStripe } from '@/lib/stripe';
+import { getStripe, getStripeConfig } from '@/lib/stripe';
 import { qualifiesForFreeShipping, subtotalCents } from '@/lib/pricing';
 import { logger } from '@/lib/logger';
 
@@ -42,18 +42,25 @@ export async function POST(req: Request) {
   const { lines } = parsed.data;
   const ids = lines.map((l) => l.variantId);
 
-  const { rows } = await pool.query<VariantRow>(
-    `SELECT v.id, v.price_cents, v.cost_cents, v.printful_sync_variant_id,
-            v.type, v.size, v.finish, v.artwork_id,
-            a.title AS artwork_title, a.slug AS artwork_slug,
-            a.image_web_url, a.image_print_url,
-            c.title AS collection_title
-     FROM artwork_variants v
-     JOIN artworks a ON a.id = v.artwork_id
-     LEFT JOIN collections c ON c.id = a.collection_id
-     WHERE v.id = ANY($1) AND v.active AND a.status = 'published'`,
-    [ids],
-  );
+  let rows: VariantRow[];
+  try {
+    const result = await pool.query<VariantRow>(
+      `SELECT v.id, v.price_cents, v.cost_cents, v.printful_sync_variant_id,
+              v.type, v.size, v.finish, v.artwork_id,
+              a.title AS artwork_title, a.slug AS artwork_slug,
+              a.image_web_url, a.image_print_url,
+              c.title AS collection_title
+       FROM artwork_variants v
+       JOIN artworks a ON a.id = v.artwork_id
+       LEFT JOIN collections c ON c.id = a.collection_id
+       WHERE v.id = ANY($1::int[]) AND v.active AND a.status = 'published'`,
+      [ids],
+    );
+    rows = result.rows;
+  } catch (err) {
+    logger.error('checkout variant lookup failed', err);
+    return NextResponse.json({ error: 'checkout_init_failed' }, { status: 502 });
+  }
 
   if (rows.length !== ids.length) {
     return NextResponse.json({ error: 'some items unavailable' }, { status: 400 });
@@ -74,56 +81,72 @@ export async function POST(req: Request) {
   const shippingAmount = freeShipping ? 0 : 900;
 
   const stripe = getStripe();
-  const session = await stripe.checkout.sessions.create({
-    mode: 'payment',
-    automatic_tax: { enabled: true },
-    shipping_address_collection: { allowed_countries: ['US', 'CA'] },
-    billing_address_collection: 'required',
-    line_items: lines.map((l) => {
-      const v = byId.get(l.variantId)!;
-      return {
-        quantity: l.quantity,
-        price_data: {
-          currency: 'usd',
-          product_data: {
-            name: `${v.artwork_title} — ${v.type}, ${v.size}${
-              v.finish ? `, ${v.finish}` : ''
-            }`,
-            images: [v.image_web_url],
-            metadata: {
-              variant_id: String(v.id),
-              artwork_id: String(v.artwork_id),
-              artwork_slug: v.artwork_slug,
+  let session;
+  try {
+    session = await stripe.checkout.sessions.create({
+      ui_mode: 'embedded',
+      mode: 'payment',
+      automatic_tax: { enabled: true },
+      shipping_address_collection: { allowed_countries: ['US', 'CA'] },
+      billing_address_collection: 'required',
+      line_items: lines.map((l) => {
+        const v = byId.get(l.variantId)!;
+        return {
+          quantity: l.quantity,
+          price_data: {
+            currency: 'usd',
+            product_data: {
+              name: `${v.artwork_title} — ${v.type}, ${v.size}${
+                v.finish ? `, ${v.finish}` : ''
+              }`,
+              images: [v.image_web_url],
+              metadata: {
+                variant_id: String(v.id),
+                artwork_id: String(v.artwork_id),
+                artwork_slug: v.artwork_slug,
+              },
+              tax_code: 'txcd_99999999',
             },
-            tax_code: 'txcd_99999999',
+            unit_amount: v.price_cents,
+            tax_behavior: 'exclusive',
           },
-          unit_amount: v.price_cents,
-          tax_behavior: 'exclusive',
-        },
-      };
-    }),
-    shipping_options: [
-      {
-        shipping_rate_data: {
-          type: 'fixed_amount',
-          display_name: freeShipping ? 'Free shipping' : 'Standard shipping',
-          fixed_amount: { amount: shippingAmount, currency: 'usd' },
-          delivery_estimate: {
-            minimum: { unit: 'business_day', value: 4 },
-            maximum: { unit: 'business_day', value: 10 },
+        };
+      }),
+      shipping_options: [
+        {
+          shipping_rate_data: {
+            type: 'fixed_amount',
+            display_name: freeShipping ? 'Free shipping' : 'Standard shipping',
+            fixed_amount: { amount: shippingAmount, currency: 'usd' },
+            delivery_estimate: {
+              minimum: { unit: 'business_day', value: 4 },
+              maximum: { unit: 'business_day', value: 10 },
+            },
           },
         },
+      ],
+      // Embedded checkout redirects to return_url after completion. Land on a
+      // redirector so the customer's browser only ever sees the public_token
+      // URL — the Stripe session id stays out of address bars, bookmarks, and
+      // outbound Referer headers.
+      return_url: `${siteUrl}/api/orders/by-session/{CHECKOUT_SESSION_ID}`,
+      metadata: {
+        cart_json: JSON.stringify(lines),
       },
-    ],
-    // Land on a redirector so the customer's browser only ever sees the
-    // public_token URL — the Stripe session id stays out of address bars,
-    // bookmarks, and outbound Referer headers.
-    success_url: `${siteUrl}/api/orders/by-session/{CHECKOUT_SESSION_ID}`,
-    cancel_url: `${siteUrl}/cart?canceled=1`,
-    metadata: {
-      cart_json: JSON.stringify(lines),
-    },
-  });
+    });
+  } catch (err) {
+    logger.error('stripe session create failed', err);
+    return NextResponse.json({ error: 'checkout_init_failed' }, { status: 502 });
+  }
+
+  if (!session.client_secret) {
+    // Embedded mode is documented to always set client_secret. Fail loudly
+    // rather than handing the client a null and forcing a generic error path.
+    logger.error('stripe returned null client_secret', undefined, {
+      sessionId: session.id,
+    });
+    return NextResponse.json({ error: 'checkout_init_failed' }, { status: 502 });
+  }
 
   // Persist an immutable per-line snapshot keyed by the Stripe session id.
   // The webhook reads this to write order_items so a catalog edit between
@@ -151,20 +174,30 @@ export async function POST(req: Request) {
       cost_cents: v.cost_cents,
     };
   });
-  try {
-    await pool.query(
-      `INSERT INTO checkout_intents (stripe_session_id, snapshot)
-       VALUES ($1, $2)
-       ON CONFLICT (stripe_session_id) DO NOTHING`,
-      [session.id, JSON.stringify(snapshot)],
-    );
-  } catch (err) {
-    // Logging only — checkout already succeeded. Webhook falls back to
-    // live catalog if the intent row is missing.
-    logger.error('checkout_intents persist failed', err, {
-      sessionId: session.id,
-    });
-  }
+  // Background the snapshot write so the response returns as soon as Stripe
+  // answers — Neon round-trip stays off the user-blocking TTFB. Webhook
+  // delivery takes seconds, so the insert lands well before the webhook
+  // reads it. The webhook fallback covers the rare case where after() fails.
+  const sessionId = session.id;
+  after(async () => {
+    try {
+      await pool.query(
+        `INSERT INTO checkout_intents (stripe_session_id, snapshot)
+         VALUES ($1, $2)
+         ON CONFLICT (stripe_session_id) DO NOTHING`,
+        [sessionId, JSON.stringify(snapshot)],
+      );
+    } catch (err) {
+      logger.error('checkout_intents persist failed', err, { sessionId });
+    }
+  });
 
-  return NextResponse.json({ id: session.id, url: session.url });
+  // Return the publishable key alongside the clientSecret so the embedded
+  // widget loads the matching test/live Stripe.js without a separate
+  // NEXT_PUBLIC env var. Honors the STRIPE_TEST_MODE_UNTIL timed fallback.
+  return NextResponse.json({
+    id: session.id,
+    clientSecret: session.client_secret,
+    publishableKey: getStripeConfig().publishable,
+  });
 }

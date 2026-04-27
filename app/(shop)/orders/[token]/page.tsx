@@ -38,7 +38,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 async function findOrder(token: string) {
   // public_token only — the stripe_session_id flavor used to be a second
   // public access path that leaked through carrier Referer headers. Stripe
-  // success_url now goes through /api/orders/by-session which 302s here
+  // return_url now goes through /api/orders/by-session which 302s here
   // with the public_token, so /orders/[token] has only one canonical URL.
   if (!UUID_RE.test(token)) return null;
   const r = await pool.query<OrderRow>(

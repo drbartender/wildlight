@@ -21,6 +21,9 @@ out/
 # scraper output
 scraped/
 
+# brainstorming visual companion (per-session mockups)
+.superpowers/
+
 # local scratch work — design handoffs, raw letters, experiments
 temp/
 

@@ -133,7 +133,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
        FROM artwork_variants v
        JOIN artworks a ON a.id = v.artwork_id
        LEFT JOIN collections c ON c.id = a.collection_id
-       WHERE v.id = ANY($1)`,
+       WHERE v.id = ANY($1::int[])`,
       [ids],
     );
     byId = new Map<number, VariantInfo>(variants.map((v) => [v.id, v]));

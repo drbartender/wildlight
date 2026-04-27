@@ -217,7 +217,7 @@ function plainOrderConfirmation(data: OrderConfirmationData): string {
   lines.push(`Order ${orderRef} — received`);
   lines.push('');
   lines.push(
-    "Your order is in. Archival prints, made to order in Aurora, Colorado. Most ship in 5-7 business days. We'll send a second email with tracking the moment it's on the way.",
+    "Your order is in. Archival prints, made to order. Most ship in 5-7 business days, direct from our print partner. We'll send a second email with tracking the moment it's on the way.",
   );
   lines.push('');
   lines.push('PLATES');
@@ -263,7 +263,7 @@ function plainOrderShipped(data: OrderShippedData): string {
   lines.push(headline);
   lines.push('');
   lines.push(
-    'Your prints are out the door from Aurora, Colorado. Most US shipments arrive in 3-5 business days from the carrier scan.',
+    'Your prints are out the door. Most US shipments arrive in 3-5 business days from the carrier scan.',
   );
   lines.push('');
   const carrierLabel =
@@ -366,7 +366,7 @@ export async function sendOrderConfirmation(data: OrderConfirmationData) {
         </td></tr>
 
         <tr><td class="wl-fg2" style="padding-bottom:18px;font-family:${FONT_SERIF};font-size:14px;line-height:1.6;color:${C.fg2};">
-          Archival prints, made to order in Aurora, Colorado. Most ship in 5–7 business days. We'll send a second email with tracking the moment it's on the way.
+          Archival prints, made to order. Most ship in 5–7 business days, direct from our print partner. We'll send a second email with tracking the moment it's on the way.
         </td></tr>
 
         <tr><td style="padding:8px 0 4px;"><span class="wl-fg3" style="${labelInline()}">Plates</span></td></tr>
@@ -489,7 +489,7 @@ export async function sendOrderShipped(data: OrderShippedData) {
         </td></tr>
 
         <tr><td class="wl-fg2" style="padding-bottom:0;font-family:${FONT_SERIF};font-size:14px;line-height:1.6;color:${C.fg2};">
-          Your prints are out the door from Aurora, Colorado. Most US shipments arrive in 3–5 business days from the carrier scan.
+          Your prints are out the door. Most US shipments arrive in 3–5 business days from the carrier scan.
         </td></tr>
 
         ${tracking}
