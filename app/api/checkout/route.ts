@@ -128,10 +128,9 @@ export async function POST(req: Request) {
           },
         },
       ],
-      // Embedded checkout redirects to return_url after completion. Land on a
-      // redirector so the customer's browser only ever sees the public_token
-      // URL — the Stripe session id stays out of address bars, bookmarks, and
-      // outbound Referer headers.
+      // Stripe redirects to return_url after `confirm()` succeeds. Use the
+      // public-token redirector so the session id stays out of address bars,
+      // bookmarks, and outbound Referer headers.
       return_url: `${siteUrl}/api/orders/by-session/{CHECKOUT_SESSION_ID}`,
       metadata: {
         cart_json: JSON.stringify(lines),

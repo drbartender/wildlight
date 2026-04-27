@@ -1569,8 +1569,12 @@ html[data-mood='ink'] .wl-surface::after {
   margin-bottom: 12px;
 }
 .wl-checkout-fields {
+  display: flex;
   flex-direction: column;
   gap: 20px;
+}
+.wl-checkout-fields[hidden] {
+  display: none;
 }
 .wl-checkout-field {
   /* Stripe Elements mount here as iframes; the Appearance API styles

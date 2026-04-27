@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { pool } from '@/lib/db';
 import { formatUSD } from '@/lib/money';
 import { StatusBadge } from '@/components/shop/StatusBadge';
+import { ClearCartOnMount } from '@/components/shop/ClearCartOnMount';
 
 export const dynamic = 'force-dynamic';
 
@@ -97,6 +98,7 @@ export default async function OrderPage({
 
   return (
     <section className="wl-cart">
+      {success && <ClearCartOnMount />}
       <h1>
         {success ? 'Thank you' : 'Your order'}
         <em>.</em>

@@ -4,7 +4,11 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { loadStripe, type Stripe, type Appearance } from '@stripe/stripe-js';
+import {
+  loadStripe,
+  type Appearance,
+  type StripeCheckoutElementsSdk,
+} from '@stripe/stripe-js';
 import { useCart } from '@/components/shop/CartProvider';
 import { formatUSD } from '@/lib/money';
 import { plateNumber } from '@/lib/plate-number';
@@ -123,25 +127,10 @@ export default function CheckoutPage() {
 
   // Imperative SDK handle. Held in a ref so the confirm handler reads the
   // latest one without forcing the effect to re-run.
-  // The exact type lives in @stripe/stripe-js but isn't re-exported by the
-  // top-level entry — we keep it loose here since we only call documented
-  // methods.
-  const sdkRef = useRef<{
-    loadActions: () => Promise<{
-      type: 'success' | 'error';
-      actions?: {
-        confirm: (a?: { returnUrl?: string }) => Promise<unknown>;
-      };
-      error?: { message: string };
-    }>;
-    changeAppearance: (a: Appearance) => void;
-  } | null>(null);
+  const sdkRef = useRef<StripeCheckoutElementsSdk | null>(null);
 
   // Guard against StrictMode double-invoke creating two Stripe sessions.
   const requestedRef = useRef(false);
-  // Latest cart.clear, captured by ref so the post-confirm cleanup is stable.
-  const clearCartRef = useRef(cart.clear);
-  clearCartRef.current = cart.clear;
 
   const lineCount = cart.lines.length;
 
@@ -157,7 +146,6 @@ export default function CheckoutPage() {
     requestedRef.current = true;
 
     const ac = new AbortController();
-    let stripe: Stripe | null = null;
     let cleanup: (() => void) | null = null;
 
     (async () => {
@@ -184,28 +172,16 @@ export default function CheckoutPage() {
           requestedRef.current = false;
           return;
         }
-        stripe = await loadStripe(data.publishableKey);
+        const stripe = await loadStripe(data.publishableKey);
         if (!stripe || ac.signal.aborted) return;
 
         // initCheckoutElementsSdk is the entry point for Custom Checkout
         // (ui_mode: 'elements'). Returns an imperative SDK we mount
         // elements from.
-        const sdk = (
-          stripe as unknown as {
-            initCheckoutElementsSdk: (opts: {
-              clientSecret: string;
-              elementsOptions?: { appearance?: Appearance };
-            }) => typeof sdkRef extends { current: infer S } ? S : never;
-          }
-        ).initCheckoutElementsSdk({
+        const sdk = stripe.initCheckoutElementsSdk({
           clientSecret: data.clientSecret,
           elementsOptions: { appearance: readAppearance() },
-        }) as unknown as NonNullable<typeof sdkRef.current> & {
-          createContactDetailsElement: () => { mount: (el: HTMLElement) => void; destroy: () => void };
-          createShippingAddressElement: () => { mount: (el: HTMLElement) => void; destroy: () => void };
-          createPaymentElement: () => { mount: (el: HTMLElement) => void; destroy: () => void };
-          createExpressCheckoutElement: () => { mount: (el: HTMLElement) => void; destroy: () => void };
-        };
+        });
         sdkRef.current = sdk;
 
         const elements: Array<{ destroy: () => void }> = [];
@@ -250,6 +226,10 @@ export default function CheckoutPage() {
               // already torn down
             }
           }
+          // Belt-and-braces: a queued observer callback firing between
+          // disconnect() and the iframe being released shouldn't ping a
+          // destroyed SDK.
+          sdkRef.current = null;
         };
         setReady(true);
       } catch (e) {
@@ -262,6 +242,10 @@ export default function CheckoutPage() {
     return () => {
       ac.abort();
       cleanup?.();
+      // Reset so Fast Refresh / StrictMode can re-init cleanly. Without
+      // this, the second mount sees the guard already set and short-circuits
+      // before mounting any elements.
+      requestedRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cart.ready]);
@@ -273,32 +257,25 @@ export default function CheckoutPage() {
     setError(null);
     try {
       const res = await sdkRef.current.loadActions();
-      if (res.type !== 'success' || !res.actions) {
+      if (res.type !== 'success') {
         setError(res.error?.message || 'Checkout could not load');
         setSubmitting(false);
         return;
       }
       const siteUrl =
         process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
-      // Clear the cart now so the customer doesn't return to a stale list
-      // if they hit Back from the order page. The webhook owns truth from
-      // here on; the localStorage cart is just a UI buffer.
-      clearCartRef.current();
-      const result = (await res.actions.confirm({
+      const result = await res.actions.confirm({
         returnUrl: `${siteUrl}/api/orders/by-session/{CHECKOUT_SESSION_ID}`,
-      })) as { type?: string; error?: { message?: string } };
-      // Stripe handles the redirect on success; reaching here means the
-      // confirm returned without redirecting, usually due to a buyer-side
-      // error.
-      if (result?.error?.message) {
+      });
+      // Reaching here without a redirect means the buyer needs to fix
+      // something. Keep the cart intact so they can retry. The order
+      // receipt page clears the cart on its own success path.
+      if (result.type === 'error') {
         setError(result.error.message);
-        setSubmitting(false);
-        return;
-      }
-      if (result?.type && result.type !== 'success') {
+      } else {
         setError('Payment did not complete. Please try again.');
-        setSubmitting(false);
       }
+      setSubmitting(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Payment failed');
       setSubmitting(false);
@@ -393,10 +370,7 @@ export default function CheckoutPage() {
             </div>
           )}
 
-          <div
-            className="wl-checkout-fields"
-            style={{ display: ready ? 'flex' : 'none' }}
-          >
+          <div className="wl-checkout-fields" hidden={!ready}>
             <div ref={expressMount} className="wl-checkout-field" />
             <div ref={contactMount} className="wl-checkout-field" />
             <div ref={shippingMount} className="wl-checkout-field" />
