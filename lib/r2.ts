@@ -5,6 +5,9 @@ import {
   CopyObjectCommand,
   DeleteObjectCommand,
   ListObjectsV2Command,
+  PutBucketCorsCommand,
+  GetBucketCorsCommand,
+  type CORSRule,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
@@ -83,6 +86,11 @@ export async function signedPrivateUrl(key: string, expiresInSec = 3600): Promis
   );
 }
 
+// Returns a presigned PUT URL for direct browser → R2 upload. The bucket
+// must have a CORS policy allowing PUT from the calling origin, otherwise
+// the browser blocks the request and the JS sees a generic "network
+// error" with no HTTP status. Run `npm run cors:r2 -- --apply` to install
+// the policy on a fresh bucket.
 export async function signedPrivateUploadUrl(
   key: string,
   contentType: string,
@@ -173,4 +181,31 @@ export function listPrivatePrefix(prefix: string) {
 
 export function listPublicPrefix(prefix: string) {
   return listPrefix(publicBucket(), prefix);
+}
+
+export async function getPrivateBucketCors(): Promise<CORSRule[] | null> {
+  const c = client();
+  try {
+    const r = await c.send(
+      new GetBucketCorsCommand({ Bucket: privateBucket() }),
+    );
+    return r.CORSRules ?? [];
+  } catch (err) {
+    // R2 returns NoSuchCORSConfiguration when no policy is set; surface as
+    // null so callers can distinguish "no policy" from real failures.
+    if (err instanceof Error && err.name === 'NoSuchCORSConfiguration') {
+      return null;
+    }
+    throw err;
+  }
+}
+
+export async function putPrivateBucketCors(rules: CORSRule[]): Promise<void> {
+  const c = client();
+  await c.send(
+    new PutBucketCorsCommand({
+      Bucket: privateBucket(),
+      CORSConfiguration: { CORSRules: rules },
+    }),
+  );
 }

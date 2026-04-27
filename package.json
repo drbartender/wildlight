@@ -21,7 +21,8 @@
     "backfill:image-dims": "tsx scripts/backfill-image-dims.ts",
     "demote:orphans": "tsx scripts/demote-orphan-publishes.ts",
     "cleanup:staged": "tsx scripts/cleanup-staged.ts",
-    "migrate": "tsx lib/migrate.ts"
+    "migrate": "tsx lib/migrate.ts",
+    "cors:r2": "tsx scripts/r2-cors-setup.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.0",
