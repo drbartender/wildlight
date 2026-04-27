@@ -210,7 +210,7 @@ function plainAddress(addr: OrderConfirmationData['shippingAddress'], name?: str
 
 function plainOrderConfirmation(data: OrderConfirmationData): string {
   const orderRef = data.orderToken.slice(0, 8);
-  const orderUrl = `${data.siteUrl.replace(/\/$/, '')}/orders/${data.orderToken}`;
+  const orderUrl = `${data.siteUrl.replace(/\/$/, '')}/shop/orders/${data.orderToken}`;
   const lines: string[] = [];
   lines.push('WILDLIGHT IMAGERY');
   lines.push('');
@@ -247,7 +247,7 @@ function plainOrderConfirmation(data: OrderConfirmationData): string {
 
 function plainOrderShipped(data: OrderShippedData): string {
   const orderRef = data.orderToken.slice(0, 8);
-  const orderUrl = `${data.siteUrl.replace(/\/$/, '')}/orders/${data.orderToken}`;
+  const orderUrl = `${data.siteUrl.replace(/\/$/, '')}/shop/orders/${data.orderToken}`;
   const isFirst = data.shipmentNumber <= 1;
   const headline = isFirst
     ? data.moreOnTheWay
@@ -334,7 +334,7 @@ function totalsBlock(data: OrderConfirmationData): string {
 
 export async function sendOrderConfirmation(data: OrderConfirmationData) {
   const orderRef = data.orderToken.slice(0, 8);
-  const orderUrl = `${data.siteUrl.replace(/\/$/, '')}/orders/${data.orderToken}`;
+  const orderUrl = `${data.siteUrl.replace(/\/$/, '')}/shop/orders/${data.orderToken}`;
   const itemsHtml = data.items
     .map((i) => itemRow({ ...i, trailing: i.lineTotal }))
     .join('');
@@ -432,7 +432,7 @@ export interface OrderShippedData {
 
 export async function sendOrderShipped(data: OrderShippedData) {
   const orderRef = data.orderToken.slice(0, 8);
-  const orderUrl = `${data.siteUrl.replace(/\/$/, '')}/orders/${data.orderToken}`;
+  const orderUrl = `${data.siteUrl.replace(/\/$/, '')}/shop/orders/${data.orderToken}`;
   const itemsHtml = data.items.map((i) => itemRow(i)).join('');
   const ship = shippingBlock(data.shippingAddress, data.customerName);
   const tracking = trackingBlock({
