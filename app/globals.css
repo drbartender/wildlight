@@ -1582,7 +1582,6 @@ html[data-mood='ink'] .wl-surface::after {
   padding: 28px;
   position: sticky;
   top: 84px;
-  position: relative;
 }
 .wl-summary::after {
   content: '';
