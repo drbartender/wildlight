@@ -12,6 +12,7 @@ interface OrderRow {
   customer_name: string | null;
   shipping_address: Record<string, string> | null;
   printful_attempt: number;
+  is_test: boolean;
 }
 
 interface ItemRow {
@@ -40,7 +41,7 @@ export async function POST(
          printful_attempt = printful_attempt + 1,
          updated_at = NOW()
      WHERE id = $1 AND status = 'needs_review' AND printful_order_id IS NULL
-     RETURNING id, customer_email, customer_name, shipping_address, printful_attempt`,
+     RETURNING id, customer_email, customer_name, shipping_address, printful_attempt, is_test`,
     [id],
   );
   if (!claim.rowCount) {
@@ -123,7 +124,11 @@ export async function POST(
         email: o.customer_email,
       },
       items: pfItems,
-      confirm: true,
+      // Mirror the webhook contract: a test-flagged order resubmits as a
+      // Printful draft. The flag travels with the order row, so this is
+      // correct even if the env's testMode has flipped since the order
+      // was created.
+      confirm: !o.is_test,
     });
     await withTransaction(async (client) => {
       await client.query(
