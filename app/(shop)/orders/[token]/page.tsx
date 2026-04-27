@@ -110,24 +110,24 @@ export default async function OrderPage({
         })}
       </div>
 
+      <div className="wl-receipt-status">
+        <span className="wl-summary-label">Status</span>
+        <StatusBadge status={order.status} />
+        {order.tracking_url && (
+          <a
+            className="wl-receipt-tracking"
+            href={order.tracking_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            referrerPolicy="no-referrer"
+          >
+            {order.tracking_number || 'View tracking →'}
+          </a>
+        )}
+      </div>
+
       <div className="wl-cart-grid">
         <div>
-          <div className="wl-receipt-status">
-            <span className="wl-summary-label">Status</span>
-            <StatusBadge status={order.status} />
-            {order.tracking_url && (
-              <a
-                className="wl-receipt-tracking"
-                href={order.tracking_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                referrerPolicy="no-referrer"
-              >
-                {order.tracking_number || 'View tracking →'}
-              </a>
-            )}
-          </div>
-
           {items.rows.map((i) => (
             <div key={i.id} className="wl-ci">
               <div className="wl-ci-img">
