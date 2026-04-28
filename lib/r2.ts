@@ -21,6 +21,15 @@ function client(): S3Client {
       accessKeyId: process.env.R2_ACCESS_KEY_ID!,
       secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
     },
+    // AWS SDK v3.729+ adds CRC32 checksum middleware by default for all
+    // upload ops. For browser presigned PUTs this means the signed URL
+    // includes x-amz-checksum-crc32=AAAAAA== as a placeholder, which R2
+    // can reject (and which Cloudflare sometimes treats as an extra
+    // signed header that breaks the signature). WHEN_REQUIRED tells the
+    // SDK to skip checksums for ops that don't strictly need them — i.e.
+    // PutObject — which keeps presigned URLs clean for R2.
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
   });
 }
 
