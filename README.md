@@ -45,6 +45,7 @@ Scripts:
 | `npm run sync:printful <id \| all>` | Create Printful sync_products for artwork(s) |
 | `npm run demote:orphans [-- --apply]` | Demote published artworks missing a print master to draft (dry-run by default) |
 | `npm run cleanup:staged [-- --apply]` | Reap R2 `incoming/*` staging keys older than 24h (private + public buckets, dry-run by default) |
+| `npm run cors:r2 [-- --apply]` | Install CORS policy on the R2 private bucket so the bulk-upload page can PUT directly from the browser (dry-run by default) |
 
 ## Deploy
 

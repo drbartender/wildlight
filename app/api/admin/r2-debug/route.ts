@@ -8,6 +8,10 @@ import { getPrivateBucketCors, signedPrivateUploadUrl } from '@/lib/r2';
 // actually applied to it + the parsed parts of a fresh presigned URL,
 // so a "PUT network error" from the browser can be diagnosed against
 // real values instead of guesses.
+//
+// TEMPORARY — added to diagnose the 2026-04 bulk-upload CORS failure.
+// Remove (or rename + repurpose as a permanent ops endpoint) once the
+// upload path is confirmed working in production.
 export async function GET() {
   await requireAdmin();
 
@@ -25,6 +29,7 @@ export async function GET() {
   let sample: { hostname: string; pathname: string; checksumParams: string[] } | null = null;
   let sampleError: string | null = null;
   try {
+    // Fixed key — overwritten on repeat calls; reaped by `cleanup:staged`.
     const url = await signedPrivateUploadUrl(
       'incoming/r2-debug-probe.jpg',
       'image/jpeg',
