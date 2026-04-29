@@ -2983,3 +2983,177 @@ html[data-mood='ink'] .wl-surface::after {
   color: var(--ink);
   border-bottom-color: var(--ink);
 }
+
+/* ─── ADMIN · STUDIO ───────────────────────────────────────── */
+
+.wl-adm-studio {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px;
+}
+.wl-adm-studio-h h1 {
+  font-family: var(--f-display);
+  font-size: 32px;
+  margin: 0 0 8px;
+}
+.wl-adm-studio-h .muted {
+  color: var(--ink-3);
+  font-family: var(--f-serif);
+  font-size: 14px;
+}
+.wl-adm-studio-modes {
+  display: flex;
+  gap: 4px;
+  margin: 24px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.wl-adm-studio-mode {
+  background: none;
+  border: 0;
+  padding: 10px 16px;
+  font: 500 12px var(--f-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.wl-adm-studio-mode.on {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.wl-adm-studio-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+}
+.wl-adm-studio-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wl-adm-studio-form label > span {
+  font: 500 11px var(--f-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.wl-adm-studio-form input,
+.wl-adm-studio-form textarea {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  padding: 10px 12px;
+  font: 400 14px var(--f-serif);
+  color: var(--ink);
+  border-radius: 3px;
+}
+.wl-adm-studio-form input:focus,
+.wl-adm-studio-form textarea:focus {
+  outline: 1px solid var(--ink);
+  border-color: var(--ink);
+}
+.wl-adm-studio-form .muted {
+  color: var(--ink-3);
+  font-family: var(--f-serif);
+  font-size: 13px;
+}
+
+.wl-adm-studio-angles {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+.wl-adm-studio-angle {
+  padding: 16px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wl-adm-studio-angle h3 {
+  font-family: var(--f-display);
+  font-size: 20px;
+  margin: 0;
+}
+.wl-adm-studio-angle .muted {
+  font-size: 13px;
+  margin: 0;
+}
+.wl-adm-studio-angle .kw {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.wl-adm-studio-angle .kw span {
+  font: 500 10px var(--f-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  padding: 3px 8px;
+  border-radius: 2px;
+  color: var(--ink-3);
+}
+
+.wl-adm-studio-draft {
+  margin-top: 32px;
+  padding: 24px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.wl-adm-studio-draft header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--rule);
+}
+.wl-adm-studio-draft header h2 {
+  font-family: var(--f-display);
+  font-size: 24px;
+  margin: 0;
+}
+.wl-adm-studio-draft header .actions {
+  display: flex;
+  gap: 8px;
+}
+.wl-adm-studio-draft label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wl-adm-studio-draft label > span {
+  font: 500 11px var(--f-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.wl-adm-studio-draft input,
+.wl-adm-studio-draft textarea {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  padding: 10px 12px;
+  font: 400 14px var(--f-serif);
+  color: var(--ink);
+  border-radius: 3px;
+}
+.wl-adm-studio-preview {
+  margin-top: 8px;
+  padding: 24px;
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  max-width: 100%;
+}
