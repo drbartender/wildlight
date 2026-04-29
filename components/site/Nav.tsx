@@ -20,9 +20,9 @@ const LINKS: LinkSpec[] = [
     match: (p) => p.startsWith('/portfolio'),
   },
   {
-    href: '/services/portraits',
-    label: 'Portraits',
-    match: (p) => p.startsWith('/services/portraits'),
+    href: '/journal',
+    label: 'Journal',
+    match: (p) => p.startsWith('/journal'),
   },
   { href: '/about', label: 'Studio', match: (p) => p.startsWith('/about') },
   {

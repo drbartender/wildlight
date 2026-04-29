@@ -38,6 +38,9 @@ export function Footer() {
           <Link className="link" href="/about">
             About Dan
           </Link>
+          <Link className="link" href="/journal">
+            Journal
+          </Link>
           <Link className="link" href="/services/portraits">
             Portraits
           </Link>
