@@ -19,12 +19,20 @@ type Filter = 'all' | 'published' | 'drafts';
 
 export default function JournalListPage() {
   const [entries, setEntries] = useState<ListEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
 
   useEffect(() => {
     void fetch('/api/admin/journal')
-      .then((r) => r.json())
-      .then((j: { entries: ListEntry[] }) => setEntries(j.entries));
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((j: { entries: ListEntry[] }) => setEntries(j.entries))
+      .catch((err: unknown) => {
+        setEntries([]);
+        setError(err instanceof Error ? err.message : 'load failed');
+      });
   }, []);
 
   const filtered =
@@ -60,7 +68,9 @@ export default function JournalListPage() {
         ))}
       </div>
 
-      {filtered == null ? (
+      {error ? (
+        <p className="wl-adm-err">Could not load chapters: {error}</p>
+      ) : filtered == null ? (
         <p className="wl-adm-muted">Loading…</p>
       ) : filtered.length === 0 ? (
         <p className="wl-adm-muted">No chapters yet.</p>
