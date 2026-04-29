@@ -45,28 +45,34 @@ export async function POST(req: Request) {
   }
   const d = parsed.data;
 
-  // Resolve a unique slug. If client passed one, slugify+uniquify.
-  // Otherwise derive from title.
-  const taken = new Set(
-    (await pool.query<{ slug: string }>('SELECT slug FROM blog_posts')).rows.map(
-      (r) => r.slug,
-    ),
-  );
   const baseSlug = slugify(d.slug || d.title) || 'untitled';
-  const slug = uniqueSlug(baseSlug, taken);
-
   const cleanBody = sanitizeJournalHtml(d.body);
 
-  try {
-    const r = await pool.query<{ id: number; slug: string }>(
-      `INSERT INTO blog_posts (slug, title, excerpt, body, cover_image_url)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, slug`,
-      [slug, d.title, d.excerpt ?? null, cleanBody, d.cover_image_url ?? null],
-    );
-    return NextResponse.json({ id: r.rows[0].id, slug: r.rows[0].slug });
-  } catch (err) {
-    logger.error('journal create failed', err);
-    return NextResponse.json({ error: 'create failed' }, { status: 500 });
+  // Race-safe slug uniquify: try ON CONFLICT, suffix-bump on null return.
+  // The UNIQUE index on blog_posts.slug is the actual guard. Two parallel
+  // creates with the same title both walk the same suffix ladder until one
+  // succeeds and the other tries the next number.
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const slug = attempt === 0 ? baseSlug : `${baseSlug}-${attempt + 1}`;
+    try {
+      const r = await pool.query<{ id: number; slug: string }>(
+        `INSERT INTO blog_posts (slug, title, excerpt, body, cover_image_url)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (slug) DO NOTHING
+         RETURNING id, slug`,
+        [slug, d.title, d.excerpt ?? null, cleanBody, d.cover_image_url ?? null],
+      );
+      if (r.rowCount) {
+        return NextResponse.json({ id: r.rows[0].id, slug: r.rows[0].slug });
+      }
+      // Slug collided — try the next suffix.
+    } catch (err) {
+      logger.error('journal create failed', err, { slug });
+      return NextResponse.json({ error: 'create failed' }, { status: 500 });
+    }
   }
+  return NextResponse.json(
+    { error: 'could not allocate unique slug' },
+    { status: 500 },
+  );
 }

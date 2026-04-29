@@ -106,6 +106,14 @@ export async function PATCH(
     if (!r.rowCount) return NextResponse.json({ error: 'not found' }, { status: 404 });
     return NextResponse.json({ id: r.rows[0].id, slug: r.rows[0].slug });
   } catch (err) {
+    // PG 23505 = unique_violation — slug collided in the race window
+    // between our SELECT and the UPDATE. Surface as 409 instead of 500.
+    if (err instanceof Error && (err as { code?: string }).code === '23505') {
+      return NextResponse.json(
+        { error: 'slug already in use' },
+        { status: 409 },
+      );
+    }
     logger.error('journal patch failed', err);
     return NextResponse.json({ error: 'update failed' }, { status: 500 });
   }
