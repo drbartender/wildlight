@@ -52,6 +52,18 @@ interface BroadcastRow {
   sent_by: string | null;
 }
 
+interface JournalListEntry {
+  id: number;
+  slug: string;
+  title: string;
+  excerpt: string | null;
+  body: string;
+  cover_image_url: string | null;
+  published: boolean;
+  published_at: string | null;
+  updated_at: string;
+}
+
 function SubscribersInner() {
   const qp = useSearchParams();
   const initialTab = (qp.get('tab') as Tab) || 'list';
@@ -72,6 +84,10 @@ function SubscribersInner() {
   const [broadcasts, setBroadcasts] = useState<BroadcastRow[]>([]);
   const [broadcastsLoading, setBroadcastsLoading] = useState(false);
 
+  // Picker state — published journal entries available as starting points.
+  const [journalEntries, setJournalEntries] = useState<JournalListEntry[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
   useEffect(() => {
     fetch('/api/admin/subscribers')
       .then((r) => r.json())
@@ -87,6 +103,18 @@ function SubscribersInner() {
       .then((d: { rows: BroadcastRow[] }) => setBroadcasts(d.rows))
       .catch(() => setBroadcasts([]))
       .finally(() => setBroadcastsLoading(false));
+  }, [tab]);
+
+  // Load published journal entries when the broadcast tab opens, so the
+  // "Start from journal entry" picker has data ready.
+  useEffect(() => {
+    if (tab !== 'broadcast') return;
+    fetch('/api/admin/journal')
+      .then((r) => r.json())
+      .then((d: { entries: JournalListEntry[] }) =>
+        setJournalEntries(d.entries.filter((e) => e.published)),
+      )
+      .catch(() => setJournalEntries([]));
   }, [tab]);
 
   const activeCount = useMemo(
@@ -113,6 +141,38 @@ function SubscribersInner() {
       // Rotate the idempotency key so a future full send gets a new UUID.
       setIdemKey(crypto.randomUUID());
     }
+  }
+
+  // Load the picked entry's full body via the single-entry GET, then build
+  // a newsletter-shaped wrapper around it. The list endpoint doesn't return
+  // body, so this second fetch is unavoidable.
+  async function preFillFromEntry(entry: JournalListEntry) {
+    const r = await fetch(`/api/admin/journal/${entry.id}`);
+    if (!r.ok) {
+      setError('could not load chapter');
+      return;
+    }
+    const d = (await r.json()) as { entry: JournalListEntry };
+    const e = d.entry;
+
+    const journalUrl = `${
+      typeof window !== 'undefined' ? window.location.origin : ''
+    }/journal/${e.slug}`;
+    const cover = e.cover_image_url
+      ? `<img src="${e.cover_image_url}" alt="${e.title}" style="max-width:100%;height:auto;display:block;margin-bottom:16px;" />\n`
+      : '';
+    const blurb = e.excerpt
+      ? `<p>${e.excerpt}</p>`
+      : `<p>${e.body
+          .replace(/<[^>]+>/g, '')
+          .slice(0, 240)
+          .trim()}…</p>`;
+
+    setSubject(e.title);
+    setHtml(
+      `${cover}<p>Friends —</p>\n${blurb}\n<p><a href="${journalUrl}">Read the full chapter →</a></p>\n<p>— Dan</p>`,
+    );
+    setPickerOpen(false);
   }
 
   return (
@@ -215,6 +275,109 @@ function SubscribersInner() {
               className="wl-adm-card"
               style={{ padding: 20, display: 'grid', gap: 14 }}
             >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <button
+                  type="button"
+                  className="wl-adm-btn small ghost"
+                  disabled={journalEntries.length === 0}
+                  onClick={() => setPickerOpen((o) => !o)}
+                  title={
+                    journalEntries.length === 0
+                      ? 'Publish a chapter first to use this.'
+                      : undefined
+                  }
+                >
+                  {pickerOpen ? 'Hide chapters' : 'Start from journal entry →'}
+                </button>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--adm-muted)',
+                    fontFamily: 'var(--f-mono), monospace',
+                    letterSpacing: '0.12em',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  {journalEntries.length} published
+                </span>
+              </div>
+              {pickerOpen && (
+                <div
+                  style={{
+                    border: '1px solid var(--adm-rule)',
+                    borderRadius: 4,
+                    background: 'var(--adm-paper-2)',
+                    maxHeight: 320,
+                    overflowY: 'auto',
+                  }}
+                >
+                  {journalEntries.length === 0 ? (
+                    <div
+                      style={{
+                        padding: 16,
+                        color: 'var(--adm-muted)',
+                        fontSize: 13,
+                      }}
+                    >
+                      No published chapters yet.
+                    </div>
+                  ) : (
+                    journalEntries.map((e, i) => (
+                      <div
+                        key={e.id}
+                        style={{
+                          padding: '12px 16px',
+                          borderBottom:
+                            i < journalEntries.length - 1
+                              ? '1px solid var(--adm-rule)'
+                              : 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 12,
+                        }}
+                      >
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 14, fontWeight: 500 }}>
+                            {e.title}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: 'var(--adm-muted)',
+                              marginTop: 2,
+                            }}
+                          >
+                            {e.excerpt
+                              ? e.excerpt.slice(0, 120) +
+                                (e.excerpt.length > 120 ? '…' : '')
+                              : '—'}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: 'var(--adm-muted)',
+                              fontFamily: 'var(--f-mono), monospace',
+                              letterSpacing: '0.12em',
+                              marginTop: 4,
+                            }}
+                          >
+                            {e.published_at
+                              ? new Date(e.published_at).toLocaleDateString()
+                              : ''}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="wl-adm-btn small"
+                          onClick={() => void preFillFromEntry(e)}
+                        >
+                          Use this →
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
               <label className="wl-adm-field">
                 <span className="wl-adm-field-label">Subject</span>
                 <input
