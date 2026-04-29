@@ -250,29 +250,25 @@ html[data-mood='ink'] .wl-surface::after {
 
 .wl-nav {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: auto 1fr;
   align-items: center;
-  padding: 22px 40px 18px;
+  gap: 32px;
+  padding: 20px 40px 16px;
   border-bottom: 1px solid var(--rule);
   position: sticky;
   top: 0;
   z-index: 10;
   background: var(--paper);
 }
-.wl-nav .nav-left,
+.wl-nav .nav-brand {
+  display: inline-flex;
+  align-items: center;
+}
 .wl-nav .nav-right {
   display: flex;
   align-items: center;
-}
-.wl-nav .nav-left {
-  gap: 28px;
-}
-.wl-nav .nav-right {
   gap: 22px;
   justify-content: flex-end;
-}
-.wl-nav .nav-center {
-  justify-self: center;
 }
 .wl-nav a.nav-link {
   font-family: var(--f-ui);
@@ -377,10 +373,9 @@ html[data-mood='ink'] .wl-surface::after {
 /* Mobile nav */
 @media (max-width: 760px) {
   .wl-nav {
-    grid-template-columns: auto 1fr auto;
+    gap: 12px;
     padding: 14px 20px;
   }
-  .wl-nav .nav-left,
   .wl-nav .nav-right .nav-link {
     display: none;
   }
@@ -392,10 +387,10 @@ html[data-mood='ink'] .wl-surface::after {
     letter-spacing: 0.16em;
   }
   .wl-mark-text .w1 {
-    font-size: 18px;
+    font-size: 20px;
   }
   .wl-mark-text .w2 {
-    font-size: 8.5px;
+    font-size: 9px;
   }
   .wl-nav-burger {
     display: inline-flex;

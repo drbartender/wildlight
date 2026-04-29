@@ -83,16 +83,11 @@ export function Nav() {
   return (
     <>
       <header className="wl-nav">
-        <div className="nav-left">
-          {LINKS.slice(0, 2).map((link) => (
-            <NavLink key={link.href} link={link} path={path} />
-          ))}
-        </div>
-        <Link href="/" className="nav-center" aria-label="Wildlight Imagery home">
-          <Wordmark size={24} />
+        <Link href="/" className="nav-brand" aria-label="Wildlight Imagery home">
+          <Wordmark size={28} />
         </Link>
         <div className="nav-right">
-          {LINKS.slice(2).map((link) => (
+          {LINKS.map((link) => (
             <NavLink key={link.href} link={link} path={path} />
           ))}
           <MoodSwitch />
