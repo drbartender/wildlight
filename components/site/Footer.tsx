@@ -13,7 +13,12 @@ export function Footer() {
             Added sparingly. Printed to order.
           </p>
           <div className="capture">
-            <EmailCaptureStrip />
+            <EmailCaptureStrip
+              source="footer"
+              eyebrow="A quiet letter"
+              headline="The next chapter, in your inbox."
+              body="New work, the occasional studio note, and first look at limited editions before they list. No more than once a month."
+            />
           </div>
         </div>
         <div>
@@ -33,11 +38,17 @@ export function Footer() {
           <Link className="link" href="/about">
             About Dan
           </Link>
+          <Link className="link" href="/services/portraits">
+            Portraits
+          </Link>
           <Link className="link" href="/contact?reason=commission">
             Commissions
           </Link>
           <Link className="link" href="/contact?reason=license">
             Licensing
+          </Link>
+          <Link className="link" href="/contact">
+            Contact
           </Link>
         </div>
         <div>
