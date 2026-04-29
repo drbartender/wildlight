@@ -23,11 +23,13 @@ interface Artwork {
   collection_id: number | null;
   collection_title: string | null;
   edition_size: number | null;
+  signed: boolean;
 }
 
 interface Data {
   artwork: Artwork;
   variants: VRow[];
+  soldCount: number;
 }
 
 export default function ArtworkEditPage({
@@ -261,6 +263,37 @@ export default function ArtworkEditPage({
                 value={a.edition_size ?? ''}
                 onSave={(v) => save({ edition_size: v ? Number(v) : null })}
               />
+            </div>
+            {a.edition_size != null && (
+              <div
+                style={{
+                  marginTop: 8,
+                  fontSize: 12,
+                  color: 'var(--adm-muted)',
+                  fontFamily: 'var(--f-mono), monospace',
+                }}
+              >
+                {data.soldCount} of {a.edition_size} sold ·{' '}
+                {Math.max(0, a.edition_size - data.soldCount)} remaining
+              </div>
+            )}
+            <div style={{ marginTop: 14 }}>
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  fontSize: 13,
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={a.signed}
+                  onChange={(e) => save({ signed: e.target.checked })}
+                />
+                <span>Signed by the artist</span>
+              </label>
             </div>
             <div style={{ marginTop: 14 }}>
               <AdminField
