@@ -415,3 +415,8 @@ CREATE INDEX IF NOT EXISTS idx_blog_posts_published_at
 
 CREATE INDEX IF NOT EXISTS idx_blog_posts_slug
   ON blog_posts(slug);
+
+-- Phase-2 hook for SP#6 limited editions: per-variant subscriber-only
+-- early-access window. NULL means no gating (variant is public when active).
+ALTER TABLE artwork_variants
+  ADD COLUMN IF NOT EXISTS subscriber_early_access_until TIMESTAMPTZ;
