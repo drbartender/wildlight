@@ -38,6 +38,23 @@ const CATALOG: NavDef[] = [
   },
 ];
 
+const EDITORIAL: NavDef[] = [
+  {
+    id: 'journal',
+    label: 'Journal',
+    href: '/admin/journal',
+    icon: 'M6 4h11a2 2 0 012 2v14H8a2 2 0 01-2-2V4zM10 8h6M10 12h6M10 16h4',
+    match: (p) => p.startsWith('/admin/journal'),
+  },
+  {
+    id: 'studio',
+    label: 'Studio',
+    href: '/admin/studio',
+    icon: 'M12 3l1.6 4.6L18 9l-4.4 1.4L12 15l-1.6-4.6L6 9l4.4-1.4zM5 4v3M5 18v3M3 6h4M3 20h4',
+    match: (p) => p.startsWith('/admin/studio'),
+  },
+];
+
 const COMMERCE: NavDef[] = [
   {
     id: 'orders',
@@ -244,6 +261,15 @@ export function AdminSidebar({ needsReview, email }: Props) {
         <nav className="wl-adm-sidebar-nav">
           <div className="wl-adm-sidebar-group">Catalog</div>
           {CATALOG.map((n) => (
+            <Item
+              key={n.id}
+              n={n}
+              path={path}
+              onNavigate={() => setOpen(false)}
+            />
+          ))}
+          <div className="wl-adm-sidebar-group second">Editorial</div>
+          {EDITORIAL.map((n) => (
             <Item
               key={n.id}
               n={n}
