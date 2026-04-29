@@ -28,9 +28,10 @@ const nextConfig: NextConfig = {
       { source: '/wildlight-store/:path*', destination: '/shop',                      permanent: true },
       { source: '/shopping-cart',         destination: '/shop/cart',                  permanent: true },
 
-      // Legacy WordPress blog (sub-project #3 retargets to /journal/* later)
-      { source: '/blog',                  destination: '/',                           permanent: false },
-      { source: '/blog/:path*',           destination: '/',                           permanent: false },
+      // Legacy WordPress blog redirects to journal root (no per-slug map —
+      // content was not migrated, so individual paths would 404 anyway).
+      { source: '/blog',                  destination: '/journal',                    permanent: true },
+      { source: '/blog/:path*',           destination: '/journal',                    permanent: true },
     ];
   },
 };
