@@ -413,8 +413,9 @@ CREATE TABLE IF NOT EXISTS blog_posts (
 CREATE INDEX IF NOT EXISTS idx_blog_posts_published_at
   ON blog_posts(published_at DESC) WHERE published = TRUE;
 
-CREATE INDEX IF NOT EXISTS idx_blog_posts_slug
-  ON blog_posts(slug);
+-- (No explicit slug index — `slug TEXT UNIQUE NOT NULL` already creates
+-- a unique btree on slug; an extra index is redundant write overhead.)
+DROP INDEX IF EXISTS idx_blog_posts_slug;
 
 -- Phase-2 hook for SP#6 limited editions: per-variant subscriber-only
 -- early-access window. NULL means no gating (variant is public when active).
@@ -435,3 +436,10 @@ CREATE TABLE IF NOT EXISTS studio_reminders (
 -- edition_size is non-null.
 ALTER TABLE artworks
   ADD COLUMN IF NOT EXISTS signed BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Edition sold-count subquery JOINS order_items × artwork_variants by
+-- variant_id and filters by v.artwork_id. Without this index the count
+-- runs as a seq-scan on order_items every artwork-detail render and
+-- every checkout submit. Critical once order_items grows past ~10K.
+CREATE INDEX IF NOT EXISTS idx_order_items_variant
+  ON order_items(variant_id);
