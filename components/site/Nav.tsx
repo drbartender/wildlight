@@ -14,17 +14,21 @@ interface LinkSpec {
 }
 
 const LINKS: LinkSpec[] = [
-  { href: '/shop', label: 'Index', match: (p) => p === '/shop' || p === '/' },
   {
-    href: '/shop/collections',
-    label: 'Collections',
-    match: (p) => p.startsWith('/shop/collections') || p.startsWith('/shop/artwork'),
+    href: '/portfolio',
+    label: 'Portfolio',
+    match: (p) => p.startsWith('/portfolio'),
+  },
+  {
+    href: '/services/portraits',
+    label: 'Portraits',
+    match: (p) => p.startsWith('/services/portraits'),
   },
   { href: '/about', label: 'Studio', match: (p) => p.startsWith('/about') },
   {
-    href: '/contact',
-    label: 'Commission',
-    match: (p) => p.startsWith('/contact'),
+    href: '/shop',
+    label: 'Shop',
+    match: (p) => p.startsWith('/shop'),
   },
 ];
 
