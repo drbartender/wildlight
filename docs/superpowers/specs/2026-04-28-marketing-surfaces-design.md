@@ -25,14 +25,23 @@ The funnel this produces: visitor lands at `/`, sees curated work + studio voice
 ## Source of truth
 
 - Architecture: `2026-04-27-wildlight-com-rebuild-overview.md`
-- Design system: `app/globals.css` (`:root` + `[data-mood='ink']` blocks; `.wl-masthead`, `.wl-eyebrow`, `.wl-btn`, `.wl-plate-card`, `.wl-cindex-list` etc.)
-- Existing Nav: `components/shop/Nav.tsx` — moves to `components/site/Nav.tsx` and adds Portfolio link
-- Existing Footer: `components/shop/Footer.tsx` — moves to `components/site/Footer.tsx`; link cleanup
-- Existing about-letter: `app/(shop)/about/page.tsx` — kept verbatim, minor additions at the tail
-- Existing contact form: `app/(shop)/contact/page.tsx` — unchanged
-- Existing API: `app/api/contact/route.ts` — unchanged
-- Existing newsletter: `components/shop/EmailCaptureStrip.tsx` — moves to `components/site/EmailCaptureStrip.tsx`
-- Existing artwork grid: `components/shop/ArtworkGrid.tsx` — extended with a `linkBase` prop so portfolio pages can route plate clicks through `/shop/artwork/[slug]` while keeping a `linkBase="/shop/artwork"` default for shop pages
+- **Design contract: prototype at `C:/Users/dalla/Downloads/Wild Light Shop/`** — fully-realized HTML/JSX/CSS preview of the marketing surfaces, built from this spec. Files relevant to SP#2:
+  - `screens-marketing.jsx` — `MarketingHome`, `PortfolioIndex`, `PortfolioDetail`, `PortraitsService`, `AboutPolished` components — the canonical structure, CSS class names, and copy.
+  - `styles-marketing.css` — class definitions for `wlmh-*` (marketing home), `wlsv-*` (services), `wlab-*` (about polish), `wlpf-*` (portfolio).
+  - `ui.jsx` — new `ApertureMark` SVG (5-petal logo), updated `Wordmark`, two-state `MoodSwitch` (bone/black), `TopNav` (4 links: Portfolio · Portraits · Studio · Shop), updated `Footer`.
+  - `data.jsx` — sample copy for collection taglines and artwork notes; informative for content tone, not the data source.
+  - **Treat the prototype as the design contract.** Implementation matches its structure, class names, and copy. Intentional deviations require explicit rationale.
+  - **Out of scope** (also in the prototype but separate concerns): `screens-home.jsx` (three shop-home variants — Letter/Plate/Folio — that replace `/shop`'s "Index of plates" home; future sub-project), expanded mood palette (`ivory`, `slate`), `density` modes, film-grain overlay, `tweaks-panel.jsx`. The 2-state mood switcher (`bone`/`black`) does land in SP#2 because it's surfaced inline in the Nav.
+- Design system: `app/globals.css` (`:root` + `[data-mood='ink']` blocks; `.wl-masthead`, `.wl-eyebrow`, `.wl-btn`, `.wl-plate-card`, `.wl-cindex-list` etc.) — extended with marketing classes from `styles-marketing.css`.
+- Mood token rename: the prototype renames the dark mood from `ink` to `black`. SP#2 keeps the existing `[data-mood='ink']` selector and does NOT rename, since renaming would touch every component file. The MoodSwitch surfaces "Black" as the user-facing label while the data attribute stays `ink`. Visually identical.
+- Existing Nav: `components/shop/Nav.tsx` — moves to `components/site/Nav.tsx`, adds Portraits link (4 links total per prototype).
+- Existing Footer: `components/shop/Footer.tsx` — moves to `components/site/Footer.tsx`; column structure refactored per prototype (Shop / Studio / Care).
+- Existing Wordmark: `components/shop/Wordmark.tsx` — moves to `components/site/Wordmark.tsx`, adds `ApertureMark` SVG before the text mark.
+- Existing about-letter: `app/(shop)/about/page.tsx` — letter content kept verbatim (Dan's voice is canonical, prototype's slight polish not adopted), additions at the tail per prototype.
+- Existing contact form: `app/(shop)/contact/page.tsx` — unchanged.
+- Existing API: `app/api/contact/route.ts` — unchanged.
+- Existing newsletter: `components/shop/EmailCaptureStrip.tsx` — moves to `components/site/EmailCaptureStrip.tsx`. The prototype renders an inline `<form class="wl-news">` rather than the `EmailCaptureStrip` component; `EmailCaptureStrip` is updated to render the prototype's structure (eyebrow + headline + body + form + fineprint).
+- Existing artwork grid: `components/shop/ArtworkGrid.tsx` — extended with `linkBase` and `showPrice` props.
 
 ## Information architecture additions
 
