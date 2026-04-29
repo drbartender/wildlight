@@ -43,12 +43,20 @@ export default async function JournalIndex({
   const offset = (page - 1) * PER_PAGE;
 
   const [rowsRes, countRes] = await Promise.all([
+    // Compute chapter_number in a CTE over the FULL published set, then
+    // page over the CTE — otherwise ROW_NUMBER restarts at 1 for each
+    // page when LIMIT is in the same SELECT.
     pool.query<ListRow>(
-      `SELECT id, slug, title, excerpt, cover_image_url,
-              published_at::text,
-              ROW_NUMBER() OVER (ORDER BY published_at ASC)::int AS chapter_number
-       FROM blog_posts
-       WHERE published = TRUE
+      `WITH ord AS (
+         SELECT id, slug, title, excerpt, cover_image_url,
+                published_at,
+                ROW_NUMBER() OVER (ORDER BY published_at ASC)::int AS chapter_number
+         FROM blog_posts
+         WHERE published = TRUE
+       )
+       SELECT id, slug, title, excerpt, cover_image_url,
+              published_at::text, chapter_number
+       FROM ord
        ORDER BY published_at DESC
        LIMIT $1 OFFSET $2`,
       [PER_PAGE, offset],
