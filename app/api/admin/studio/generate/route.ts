@@ -1,156 +1,90 @@
 export const runtime = 'nodejs';
-export const maxDuration = 60; // vision + body generation can run 20-40s
+// Unified mode runs SEO research (web_search 10-30s) + generation
+// (vision/body 20-40s) sequentially in the worst case. 120s gives the
+// composer headroom without blowing past Vercel's default 300s ceiling.
+export const maxDuration = 120;
+
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireAdmin } from '@/lib/session';
 import { logger } from '@/lib/logger';
 import { safeHttpUrl } from '@/lib/url';
-import {
-  generateFromImage,
-  generateFromTitle,
-  generateCombination,
-  generateImproved,
-  type JournalDraft,
-  type ImageInput,
-} from '@/lib/studio';
+import { generateUnified } from '@/lib/studio';
+import { recordAndCheckRateLimit } from '@/lib/rate-limit';
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
-const ALLOWED_IMAGE_TYPES = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'image/gif',
-]);
+// POST /api/admin/studio/generate
+//
+// Single mode after the review pass — the composer never calls the
+// legacy mode-by-mode JSON branches or the multipart image-upload
+// path. They lived for one minor release and were removed when the
+// review showed only `mode: 'unified'` reaches this handler. Image
+// inputs come in as URLs (already uploaded to R2 via /upload-image
+// or /upload-presign), not as raw files.
 
-// JSON path — title / improve / image-by-URL.
-const JsonBody = z.discriminatedUnion('mode', [
-  z.object({
-    mode: z.literal('title'),
-    title: z.string().min(1).max(200),
-  }),
-  z.object({
-    mode: z.literal('image'),
-    imageUrl: z.string().url(),
-    titleHint: z.string().max(200).optional(),
-  }),
-  z.object({
-    mode: z.literal('combination'),
-    imageUrl: z.string().url(),
-    title: z.string().min(1).max(200),
-  }),
-  z.object({
-    mode: z.literal('improve'),
-    body: z.string().min(1).max(50_000),
-    feedback: z.string().max(1000).optional(),
-  }),
-]);
+const Body = z.object({
+  mode: z.literal('unified'),
+  kind: z.enum(['journal', 'newsletter']),
+  imageUrls: z.array(z.string().url()).max(12).optional(),
+  title: z.string().max(200).optional(),
+  subject: z.string().max(500).optional(),
+  body: z.string().max(50_000).optional(),
+  chooseForMe: z.boolean().optional(),
+});
 
 export async function POST(req: Request) {
-  await requireAdmin();
-
-  const contentType = req.headers.get('content-type') || '';
-
-  // Multipart path — image upload (image / combination modes).
-  if (contentType.startsWith('multipart/form-data')) {
-    return handleMultipart(req);
+  const session = await requireAdmin();
+  // Each call burns Anthropic budget (~$0.05-0.20 of model time + web
+  // search) — this is the cost-amplification surface a stolen cookie
+  // would target. 30/hour gives normal use plenty of headroom while
+  // capping the blast radius.
+  const gate = await recordAndCheckRateLimit(
+    'studio-generate',
+    session.email,
+    3600,
+    30,
+  );
+  if (gate.blocked) {
+    return NextResponse.json(
+      { error: 'too many generations — try again later' },
+      {
+        status: 429,
+        headers: gate.retryAfter
+          ? { 'Retry-After': String(gate.retryAfter) }
+          : undefined,
+      },
+    );
   }
-
-  // JSON path
   const json = await req.json().catch(() => null);
-  const parsed = JsonBody.safeParse(json);
+  const parsed = Body.safeParse(json);
   if (!parsed.success) {
     return NextResponse.json({ error: 'invalid input' }, { status: 400 });
   }
   const d = parsed.data;
 
-  try {
-    let draft: JournalDraft;
-    switch (d.mode) {
-      case 'title':
-        draft = await generateFromTitle({ title: d.title });
-        break;
-      case 'image': {
-        const url = safeHttpUrl(d.imageUrl);
-        if (!url)
-          return NextResponse.json({ error: 'bad image url' }, { status: 400 });
-        draft = await generateFromImage({
-          image: { url },
-          titleHint: d.titleHint,
-        });
-        break;
-      }
-      case 'combination': {
-        const url = safeHttpUrl(d.imageUrl);
-        if (!url)
-          return NextResponse.json({ error: 'bad image url' }, { status: 400 });
-        draft = await generateCombination({
-          image: { url },
-          title: d.title,
-        });
-        break;
-      }
-      case 'improve':
-        draft = await generateImproved({
-          body: d.body,
-          feedback: d.feedback,
-        });
-        break;
+  // Validate every image URL before we spend a 30s research call.
+  // safeHttpUrl returns the canonical form on success, null on a
+  // disallowed scheme; we only forward canonicalized values.
+  const cleanUrls: string[] = [];
+  for (const u of d.imageUrls ?? []) {
+    const safe = safeHttpUrl(u);
+    if (!safe) {
+      return NextResponse.json({ error: 'bad image url' }, { status: 400 });
     }
-    return NextResponse.json({ draft });
-  } catch (err) {
-    logger.error('studio generate failed', err, { mode: d.mode });
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'generation failed' },
-      { status: 502 },
-    );
+    cleanUrls.push(safe);
   }
-}
-
-async function handleMultipart(req: Request): Promise<Response> {
-  const form = await req.formData().catch(() => null);
-  if (!form)
-    return NextResponse.json({ error: 'invalid form' }, { status: 400 });
-
-  const mode = form.get('mode');
-  const file = form.get('file');
-  if (typeof mode !== 'string' || !['image', 'combination'].includes(mode)) {
-    return NextResponse.json({ error: 'invalid mode' }, { status: 400 });
-  }
-  if (!(file instanceof File)) {
-    return NextResponse.json({ error: 'no file' }, { status: 400 });
-  }
-  if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
-    return NextResponse.json(
-      { error: 'unsupported image type' },
-      { status: 415 },
-    );
-  }
-  if (file.size > MAX_IMAGE_BYTES) {
-    return NextResponse.json({ error: 'image too large' }, { status: 413 });
-  }
-
-  const buf = Buffer.from(await file.arrayBuffer());
-  const image: ImageInput = {
-    base64: { data: buf.toString('base64'), mediaType: file.type },
-  };
-
-  const titleHint =
-    typeof form.get('titleHint') === 'string'
-      ? (form.get('titleHint') as string).slice(0, 200)
-      : undefined;
-  const title =
-    typeof form.get('title') === 'string'
-      ? (form.get('title') as string).slice(0, 200)
-      : undefined;
 
   try {
-    const draft =
-      mode === 'image'
-        ? await generateFromImage({ image, titleHint })
-        : await generateCombination({ image, title: title ?? '' });
-    return NextResponse.json({ draft });
+    const result = await generateUnified({
+      kind: d.kind,
+      imageUrls: cleanUrls,
+      title: d.title,
+      subject: d.subject,
+      body: d.body,
+      chooseForMe: d.chooseForMe,
+    });
+    return NextResponse.json(result);
   } catch (err) {
-    logger.error('studio generate (multipart) failed', err, { mode });
+    logger.error('studio generate failed', err, { kind: d.kind });
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'generation failed' },
       { status: 502 },

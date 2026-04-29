@@ -117,6 +117,58 @@ export async function signedPrivateUploadUrl(
   );
 }
 
+// Public bucket variant — used by the studio composer to bypass the
+// 4.5MB Vercel function body limit on big uploads. Same caveat about
+// bucket CORS: PUT from the admin origin must be permitted, otherwise
+// the browser request fails opaquely. After PUT succeeds the public
+// URL is `${publicBase()}/${key}`, identical to uploadPublic's return.
+export async function signedPublicUploadUrl(
+  key: string,
+  contentType: string,
+  expiresInSec = 900,
+): Promise<string> {
+  const c = client();
+  return getSignedUrl(
+    c,
+    new PutObjectCommand({
+      Bucket: publicBucket(),
+      Key: key,
+      ContentType: contentType,
+      CacheControl: 'public, max-age=31536000, immutable',
+    }),
+    { expiresIn: expiresInSec },
+  );
+}
+
+export function publicUrlFor(key: string): string {
+  return `${publicBase()}/${key}`;
+}
+
+export async function getPublicBucketCors(): Promise<CORSRule[] | null> {
+  const c = client();
+  try {
+    const r = await c.send(
+      new GetBucketCorsCommand({ Bucket: publicBucket() }),
+    );
+    return r.CORSRules ?? [];
+  } catch (err) {
+    if (err instanceof Error && err.name === 'NoSuchCORSConfiguration') {
+      return null;
+    }
+    throw err;
+  }
+}
+
+export async function putPublicBucketCors(rules: CORSRule[]): Promise<void> {
+  const c = client();
+  await c.send(
+    new PutBucketCorsCommand({
+      Bucket: publicBucket(),
+      CORSConfiguration: { CORSRules: rules },
+    }),
+  );
+}
+
 export async function copyAndDeletePrivate(
   srcKey: string,
   dstKey: string,

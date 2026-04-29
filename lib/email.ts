@@ -708,3 +708,89 @@ ${anglesHtml}
     { siteUrl: data.siteUrl, plainEmails: true },
   );
 }
+
+// ─── Studio composer broadcasts ──────────────────────────────────
+//
+// Wraps a composer draft (newsletter or cross-posted journal) into the
+// shared brand-template HTML used by the rest of /lib/email.ts.
+//
+//  * cover image — full-bleed at the top when present
+//  * subject — kept short, used as the Resend subject line, not repeated
+//    in the body (mail clients show subject in their own chrome)
+//  * body — already sanitized HTML (sanitizeJournalHtml runs on every
+//    composer auto-save), inserted verbatim
+//  * read-on-the-journal CTA — only when crosslinkUrl is supplied
+//  * unsubscribe footer is appended by sendBroadcast() per recipient
+
+export interface ComposerBroadcastInput {
+  /** Subject line for Resend; the email body itself never repeats it. */
+  subject: string;
+  /** Sanitized body HTML straight from blog_posts.body / newsletter_drafts.body. */
+  bodyHtml: string;
+  /** First image of the gallery — rendered at the top of the email if set. */
+  coverImageUrl?: string | null;
+  /** When the broadcast mirrors a journal entry, link readers to the canonical chapter. */
+  crosslinkUrl?: string | null;
+  /** Used to format absolute URLs inside the template. */
+  siteUrl: string;
+}
+
+export function renderComposerBroadcast(input: ComposerBroadcastInput): string {
+  // Validate AND canonicalize. The original `input.coverImageUrl` is
+  // discarded — we render the parsed/canonical URL only, so a host
+  // that round-trips through `safeHttpUrl` is what reaches subscribers'
+  // inboxes. Same shape for the cross-link CTA.
+  const safeCover = input.coverImageUrl
+    ? safeHttpUrl(input.coverImageUrl)
+    : null;
+  const cover = safeCover
+    ? `<tr><td style="padding:0 0 18px;"><img src="${escapeHtml(safeCover)}" alt="" width="560" style="display:block;width:100%;max-width:560px;height:auto;border-radius:6px;"/></td></tr>`
+    : '';
+  const safeCrosslink = input.crosslinkUrl
+    ? safeHttpUrl(input.crosslinkUrl)
+    : null;
+  const cta = safeCrosslink
+    ? `<tr><td style="padding:18px 0 8px;">
+         <a class="wl-link wl-fg" href="${escapeHtml(safeCrosslink)}" style="color:${C.fg};text-decoration:underline;font-family:${FONT_SERIF};font-size:14px;font-weight:500;">Read the full chapter →</a>
+       </td></tr>`
+    : '';
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="color-scheme" content="light dark"/>
+  <meta name="supported-color-schemes" content="light dark"/>
+  <meta name="x-apple-disable-message-reformatting"/>
+  <title>${escapeHtml(input.subject)}</title>
+  ${darkModeStyleBlock()}
+  <style>
+    .wl-bdy h2 { font-family:${FONT_SERIF}; font-size:20px; font-weight:600; margin:24px 0 8px; color:${C.fg}; }
+    .wl-bdy h3 { font-family:${FONT_SERIF}; font-size:16px; font-weight:600; margin:18px 0 6px; color:${C.fg}; }
+    .wl-bdy p  { font-family:${FONT_SERIF}; font-size:15px; line-height:1.65; margin:0 0 14px; color:${C.fg2}; }
+    .wl-bdy a  { color:${C.fg}; }
+    .wl-bdy blockquote { margin:14px 0; padding:8px 14px; border-left:2px solid ${C.rule}; color:${C.fg2}; font-style:italic; }
+    .wl-bdy figure { margin:14px 0; }
+    .wl-bdy img { max-width:100%; height:auto; display:block; border-radius:4px; }
+    @media (prefers-color-scheme: dark) {
+      .wl-bdy h2, .wl-bdy h3 { color:#f2ede1 !important; }
+      .wl-bdy p, .wl-bdy blockquote { color:#d8d2c1 !important; }
+      .wl-bdy a { color:#f2ede1 !important; }
+    }
+  </style>
+</head>
+<body class="wl-bg" style="margin:0;padding:0;background:${C.bg};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="wl-bg" style="background:${C.bg};padding:24px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;">
+        ${brandHeader()}
+        ${cover}
+        <tr><td class="wl-bdy">${input.bodyHtml}</td></tr>
+        ${cta}
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}

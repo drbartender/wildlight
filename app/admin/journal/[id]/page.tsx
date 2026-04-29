@@ -1,31 +1,21 @@
-import { notFound } from 'next/navigation';
-import {
-  JournalEditor,
-  type JournalEntry,
-} from '@/components/admin/JournalEditor';
-import { requireAdminOrRedirect } from '@/lib/session';
-import { pool, parsePathId } from '@/lib/db';
+import { redirect } from 'next/navigation';
+import { parsePathId } from '@/lib/db';
 
+// Legacy chapter-edit route — Studio composer takes over editing too.
+// We pass the id straight through so the composer loads it on mount.
+// A bad id (non-numeric) just lands on a blank journal composer.
 export const dynamic = 'force-dynamic';
 
-export default async function EditJournalEntry({
+export default async function EditChapterRedirect({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireAdminOrRedirect();
   const { id: raw } = await params;
   const id = parsePathId(raw);
-  if (id == null) notFound();
-
-  const r = await pool.query<JournalEntry>(
-    `SELECT id, slug, title, excerpt, body, cover_image_url,
-            published, published_at::text
-     FROM blog_posts WHERE id = $1`,
-    [id],
+  redirect(
+    id == null
+      ? '/admin/studio?kind=journal'
+      : `/admin/studio?kind=journal&id=${id}`,
   );
-  const entry = r.rows[0];
-  if (!entry) notFound();
-
-  return <JournalEditor initial={entry} isEdit={true} />;
 }

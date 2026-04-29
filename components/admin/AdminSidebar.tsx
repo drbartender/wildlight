@@ -1,17 +1,24 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { usePathname, useSearchParams } from 'next/navigation';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApertureMark } from '@/components/brand/ApertureMark';
 
+// Match callback gets pathname AND searchParams so Studio can split
+// active state across its two siblings (Journal vs Newsletter) via
+// the `?kind=` query — usePathname() drops the query.
+interface NavMatchInput {
+  path: string;
+  search: URLSearchParams;
+}
 interface NavDef {
   id: string;
   label: string;
   href: string;
   icon: string;
   badge?: number;
-  match: (path: string) => boolean;
+  match: (input: NavMatchInput) => boolean;
 }
 
 const CATALOG: NavDef[] = [
@@ -20,38 +27,50 @@ const CATALOG: NavDef[] = [
     label: 'Overview',
     href: '/admin',
     icon: 'M3 3h7v7H3zM14 3h7v4h-7zM14 10h7v11h-7zM3 14h7v7H3z',
-    match: (p) => p === '/admin',
+    match: ({ path }) => path === '/admin',
   },
   {
     id: 'artworks',
     label: 'Artworks',
     href: '/admin/artworks',
     icon: 'M4 4h16v12H4zM4 18h10v2H4z',
-    match: (p) => p.startsWith('/admin/artworks'),
+    match: ({ path }) => path.startsWith('/admin/artworks'),
   },
   {
     id: 'collections',
     label: 'Collections',
     href: '/admin/collections',
     icon: 'M3 5h6v6H3zM11 5h10v6H11zM3 13h10v8H3zM15 13h6v8h-6z',
-    match: (p) => p.startsWith('/admin/collections'),
+    match: ({ path }) => path.startsWith('/admin/collections'),
   },
 ];
 
-const EDITORIAL: NavDef[] = [
+// "STUDIO" replaces the old EDITORIAL group. Journal and Newsletter
+// are both surfaces of the same composer at /admin/studio — they
+// switch via the kind tabs at the top of the page. The match logic
+// here distinguishes the two by the `?kind=` query so the active
+// pill follows the user's intent inside the composer. We also count
+// /admin/journal/* paths as Journal-active during the redirect
+// transition window (those routes redirect to /admin/studio).
+const STUDIO: NavDef[] = [
   {
     id: 'journal',
     label: 'Journal',
-    href: '/admin/journal',
-    icon: 'M6 4h11a2 2 0 012 2v14H8a2 2 0 01-2-2V4zM10 8h6M10 12h6M10 16h4',
-    match: (p) => p.startsWith('/admin/journal'),
+    href: '/admin/studio?kind=journal',
+    icon: 'M4 4h12l4 4v12H4zM4 4v6h12V4M8 14h8M8 17h6',
+    match: ({ path, search }) =>
+      (path.startsWith('/admin/studio') &&
+        search.get('kind') !== 'newsletter') ||
+      path.startsWith('/admin/journal'),
   },
   {
-    id: 'studio',
-    label: 'Studio',
-    href: '/admin/studio',
-    icon: 'M12 3l1.6 4.6L18 9l-4.4 1.4L12 15l-1.6-4.6L6 9l4.4-1.4zM5 4v3M5 18v3M3 6h4M3 20h4',
-    match: (p) => p.startsWith('/admin/studio'),
+    id: 'newsletter',
+    label: 'Newsletter',
+    href: '/admin/studio?kind=newsletter',
+    icon: 'M3 6h18v12H3zM3 6l9 7 9-7',
+    match: ({ path, search }) =>
+      path.startsWith('/admin/studio') &&
+      search.get('kind') === 'newsletter',
   },
 ];
 
@@ -61,14 +80,14 @@ const COMMERCE: NavDef[] = [
     label: 'Orders',
     href: '/admin/orders',
     icon: 'M4 6h16l-2 12H6zM9 10v6M15 10v6',
-    match: (p) => p.startsWith('/admin/orders'),
+    match: ({ path }) => path.startsWith('/admin/orders'),
   },
   {
     id: 'subscribers',
     label: 'Subscribers',
     href: '/admin/subscribers',
     icon: 'M3 20v-1a5 5 0 0110 0v1M8 12a4 4 0 110-8 4 4 0 010 8zM15 20v-1a4 4 0 018 0v1M19 12a3.5 3.5 0 110-7 3.5 3.5 0 010 7z',
-    match: (p) => p.startsWith('/admin/subscribers'),
+    match: ({ path }) => path.startsWith('/admin/subscribers'),
   },
 ];
 
@@ -78,7 +97,7 @@ const ACCOUNT: NavDef[] = [
     label: 'Settings',
     href: '/admin/settings',
     icon: 'M12 9a3 3 0 100 6 3 3 0 000-6zM19.4 15a1.6 1.6 0 00.3 1.7l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.6 1.6 0 00-1.7-.3 1.6 1.6 0 00-1 1.5V21a2 2 0 01-4 0v-.1a1.6 1.6 0 00-1-1.5 1.6 1.6 0 00-1.7.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.6 1.6 0 00.3-1.7 1.6 1.6 0 00-1.5-1H3a2 2 0 010-4h.1a1.6 1.6 0 001.5-1 1.6 1.6 0 00-.3-1.7l-.1-.1a2 2 0 112.8-2.8l.1.1a1.6 1.6 0 001.7.3h.1a1.6 1.6 0 001-1.5V3a2 2 0 014 0v.1a1.6 1.6 0 001 1.5 1.6 1.6 0 001.7-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.6 1.6 0 00-.3 1.7v.1a1.6 1.6 0 001.5 1H21a2 2 0 010 4h-.1a1.6 1.6 0 00-1.5 1z',
-    match: (p) => p.startsWith('/admin/settings'),
+    match: ({ path }) => path.startsWith('/admin/settings'),
   },
 ];
 
@@ -99,13 +118,15 @@ const HEALTH_KEYS: readonly ['stripe', 'printful', 'resend', 'r2', 'webhooks'] =
 function Item({
   n,
   path,
+  search,
   onNavigate,
 }: {
   n: NavDef;
   path: string;
+  search: URLSearchParams;
   onNavigate?: () => void;
 }) {
-  const active = n.match(path);
+  const active = n.match({ path, search });
   return (
     <Link
       href={n.href}
@@ -132,6 +153,15 @@ function Item({
 
 export function AdminSidebar({ needsReview, email }: Props) {
   const path = usePathname() || '/admin';
+  const searchParams = useSearchParams();
+  // Stable URLSearchParams across renders (the ReadonlyURLSearchParams
+  // returned by next/navigation has the .get() method we need but isn't
+  // a URLSearchParams instance). Memoize on the string form so callers
+  // receive the same object until the query actually changes.
+  const search = useMemo(
+    () => new URLSearchParams(searchParams?.toString() ?? ''),
+    [searchParams],
+  );
   const orders = COMMERCE.map((n) =>
     n.id === 'orders' && needsReview > 0 ? { ...n, badge: needsReview } : n,
   );
@@ -265,15 +295,7 @@ export function AdminSidebar({ needsReview, email }: Props) {
               key={n.id}
               n={n}
               path={path}
-              onNavigate={() => setOpen(false)}
-            />
-          ))}
-          <div className="wl-adm-sidebar-group second">Editorial</div>
-          {EDITORIAL.map((n) => (
-            <Item
-              key={n.id}
-              n={n}
-              path={path}
+              search={search}
               onNavigate={() => setOpen(false)}
             />
           ))}
@@ -283,6 +305,17 @@ export function AdminSidebar({ needsReview, email }: Props) {
               key={n.id}
               n={n}
               path={path}
+              search={search}
+              onNavigate={() => setOpen(false)}
+            />
+          ))}
+          <div className="wl-adm-sidebar-group second">Studio</div>
+          {STUDIO.map((n) => (
+            <Item
+              key={n.id}
+              n={n}
+              path={path}
+              search={search}
               onNavigate={() => setOpen(false)}
             />
           ))}
@@ -292,6 +325,7 @@ export function AdminSidebar({ needsReview, email }: Props) {
               key={n.id}
               n={n}
               path={path}
+              search={search}
               onNavigate={() => setOpen(false)}
             />
           ))}

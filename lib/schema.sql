@@ -417,6 +417,44 @@ CREATE INDEX IF NOT EXISTS idx_blog_posts_published_at
 -- a unique btree on slug; an extra index is redundant write overhead.)
 DROP INDEX IF EXISTS idx_blog_posts_slug;
 
+-- ─── Studio composer · ephemeral state on blog_posts ───────────────
+-- Holds composer-only fields that don't belong on the published row:
+-- ordered image list (so the gallery can re-hydrate after reload), the
+-- "choose for me" toggle, and the last SEO-research result so the panel
+-- survives navigation. Never read by the public render — only the admin
+-- studio composer reads/writes it. NULL until the row passes through
+-- the new composer at least once.
+ALTER TABLE blog_posts
+  ADD COLUMN IF NOT EXISTS studio_meta JSONB;
+
+-- Powers the "Recent entries" right-rail and the chapter list. The
+-- studio composer always sorts by updated_at DESC.
+CREATE INDEX IF NOT EXISTS idx_blog_posts_updated_at
+  ON blog_posts(updated_at DESC);
+
+-- ─── Newsletter drafts (WIP composer state for newsletters) ────────
+-- broadcast_log stays the immutable send audit. Drafts live here until
+-- the user hits Publish, at which point a new broadcast_log row is
+-- inserted, the draft's sent_broadcast_id+sent_at are set, and the
+-- draft is preserved as the round-trip source if the user re-opens it
+-- in the composer. broadcast_log holds the rendered HTML at send time;
+-- the draft holds the composer source.
+CREATE TABLE IF NOT EXISTS newsletter_drafts (
+  id                  SERIAL PRIMARY KEY,
+  subject             TEXT NOT NULL DEFAULT '',
+  preheader           TEXT NOT NULL DEFAULT '',
+  body                TEXT NOT NULL DEFAULT '',
+  cover_image_url     TEXT,
+  studio_meta         JSONB,
+  sent_broadcast_id   INT REFERENCES broadcast_log(id) ON DELETE SET NULL,
+  sent_at             TIMESTAMPTZ,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_newsletter_drafts_updated_at
+  ON newsletter_drafts(updated_at DESC);
+
 -- Phase-2 hook for SP#6 limited editions: per-variant subscriber-only
 -- early-access window. NULL means no gating (variant is public when active).
 ALTER TABLE artwork_variants

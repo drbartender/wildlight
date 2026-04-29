@@ -13,14 +13,14 @@ const ITEMS: Item[] = [
   { k: 'Go to Overview', to: '/admin', hint: 'dashboard' },
   { k: 'Go to Artworks', to: '/admin/artworks' },
   { k: 'Go to Collections', to: '/admin/collections' },
-  { k: 'Go to Journal', to: '/admin/journal', hint: 'chapters' },
-  { k: 'Go to Studio', to: '/admin/studio', hint: 'draft generator' },
   { k: 'Go to Orders', to: '/admin/orders' },
-  { k: 'Go to Subscribers', to: '/admin/subscribers' },
+  { k: 'Go to Subscribers', to: '/admin/subscribers', hint: 'list' },
+  { k: 'Go to Studio · Journal', to: '/admin/studio?kind=journal', hint: 'composer' },
+  { k: 'Go to Studio · Newsletter', to: '/admin/studio?kind=newsletter', hint: 'composer' },
   { k: 'Go to Settings', to: '/admin/settings' },
   { k: 'New artwork', to: '/admin/artworks/new', hint: 'upload' },
-  { k: 'New chapter', to: '/admin/journal/new', hint: 'journal' },
-  { k: 'New broadcast', to: '/admin/subscribers?tab=broadcast' },
+  { k: 'New journal entry', to: '/admin/studio?kind=journal&new=1', hint: 'studio' },
+  { k: 'New newsletter', to: '/admin/studio?kind=newsletter&new=1', hint: 'studio' },
 ];
 
 export function AdminCmdK() {
