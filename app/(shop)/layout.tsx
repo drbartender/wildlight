@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
-import { Nav } from '@/components/shop/Nav';
-import { Footer } from '@/components/shop/Footer';
+import { Nav } from '@/components/site/Nav';
+import { Footer } from '@/components/site/Footer';
 import { CartProvider } from '@/components/shop/CartProvider';
 
 export default function ShopLayout({ children }: { children: ReactNode }) {

@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { Wordmark } from './Wordmark';
 import { MoodSwitch } from './MoodSwitch';
-import { CartCountBadge } from './CartCountBadge';
+import { CartCountBadge } from '@/components/shop/CartCountBadge';
 
 interface LinkSpec {
   href: string;

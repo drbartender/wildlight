@@ -1,5 +1,5 @@
 import { pool } from '@/lib/db';
-import { ArtworkGrid, type GridItem } from '@/components/shop/ArtworkGrid';
+import { ArtworkGrid, type GridItem } from '@/components/site/ArtworkGrid';
 
 export const revalidate = 60;
 

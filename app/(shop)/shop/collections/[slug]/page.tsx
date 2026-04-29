@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { pool } from '@/lib/db';
-import { PlateCard, type PlateCardData } from '@/components/shop/PlateCard';
+import { PlateCard, type PlateCardData } from '@/components/site/PlateCard';
 
 export const revalidate = 60;
 

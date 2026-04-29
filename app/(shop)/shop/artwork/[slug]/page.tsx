@@ -3,7 +3,7 @@ import Image from 'next/image';
 import { notFound } from 'next/navigation';
 import { pool } from '@/lib/db';
 import { OrderCard, type VariantOption } from '@/components/shop/OrderCard';
-import { PlateCard, type PlateCardData } from '@/components/shop/PlateCard';
+import { PlateCard, type PlateCardData } from '@/components/site/PlateCard';
 import { plateNumber } from '@/lib/plate-number';
 
 export const revalidate = 60;
