@@ -1,5 +1,9 @@
 import type { MetadataRoute } from 'next';
 import { pool } from '@/lib/db';
+import { logger } from '@/lib/logger';
+
+// Sitemap doesn't need to be live; rebuild hourly.
+export const revalidate = 3600;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const base = (process.env.NEXT_PUBLIC_APP_URL || 'https://wildlightimagery.shop').replace(/\/$/, '');
@@ -43,7 +47,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         lastModified: j.updated_at,
       })),
     ];
-  } catch {
+  } catch (err) {
+    logger.error('sitemap DB lookup failed', err);
     return [
       { url: `${base}/`, lastModified: new Date() },
       { url: `${base}/portfolio`, lastModified: new Date() },

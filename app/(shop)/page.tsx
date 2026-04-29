@@ -37,15 +37,16 @@ export default async function MarketingHome() {
       `SELECT COUNT(*)::int AS n, MAX(published_at)::text AS latest
        FROM artworks WHERE status='published'`,
     ),
+    // Marketing home renders cards with showPrice={false}, so the
+    // MIN(price_cents) subquery is unused — drop it. Saves 6 correlated
+    // subqueries on every cache-miss render of the highest-traffic page.
     pool.query<PlateRow>(
       `SELECT a.slug,
               a.title,
               a.image_web_url,
               a.year_shot,
               a.location,
-              c.title AS collection_title,
-              (SELECT MIN(price_cents) FROM artwork_variants v
-                 WHERE v.artwork_id = a.id AND v.active = TRUE) AS min_price_cents
+              c.title AS collection_title
        FROM artworks a
        LEFT JOIN collections c ON c.id = a.collection_id
        WHERE a.status = 'published'
