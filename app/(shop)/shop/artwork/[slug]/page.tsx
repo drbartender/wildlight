@@ -5,6 +5,7 @@ import { pool } from '@/lib/db';
 import { OrderCard, type VariantOption } from '@/components/shop/OrderCard';
 import { PlateCard, type PlateCardData } from '@/components/site/PlateCard';
 import { plateNumber } from '@/lib/plate-number';
+import { getEditionStatus } from '@/lib/editions';
 
 export const revalidate = 60;
 
@@ -24,6 +25,10 @@ interface ArtworkRow {
   plate_idx: number;
   /** Total published artworks in the catalog. */
   plate_total: number;
+}
+
+interface RelatedQueryResult {
+  rows: PlateCardData[];
 }
 
 export default async function ArtworkPage({
@@ -59,7 +64,7 @@ export default async function ArtworkPage({
   // Fire both in parallel after the gating art lookup resolves — shaves a
   // round-trip off TTFB on every cache-miss of the shop's highest-intent
   // page.
-  const [variantsRes, relatedRes] = await Promise.all([
+  const [variantsRes, relatedRes, edition] = await Promise.all([
     pool.query<VariantOption>(
       `SELECT id, type, size, finish, price_cents FROM artwork_variants
        WHERE artwork_id = $1 AND active = TRUE
@@ -78,7 +83,8 @@ export default async function ArtworkPage({
            LIMIT 4`,
           [art.collection_slug, art.slug],
         )
-      : Promise.resolve({ rows: [] as PlateCardData[] }),
+      : Promise.resolve<RelatedQueryResult>({ rows: [] }),
+    getEditionStatus(art.id),
   ]);
   const variants = variantsRes.rows;
   const related = relatedRes;
@@ -156,17 +162,49 @@ export default async function ArtworkPage({
             </div>
           </div>
 
-          <OrderCard
-            artworkId={art.id}
-            artworkSlug={art.slug}
-            artworkTitle={art.title}
-            imageUrl={art.image_web_url}
-            plateNo={plate}
-            chapterTitle={art.collection_title}
-            yearShot={art.year_shot}
-            note={art.artist_note}
-            variants={variants}
-          />
+          <div className="wl-art-buy">
+            {edition.isLimited && (
+              <div className="wl-edition-badge">
+                <span className="line-1">
+                  Edition of {String(edition.editionSize).padStart(2, '0')}
+                </span>
+                {edition.signed && (
+                  <span className="line-2">Signed by the artist</span>
+                )}
+                <span
+                  className={`line-3 ${edition.soldOut ? 'sold-out' : ''}`}
+                >
+                  {edition.soldOut
+                    ? 'Sold out'
+                    : `${edition.remaining} remaining`}
+                </span>
+              </div>
+            )}
+            {edition.soldOut ? (
+              <div className="wl-edition-soldout">
+                <h3>Sold out — thank you.</h3>
+                <p>
+                  This edition has reached its run of {edition.editionSize}.
+                  To know about future releases:
+                </p>
+                <Link className="wl-btn primary" href="/journal">
+                  Subscribe via the journal →
+                </Link>
+              </div>
+            ) : (
+              <OrderCard
+                artworkId={art.id}
+                artworkSlug={art.slug}
+                artworkTitle={art.title}
+                imageUrl={art.image_web_url}
+                plateNo={plate}
+                chapterTitle={art.collection_title}
+                yearShot={art.year_shot}
+                note={art.artist_note}
+                variants={variants}
+              />
+            )}
+          </div>
         </div>
 
         {related.rows.length > 0 && art.collection_title && (
