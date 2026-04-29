@@ -420,3 +420,11 @@ CREATE INDEX IF NOT EXISTS idx_blog_posts_slug
 -- early-access window. NULL means no gating (variant is public when active).
 ALTER TABLE artwork_variants
   ADD COLUMN IF NOT EXISTS subscriber_early_access_until TIMESTAMPTZ;
+
+-- Studio reminder cron audit log — one row per quarterly nudge.
+CREATE TABLE IF NOT EXISTS studio_reminders (
+  id            SERIAL PRIMARY KEY,
+  sent_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  delivered     BOOLEAN NOT NULL DEFAULT FALSE,
+  trend_angles  JSONB
+);
