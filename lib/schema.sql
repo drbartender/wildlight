@@ -395,3 +395,23 @@ WHERE o.status = 'refunded'
     SELECT 1 FROM order_events e
     WHERE e.order_id = o.id AND e.type = 'refunded'
   );
+
+-- ─── Journal entries (DRB-shaped blog_posts) ───────────────────────
+CREATE TABLE IF NOT EXISTS blog_posts (
+  id              SERIAL PRIMARY KEY,
+  slug            TEXT UNIQUE NOT NULL,
+  title           TEXT NOT NULL,
+  excerpt         TEXT,
+  body            TEXT NOT NULL,
+  cover_image_url TEXT,
+  published       BOOLEAN NOT NULL DEFAULT FALSE,
+  published_at    TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_blog_posts_published_at
+  ON blog_posts(published_at DESC) WHERE published = TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_blog_posts_slug
+  ON blog_posts(slug);
