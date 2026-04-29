@@ -26,7 +26,7 @@ export async function POST(req: Request) {
 
   const adminEmail = process.env.ADMIN_ALERT_EMAIL;
   if (!adminEmail) {
-    logger.error('studio reminder skipped — ADMIN_ALERT_EMAIL not set');
+    logger.warn('studio reminder skipped — ADMIN_ALERT_EMAIL not set');
     return NextResponse.json({ skipped: 'no admin email' });
   }
 
