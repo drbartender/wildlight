@@ -15,7 +15,7 @@ export async function GET(
   const { id: raw } = await ctx.params;
   const id = parsePathId(raw);
   if (id == null) return NextResponse.json({ error: 'invalid id' }, { status: 400 });
-  const [a, v] = await Promise.all([
+  const [a, v, e] = await Promise.all([
     pool.query(
       `SELECT a.*, c.title AS collection_title
        FROM artworks a LEFT JOIN collections c ON c.id = a.collection_id
@@ -26,9 +26,22 @@ export async function GET(
       `SELECT * FROM artwork_variants WHERE artwork_id = $1 ORDER BY type, price_cents`,
       [id],
     ),
+    pool.query<{ sold: number }>(
+      `SELECT COUNT(oi.id)::int AS sold
+       FROM order_items oi
+       JOIN artwork_variants vv ON vv.id = oi.variant_id
+       JOIN orders o ON o.id = oi.order_id
+       WHERE vv.artwork_id = $1
+         AND o.status NOT IN ('canceled', 'refunded')`,
+      [id],
+    ),
   ]);
   if (!a.rowCount) return NextResponse.json({ error: 'not found' }, { status: 404 });
-  return NextResponse.json({ artwork: a.rows[0], variants: v.rows });
+  return NextResponse.json({
+    artwork: a.rows[0],
+    variants: v.rows,
+    soldCount: e.rows[0]?.sold ?? 0,
+  });
 }
 
 const Patch = z.object({
@@ -40,6 +53,7 @@ const Patch = z.object({
   collection_id: z.number().int().nullable().optional(),
   display_order: z.number().int().optional(),
   edition_size: z.number().int().positive().nullable().optional(),
+  signed: z.boolean().optional(),
   // Keys live under `artworks-print/<collection-or-id>/<slug>.<ext>`; enforce
   // the prefix + sane characters so an admin PATCH can't stash an arbitrary
   // string (e.g. a URL) that later gets passed to the R2 signer.
