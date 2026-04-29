@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import type { Metadata } from 'next';
+import { EmailCaptureStrip } from '@/components/site/EmailCaptureStrip';
 
 export const metadata: Metadata = { title: 'Studio — Wildlight Imagery' };
 
@@ -15,51 +16,79 @@ const LETTER: string[] = [
 
 export default function AboutPage() {
   return (
-    <section className="wl-about">
-      <div className="side">
-        <div className="portrait">
-          <Image
-            src="/dan-portrait.jpg"
-            alt="Dan Raby"
-            fill
-            sizes="(max-width: 900px) 100vw, 50vw"
-            priority
-            style={{ objectFit: 'cover' }}
-          />
+    <>
+      <section className="wl-about">
+        <div className="side">
+          <div className="portrait">
+            <Image
+              src="/dan-portrait.jpg"
+              alt="Dan Raby"
+              fill
+              sizes="(max-width: 900px) 100vw, 50vw"
+              priority
+              style={{ objectFit: 'cover' }}
+            />
+          </div>
+          <div className="caption">
+            <span>Dan Raby, at the studio</span>
+            <span>Aurora, CO</span>
+          </div>
         </div>
-        <div className="caption">
-          <span>Dan Raby, at the studio</span>
-          <span>Aurora, CO</span>
+
+        <div className="letter">
+          <span
+            className="wl-eyebrow"
+            style={{ display: 'inline-flex', marginBottom: 24 }}
+          >
+            A letter from the chief photographer
+          </span>
+          <h1>
+            My name is <em>Dan Raby</em>.
+          </h1>
+
+          {LETTER.map((p, i) => (
+            <p key={i}>{p}</p>
+          ))}
+
+          <div className="sig">— Dan</div>
+          <div className="sig-sub">Chief Photographer · Wildlight Imagery</div>
+
+          <div style={{ marginTop: 48, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <Link className="wl-btn primary" href="/shop">
+              Visit the shop →
+            </Link>
+            <Link className="wl-btn ghost" href="/portfolio">
+              Browse the portfolio
+            </Link>
+          </div>
         </div>
-      </div>
+      </section>
 
-      <div className="letter">
-        <span
-          className="wl-eyebrow"
-          style={{ display: 'inline-flex', marginBottom: 24 }}
-        >
-          A letter from the chief photographer
-        </span>
-        <h1>
-          My name is <em>Dan Raby</em>.
-        </h1>
-
-        {LETTER.map((p, i) => (
-          <p key={i}>{p}</p>
-        ))}
-
-        <div className="sig">— Dan</div>
-        <div className="sig-sub">Chief Photographer · Wildlight Imagery</div>
-
-        <div style={{ marginTop: 48, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <Link className="wl-btn primary" href="/contact?reason=commission">
-            Commission Dan →
+      {/* Tail addition #1 — services callout */}
+      <section className="wlab-callout">
+        <div className="wlab-callout-inner">
+          <div>
+            <span className="wl-eyebrow">Also from the studio</span>
+            <p>
+              Wildlight also offers <em>portrait photography</em> for headshots,
+              families, and editorial commissions.
+            </p>
+          </div>
+          <Link className="wlmh-bigcta" href="/services/portraits">
+            Learn more →
           </Link>
-          <Link className="wl-btn ghost" href="/shop/collections">
-            Browse work
-          </Link>
         </div>
-      </div>
-    </section>
+      </section>
+
+      {/* Tail addition #2 — newsletter strip */}
+      <section className="wlmh-news-section">
+        <EmailCaptureStrip
+          source="about-tail"
+          eyebrow="Notes from the field"
+          headline="Quarterly notes from the field."
+          body="New chapters, new prints, occasional limited editions. Sent quarterly — never more."
+        />
+      </section>
+    </>
   );
 }
