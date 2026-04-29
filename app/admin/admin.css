@@ -2539,3 +2539,661 @@
   gap: 16px; flex-wrap: wrap;
 }
 .wl-bulk-cleanup p { margin: 0; }
+
+/* ─── STUDIO COMPOSER ───────────────────────────────────────────────
+ *
+ * Two-column layout: composer left (fluid), right rail ~300px. Every
+ * selector is scoped under `.wl-admin-surface` so token cascade
+ * guarantees Atelier / Darkroom skinning without a separate variant
+ * per skin. Display fonts swap with the theme — Atelier uses Caslon
+ * for the title input + headlines, Darkroom uses Inter (no serif).
+ * Body textarea swaps EB Garamond ↔ JetBrains Mono. Field labels stay
+ * mono in both moods (they read as machine UI either way).
+ */
+
+.wl-admin-surface .wl-stu-composer {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 0;
+  align-items: stretch;
+  min-height: calc(100vh - 64px);
+}
+@media (max-width: 1100px) {
+  .wl-admin-surface .wl-stu-composer {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Composer column ──────────────────────────────────────────────── */
+.wl-admin-surface .wl-stu-col {
+  padding: 24px 28px 36px;
+  border-right: 1px solid var(--adm-rule);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 880px;
+  width: 100%;
+}
+@media (max-width: 1100px) {
+  .wl-admin-surface .wl-stu-col {
+    border-right: 0;
+    border-bottom: 1px solid var(--adm-rule);
+    max-width: none;
+  }
+}
+
+.wl-admin-surface .wl-stu-loading {
+  color: var(--adm-muted);
+  font-family: var(--f-caslon), 'Libre Caslon Text', Georgia, serif;
+  font-size: 14px;
+}
+.wl-admin-surface[data-theme='dark'] .wl-stu-loading {
+  font-family: var(--f-ui), 'Inter', system-ui, sans-serif;
+}
+
+.wl-admin-surface .wl-stu-err {
+  margin: 0;
+  padding: 10px 14px;
+  background: var(--adm-red-soft);
+  border: 1px solid var(--adm-red);
+  color: var(--adm-red);
+  border-radius: var(--adm-radius-md);
+  font-size: 13px;
+}
+
+/* Mode tabs + autosave + counts row */
+.wl-admin-surface .wl-stu-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.wl-admin-surface .wl-stu-kind {
+  display: inline-flex;
+  border: 1px solid var(--adm-rule);
+  border-radius: var(--adm-radius-md);
+  overflow: hidden;
+  background: var(--adm-card);
+}
+.wl-admin-surface .wl-stu-kind button {
+  border: 0;
+  padding: 6px 14px;
+  font-family: var(--f-ui), 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--adm-muted);
+  background: transparent;
+  cursor: pointer;
+  border-right: 1px solid var(--adm-rule);
+}
+.wl-admin-surface .wl-stu-kind button:last-child { border-right: 0; }
+.wl-admin-surface .wl-stu-kind button.on {
+  background: var(--adm-paper-alt);
+  color: var(--adm-ink);
+  font-weight: 500;
+}
+.wl-admin-surface .wl-stu-kind button:hover:not(.on) {
+  color: var(--adm-ink-2);
+}
+
+.wl-admin-surface .wl-stu-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--f-ui), 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--adm-muted);
+}
+.wl-admin-surface .wl-stu-save-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--adm-green);
+  transition: background 0.2s;
+}
+.wl-admin-surface .wl-stu-save-dot.on {
+  background: var(--adm-amber);
+  animation: wlStuPulse 0.9s ease-in-out infinite;
+}
+@keyframes wlStuPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.wl-admin-surface .wl-stu-counts {
+  margin-left: auto;
+  font-family: var(--f-mono), 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--adm-muted);
+  letter-spacing: 0.04em;
+}
+
+/* Drop zone */
+.wl-admin-surface .wl-stu-dropzone {
+  border: 1px dashed var(--adm-rule);
+  background: var(--adm-paper-alt);
+  border-radius: var(--adm-radius-lg);
+  padding: 28px;
+  transition: border-color 0.15s, background 0.15s;
+  position: relative;
+}
+.wl-admin-surface .wl-stu-dropzone.is-filled { padding: 14px; }
+.wl-admin-surface .wl-stu-dropzone.is-drag {
+  border-color: var(--adm-green);
+  background: var(--adm-green-soft);
+}
+.wl-admin-surface .wl-stu-dropzone-empty {
+  text-align: center;
+  color: var(--adm-muted);
+  font-family: var(--f-ui), 'Inter', system-ui, sans-serif;
+}
+.wl-admin-surface .wl-stu-dropzone-empty svg {
+  display: block;
+  margin: 0 auto 10px;
+  color: var(--adm-dim);
+}
+.wl-admin-surface .wl-stu-dropzone-headline {
+  font-family: var(--f-caslon), 'Libre Caslon Text', Georgia, serif;
+  font-size: 20px;
+  color: var(--adm-ink);
+  letter-spacing: 0.005em;
+}
+.wl-admin-surface[data-theme='dark'] .wl-stu-dropzone-headline {
+  font-family: var(--f-ui), 'Inter', system-ui, sans-serif;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.wl-admin-surface .wl-stu-dropzone-help {
+  font-size: 12px;
+  margin-top: 6px;
+}
+.wl-admin-surface .wl-stu-dropzone-browse {
+  border: 0;
+  background: none;
+  color: var(--adm-green);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+.wl-admin-surface .wl-stu-dropzone-uploading {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  font-family: var(--f-mono), 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--adm-muted);
+  background: var(--adm-paper);
+  border: 1px solid var(--adm-rule);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.wl-admin-surface .wl-stu-thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+}
+.wl-admin-surface .wl-stu-thumb {
+  position: relative;
+  aspect-ratio: 4 / 5;
+  background: var(--adm-card);
+  border: 1px solid var(--adm-rule);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.wl-admin-surface .wl-stu-thumb-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-style: dashed;
+  color: var(--adm-muted);
+  font-family: var(--f-ui), 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  cursor: pointer;
+}
+.wl-admin-surface .wl-stu-thumb-add:hover {
+  color: var(--adm-ink);
+  border-color: var(--adm-ink-2);
+}
+.wl-admin-surface .wl-stu-thumb-idx {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: var(--adm-paper);
+  color: var(--adm-ink);
+  font-family: var(--f-mono), 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 2px;
+  border: 1px solid var(--adm-rule);
+  z-index: 2;
+}
+.wl-admin-surface .wl-stu-thumb-tools {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 18px 6px 6px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.45), transparent);
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 2;
+}
+.wl-admin-surface .wl-stu-thumb:hover .wl-stu-thumb-tools,
+.wl-admin-surface .wl-stu-thumb:focus-within .wl-stu-thumb-tools {
+  opacity: 1;
+}
+.wl-admin-surface .wl-stu-thumb-tools button {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--adm-rule);
+  background: var(--adm-paper);
+  color: var(--adm-ink);
+  border-radius: 3px;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--f-ui), 'Inter', system-ui, sans-serif;
+}
+.wl-admin-surface .wl-stu-thumb-tools button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.wl-admin-surface .wl-stu-thumbs-foot {
+  display: flex;
+  margin-top: 10px;
+  font-family: var(--f-ui), 'Inter', system-ui, sans-serif;
+  font-size: 11px;
+  color: var(--adm-muted);
+}
+.wl-admin-surface .wl-stu-thumbs-foot-r { margin-left: auto; }
+
+/* Field labels + inputs */
+.wl-admin-surface .wl-stu-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wl-admin-surface .wl-stu-field-label {
+  font: 500 11px var(--f-mono), 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--adm-muted);
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.wl-admin-surface .wl-stu-field-hint {
+  margin-left: auto;
+  font: 400 11px var(--f-ui), 'Inter', system-ui, sans-serif;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--adm-dim);
+}
+
+/* Title input — large display element. Atelier: Caslon serif.
+ * Darkroom: Inter, slightly tighter tracking, sans look. */
+.wl-admin-surface .wl-stu-title {
+  width: 100%;
+  padding: 10px 0 8px;
+  border: 0;
+  border-bottom: 1px solid var(--adm-rule);
+  background: transparent;
+  font-family: var(--f-caslon), 'Libre Caslon Text', Georgia, serif;
+  font-size: 28px;
+  color: var(--adm-ink);
+  letter-spacing: 0.005em;
+}
+.wl-admin-surface[data-theme='dark'] .wl-stu-title {
+  font-family: var(--f-ui), 'Inter', system-ui, sans-serif;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+}
+.wl-admin-surface .wl-stu-title:focus {
+  outline: 0;
+  border-bottom-color: var(--adm-ink);
+}
+.wl-admin-surface .wl-stu-title::placeholder {
+  color: var(--adm-dim);
+}
+
+/* Subject / preheader — italic serif in Atelier; italic sans in Darkroom. */
+.wl-admin-surface .wl-stu-subject {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--adm-rule);
+  border-radius: var(--adm-radius-md);
+  background: var(--adm-card);
+  font-family: var(--f-caslon), 'Libre Caslon Text', Georgia, serif;
+  font-size: 15px;
+  font-style: italic;
+  color: var(--adm-ink-2);
+}
+.wl-admin-surface[data-theme='dark'] .wl-stu-subject {
+  font-family: var(--f-ui), 'Inter', system-ui, sans-serif;
+}
+.wl-admin-surface .wl-stu-subject:focus {
+  outline: 1px solid var(--adm-ink);
+  border-color: var(--adm-ink);
+  font-style: normal;
+}
+.wl-admin-surface .wl-stu-subject::placeholder {
+  color: var(--adm-dim);
+}
+
+/* Body textarea. Atelier: serif (the writer is composing for the
+ * editorial journal). Darkroom: mono (workbench feel — matches the
+ * darkroom skin's identity). */
+.wl-admin-surface .wl-stu-body {
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--adm-rule);
+  border-radius: var(--adm-radius-md);
+  background: var(--adm-card);
+  font-family: var(--f-caslon), 'Libre Caslon Text', Georgia, serif;
+  font-size: 15px;
+  color: var(--adm-ink);
+  line-height: 1.65;
+  resize: vertical;
+  min-height: 280px;
+}
+.wl-admin-surface[data-theme='dark'] .wl-stu-body {
+  font-family: var(--f-mono), 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.wl-admin-surface .wl-stu-body:focus {
+  outline: 1px solid var(--adm-ink);
+  border-color: var(--adm-ink);
+}
+.wl-admin-surface .wl-stu-body::placeholder {
+  color: var(--adm-dim);
+}
+
+/* SEO panel */
+.wl-admin-surface .wl-stu-seo {
+  border: 1px solid var(--adm-rule);
+  background: var(--adm-card);
+  border-radius: var(--adm-radius-md);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.wl-admin-surface .wl-stu-seo header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.wl-admin-surface .wl-stu-seo h4 {
+  margin: 0;
+  font-family: var(--f-caslon), 'Libre Caslon Text', Georgia, serif;
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--adm-ink);
+}
+.wl-admin-surface[data-theme='dark'] .wl-stu-seo h4 {
+  font-family: var(--f-ui), 'Inter', system-ui, sans-serif;
+  font-weight: 500;
+}
+.wl-admin-surface .wl-stu-seo-hide {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  color: var(--adm-muted);
+  font: 12px var(--f-ui), 'Inter', system-ui, sans-serif;
+  cursor: pointer;
+}
+.wl-admin-surface .wl-stu-seo-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.wl-admin-surface .wl-stu-seo-kws {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.wl-admin-surface .wl-stu-seo-kws span {
+  background: var(--adm-green-soft);
+  color: var(--adm-green);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font: 11px var(--f-ui), 'Inter', system-ui, sans-serif;
+  letter-spacing: 0.01em;
+}
+.wl-admin-surface .wl-stu-seo-rt {
+  font-family: var(--f-caslon), 'Libre Caslon Text', Georgia, serif;
+  font-size: 18px;
+  color: var(--adm-ink);
+}
+.wl-admin-surface[data-theme='dark'] .wl-stu-seo-rt {
+  font-family: var(--f-ui), 'Inter', system-ui, sans-serif;
+  font-weight: 500;
+}
+.wl-admin-surface .wl-stu-seo-meta,
+.wl-admin-surface .wl-stu-seo-related {
+  margin: 0;
+  color: var(--adm-ink-2);
+  font-family: var(--f-caslon), 'Libre Caslon Text', Georgia, serif;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.wl-admin-surface[data-theme='dark'] .wl-stu-seo-meta,
+.wl-admin-surface[data-theme='dark'] .wl-stu-seo-related {
+  font-family: var(--f-ui), 'Inter', system-ui, sans-serif;
+}
+
+/* Action bar */
+.wl-admin-surface .wl-stu-actions {
+  margin-top: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--adm-rule);
+  background: var(--adm-paper-alt);
+  border-radius: var(--adm-radius-md);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.wl-admin-surface .wl-stu-actions-spacer { flex: 1; }
+
+.wl-admin-surface .wl-stu-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-family: var(--f-ui), 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--adm-ink-2);
+}
+.wl-admin-surface .wl-stu-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.wl-admin-surface .wl-stu-toggle-track {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--adm-chip-track);
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.wl-admin-surface .wl-stu-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--adm-paper);
+  transition: left 0.15s;
+}
+.wl-admin-surface .wl-stu-toggle input:checked + .wl-stu-toggle-track {
+  background: var(--adm-green);
+}
+.wl-admin-surface .wl-stu-toggle input:checked + .wl-stu-toggle-track .wl-stu-toggle-thumb {
+  left: 16px;
+}
+.wl-admin-surface .wl-stu-toggle input:focus-visible + .wl-stu-toggle-track {
+  outline: 2px solid var(--adm-ink);
+  outline-offset: 2px;
+}
+.wl-admin-surface .wl-stu-toggle strong {
+  color: var(--adm-ink);
+  font-weight: 500;
+}
+.wl-admin-surface .wl-stu-toggle-help {
+  color: var(--adm-muted);
+}
+
+/* ── Right rail ───────────────────────────────────────────────────── */
+.wl-admin-surface .wl-stu-rail {
+  padding: 24px 22px;
+  background: var(--adm-paper-alt);
+  font-family: var(--f-ui), 'Inter', system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+@media (max-width: 1100px) {
+  .wl-admin-surface .wl-stu-rail {
+    border-top: 1px solid var(--adm-rule);
+  }
+}
+
+.wl-admin-surface .wl-stu-rail-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.wl-admin-surface .wl-stu-rail-h {
+  margin: 0;
+  font: 500 11px var(--f-mono), 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--adm-muted);
+}
+.wl-admin-surface .wl-stu-rail-loading,
+.wl-admin-surface .wl-stu-rail-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--adm-muted);
+}
+
+.wl-admin-surface .wl-stu-recent {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.wl-admin-surface .wl-stu-recent li {
+  border-top: 1px solid var(--adm-rule);
+}
+.wl-admin-surface .wl-stu-recent li:first-child {
+  border-top: 0;
+}
+.wl-admin-surface .wl-stu-recent a {
+  display: block;
+  padding: 10px 8px;
+  text-decoration: none;
+  color: var(--adm-ink);
+  border-radius: 4px;
+}
+.wl-admin-surface .wl-stu-recent a:hover {
+  background: var(--adm-hover);
+}
+.wl-admin-surface .wl-stu-recent-active {
+  background: var(--adm-card);
+  box-shadow: inset 0 0 0 1px var(--adm-rule);
+}
+.wl-admin-surface .wl-stu-recent-title {
+  display: block;
+  font-family: var(--f-caslon), 'Libre Caslon Text', Georgia, serif;
+  font-size: 14px;
+  line-height: 1.3;
+  color: var(--adm-ink);
+}
+.wl-admin-surface[data-theme='dark'] .wl-stu-recent-title {
+  font-family: var(--f-ui), 'Inter', system-ui, sans-serif;
+  font-weight: 500;
+}
+.wl-admin-surface .wl-stu-recent-meta {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--adm-muted);
+}
+.wl-admin-surface .wl-stu-recent-meta em {
+  font-style: normal;
+  text-transform: capitalize;
+}
+
+.wl-admin-surface .wl-stu-publish-target {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 0;
+  cursor: pointer;
+}
+.wl-admin-surface .wl-stu-publish-target input {
+  margin-top: 3px;
+}
+.wl-admin-surface .wl-stu-publish-name {
+  display: block;
+  font-size: 13px;
+  color: var(--adm-ink);
+}
+.wl-admin-surface .wl-stu-publish-hint {
+  display: block;
+  font-size: 11px;
+  color: var(--adm-muted);
+  font-family: var(--f-mono), 'JetBrains Mono', ui-monospace, monospace;
+  margin-top: 2px;
+}
+
+.wl-admin-surface .wl-stu-tip {
+  padding: 14px;
+  border: 1px solid var(--adm-rule);
+  background: var(--adm-card);
+  border-radius: var(--adm-radius-md);
+}
+.wl-admin-surface .wl-stu-tip-h {
+  font-family: var(--f-caslon), 'Libre Caslon Text', Georgia, serif;
+  font-size: 14px;
+  font-style: italic;
+  color: var(--adm-ink);
+}
+.wl-admin-surface[data-theme='dark'] .wl-stu-tip-h {
+  font-family: var(--f-ui), 'Inter', system-ui, sans-serif;
+  font-style: normal;
+  font-weight: 500;
+}
+.wl-admin-surface .wl-stu-tip p {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--adm-ink-2);
+  line-height: 1.55;
+}
+
+.wl-admin-surface .wl-stu-rail-foot {
+  border-top: 1px solid var(--adm-rule);
+  padding-top: 14px;
+}
+.wl-admin-surface .wl-stu-discard {
+  border: 0;
+  background: none;
+  color: var(--adm-red);
+  font: 12px var(--f-ui), 'Inter', system-ui, sans-serif;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.wl-admin-surface .wl-stu-discard:hover {
+  text-decoration: underline;
+}
