@@ -3157,3 +3157,60 @@ html[data-mood='ink'] .wl-surface::after {
   border-radius: 4px;
   max-width: 100%;
 }
+
+/* ─── LIMITED EDITIONS ───────────────────────────────────── */
+
+.wl-edition-badge {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  background: var(--paper-2);
+  border: 1px solid var(--rule-strong);
+  border-left: 3px solid var(--ink);
+  font-family: var(--f-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.wl-edition-badge .line-1 {
+  font-weight: 600;
+  color: var(--ink);
+}
+.wl-edition-badge .line-2 {
+  color: var(--ink-2);
+  font-style: italic;
+  text-transform: none;
+  font-family: var(--f-serif);
+  letter-spacing: 0;
+  font-size: 13px;
+}
+.wl-edition-badge .line-3 {
+  color: var(--ink-3);
+}
+.wl-edition-badge .line-3.sold-out {
+  color: var(--s-red);
+  font-weight: 600;
+}
+
+.wl-edition-soldout {
+  padding: 32px;
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  text-align: center;
+}
+.wl-edition-soldout h3 {
+  font-family: var(--f-display);
+  font-size: 28px;
+  margin: 0 0 12px;
+  color: var(--ink);
+}
+.wl-edition-soldout p {
+  font-family: var(--f-serif);
+  font-size: 15px;
+  color: var(--ink-2);
+  margin: 0 0 20px;
+  line-height: 1.55;
+}
