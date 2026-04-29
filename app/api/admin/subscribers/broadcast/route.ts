@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { pool, withTransaction } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 import { sendBroadcast } from '@/lib/email';
+import { sanitizeJournalHtml } from '@/lib/journal-html';
 import { logger } from '@/lib/logger';
 
 const Body = z.object({
@@ -22,10 +23,15 @@ export async function POST(req: Request) {
 
   const siteUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
+  // Defense in depth — even though admins are trusted, sanitize any HTML
+  // that pasted in unwanted scripting. Same allowed-tags whitelist as the
+  // journal body since these emails often link or excerpt journal content.
+  const cleanHtml = sanitizeJournalHtml(p.data.html);
+
   // Test sends bypass the log — they go to a single address and don't
   // need idempotency (admins can re-send tests at will).
   if (p.data.testTo) {
-    await sendBroadcast(p.data.subject, p.data.html, [p.data.testTo], {
+    await sendBroadcast(p.data.subject, cleanHtml, [p.data.testTo], {
       siteUrl,
       plainEmails: true,
     });
@@ -55,7 +61,7 @@ export async function POST(req: Request) {
        VALUES ($1, $2, 0, $3, $4)
        ON CONFLICT (idempotency_key) DO NOTHING
        RETURNING id`,
-      [p.data.subject, p.data.html, session.email, idemKey],
+      [p.data.subject, cleanHtml, session.email, idemKey],
     );
     if (claim.rowCount) logId = claim.rows[0].id;
   });
@@ -64,7 +70,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    await sendBroadcast(p.data.subject, p.data.html, subs, { siteUrl });
+    await sendBroadcast(p.data.subject, cleanHtml, subs, { siteUrl });
     await pool.query(
       `UPDATE broadcast_log SET recipient_count = $1 WHERE id = $2`,
       [subs.length, logId],
