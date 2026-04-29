@@ -5,7 +5,7 @@ import { pool } from '@/lib/db';
 import { OrderCard, type VariantOption } from '@/components/shop/OrderCard';
 import { PlateCard, type PlateCardData } from '@/components/site/PlateCard';
 import { plateNumber } from '@/lib/plate-number';
-import { getEditionStatus } from '@/lib/editions';
+import type { EditionStatus } from '@/lib/editions';
 
 export const revalidate = 60;
 
@@ -25,6 +25,9 @@ interface ArtworkRow {
   plate_idx: number;
   /** Total published artworks in the catalog. */
   plate_total: number;
+  edition_size: number | null;
+  signed: boolean;
+  sold_count: number;
 }
 
 interface RelatedQueryResult {
@@ -38,11 +41,14 @@ export default async function ArtworkPage({
 }) {
   const { slug } = await params;
 
+  // Single gating query now also pulls edition_size, signed, and the
+  // sold_count subquery — saves a separate getEditionStatus round-trip
+  // on the shop's highest-intent page (cache-miss path).
   const arts = await pool.query<ArtworkRow>(
     `WITH published AS (
        SELECT a.id, a.slug, a.title, a.artist_note, a.year_shot, a.location,
               a.image_web_url, a.image_width, a.image_height,
-              a.collection_id,
+              a.collection_id, a.edition_size, a.signed,
               ROW_NUMBER() OVER (ORDER BY a.display_order, a.id) AS plate_idx,
               COUNT(*) OVER () AS plate_total
        FROM artworks a
@@ -51,6 +57,15 @@ export default async function ArtworkPage({
      SELECT p.id, p.slug, p.title, p.artist_note, p.year_shot, p.location,
             p.image_web_url, p.image_width, p.image_height,
             p.plate_idx::int, p.plate_total::int,
+            p.edition_size, p.signed,
+            COALESCE((
+              SELECT COUNT(oi.id)::int
+              FROM order_items oi
+              JOIN artwork_variants v ON v.id = oi.variant_id
+              JOIN orders o ON o.id = oi.order_id
+              WHERE v.artwork_id = p.id
+                AND o.status NOT IN ('canceled', 'refunded')
+            ), 0) AS sold_count,
             c.slug AS collection_slug, c.title AS collection_title
      FROM published p
      LEFT JOIN collections c ON c.id = p.collection_id
@@ -60,11 +75,24 @@ export default async function ArtworkPage({
   if (!arts.rowCount) notFound();
   const art = arts.rows[0];
 
+  // Build EditionStatus from the row data (no extra query).
+  const isLimited = art.edition_size != null && art.edition_size > 0;
+  const edition: EditionStatus = {
+    isLimited,
+    editionSize: art.edition_size,
+    signed: art.signed,
+    soldCount: art.sold_count,
+    remaining: isLimited
+      ? Math.max(0, (art.edition_size as number) - art.sold_count)
+      : null,
+    soldOut: isLimited && art.sold_count >= (art.edition_size as number),
+  };
+
   // variants only need art.id; related only needs collection_slug + slug.
   // Fire both in parallel after the gating art lookup resolves — shaves a
   // round-trip off TTFB on every cache-miss of the shop's highest-intent
   // page.
-  const [variantsRes, relatedRes, edition] = await Promise.all([
+  const [variantsRes, relatedRes] = await Promise.all([
     pool.query<VariantOption>(
       `SELECT id, type, size, finish, price_cents FROM artwork_variants
        WHERE artwork_id = $1 AND active = TRUE
@@ -84,7 +112,6 @@ export default async function ArtworkPage({
           [art.collection_slug, art.slug],
         )
       : Promise.resolve<RelatedQueryResult>({ rows: [] }),
-    getEditionStatus(art.id),
   ]);
   const variants = variantsRes.rows;
   const related = relatedRes;
