@@ -67,6 +67,62 @@ export async function POST(req: Request) {
   }
 
   const byId = new Map<number, VariantRow>(rows.map((r) => [r.id, r]));
+
+  // Limited-edition guard: for each line item whose artwork has a
+  // non-null edition_size, ensure the requested quantity won't push
+  // total sold over the cap. Race-safe because we count completed
+  // orders at request time, not at session-create time.
+  const artworkIds = Array.from(new Set(rows.map((r) => r.artwork_id)));
+  if (artworkIds.length > 0) {
+    const editionCheck = await pool.query<{
+      artwork_id: number;
+      title: string;
+      edition_size: number | null;
+      sold: number;
+    }>(
+      `SELECT a.id AS artwork_id, a.title, a.edition_size,
+              COALESCE(
+                (
+                  SELECT COUNT(oi.id)::int
+                  FROM order_items oi
+                  JOIN artwork_variants vv ON vv.id = oi.variant_id
+                  JOIN orders o ON o.id = oi.order_id
+                  WHERE vv.artwork_id = a.id
+                    AND o.status NOT IN ('canceled', 'refunded')
+                ),
+                0
+              ) AS sold
+       FROM artworks a
+       WHERE a.id = ANY($1::int[])`,
+      [artworkIds],
+    );
+
+    // Sum requested quantities by artwork_id.
+    const requestedByArtwork = new Map<number, number>();
+    for (const l of lines) {
+      const v = byId.get(l.variantId);
+      if (!v) continue;
+      requestedByArtwork.set(
+        v.artwork_id,
+        (requestedByArtwork.get(v.artwork_id) ?? 0) + l.quantity,
+      );
+    }
+
+    for (const ed of editionCheck.rows) {
+      if (ed.edition_size == null) continue;
+      const requested = requestedByArtwork.get(ed.artwork_id) ?? 0;
+      if (ed.sold + requested > ed.edition_size) {
+        const remaining = Math.max(0, ed.edition_size - ed.sold);
+        return NextResponse.json(
+          {
+            error: `"${ed.title}" sold out — please pick another. ${remaining} remaining.`,
+          },
+          { status: 400 },
+        );
+      }
+    }
+  }
+
   const siteUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
   // Free shipping threshold lives in lib/pricing.ts so the storefront can
