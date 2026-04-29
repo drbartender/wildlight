@@ -1,8 +1,13 @@
 // Vercel cron: 0 9 1 */3 * (9 AM on 1st of every 3rd month).
-// Vercel signs cron requests; we additionally accept an
-// authorization header for local testing.
+//
+// Vercel cron sends GET (not POST), so the handler exports GET.
+// Auth: Vercel signs cron requests with `Authorization: Bearer ${CRON_SECRET}`
+// when CRON_SECRET is set in the project. We use timing-safe comparison
+// against CRON_SECRET — no presence-only header check (which would let
+// any caller forge `x-vercel-cron-signature`).
 export const runtime = 'nodejs';
 export const maxDuration = 60;
+import crypto from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
 import { researchSeoTrends, type SeoAngle } from '@/lib/studio';
@@ -10,16 +15,22 @@ import { sendStudioReminderEmail } from '@/lib/email';
 import { logger } from '@/lib/logger';
 
 function isAuthorizedCron(req: Request): boolean {
-  // Vercel sets x-vercel-cron-signature on cron-triggered requests.
-  if (req.headers.get('x-vercel-cron-signature')) return true;
-  // Local + manual trigger: shared secret.
-  const authz = req.headers.get('authorization');
   const secret = process.env.CRON_SECRET;
-  if (secret && authz === `Bearer ${secret}`) return true;
-  return false;
+  if (!secret) return false;
+  const authz = req.headers.get('authorization');
+  if (!authz) return false;
+  const expected = `Bearer ${secret}`;
+  const given = Buffer.from(authz);
+  const want = Buffer.from(expected);
+  if (given.length !== want.length) return false;
+  try {
+    return crypto.timingSafeEqual(given, want);
+  } catch {
+    return false;
+  }
 }
 
-export async function POST(req: Request) {
+export async function GET(req: Request) {
   if (!isAuthorizedCron(req)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
@@ -39,28 +50,35 @@ export async function POST(req: Request) {
     logger.error('studio reminder — angles research failed', err);
   }
 
-  // Stats for the email body.
-  const statsRes = await pool.query<{
-    drafts: number;
-    published: number;
-    last_pub: string | null;
-  }>(
-    `SELECT
-       COUNT(*) FILTER (WHERE published = FALSE)::int AS drafts,
-       COUNT(*) FILTER (WHERE published = TRUE)::int AS published,
-       MAX(published_at)::text AS last_pub
-     FROM blog_posts`,
-  );
-  const stats = statsRes.rows[0] ?? { drafts: 0, published: 0, last_pub: null };
+  // Stats for the email body. DB hiccup shouldn't kill the reminder; fall
+  // back to zeros and proceed.
+  let stats = { drafts: 0, published: 0, last_pub: null as string | null };
+  try {
+    const statsRes = await pool.query<typeof stats>(
+      `SELECT
+         COUNT(*) FILTER (WHERE published = FALSE)::int AS drafts,
+         COUNT(*) FILTER (WHERE published = TRUE)::int AS published,
+         MAX(published_at)::text AS last_pub
+       FROM blog_posts`,
+    );
+    stats = statsRes.rows[0] ?? stats;
+  } catch (err) {
+    logger.error('studio reminder — stats lookup failed', err);
+  }
 
   // Persist log entry first (so even if email send fails we have a record).
-  const log = await pool.query<{ id: number }>(
-    `INSERT INTO studio_reminders (delivered, trend_angles)
-     VALUES (FALSE, $1)
-     RETURNING id`,
-    [JSON.stringify(angles)],
-  );
-  const logId = log.rows[0].id;
+  let logId = 0;
+  try {
+    const log = await pool.query<{ id: number }>(
+      `INSERT INTO studio_reminders (delivered, trend_angles)
+       VALUES (FALSE, $1)
+       RETURNING id`,
+      [JSON.stringify(angles)],
+    );
+    logId = log.rows[0].id;
+  } catch (err) {
+    logger.error('studio reminder — log insert failed', err);
+  }
 
   let delivered = false;
   try {
@@ -76,10 +94,12 @@ export async function POST(req: Request) {
     logger.error('studio reminder email send failed', err);
   }
 
-  await pool.query(
-    `UPDATE studio_reminders SET delivered = $1 WHERE id = $2`,
-    [delivered, logId],
-  );
+  if (logId > 0) {
+    await pool.query(
+      `UPDATE studio_reminders SET delivered = $1 WHERE id = $2`,
+      [delivered, logId],
+    );
+  }
 
   return NextResponse.json({ delivered, logId, angles: angles.length });
 }
