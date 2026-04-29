@@ -13,10 +13,26 @@ export interface PlateCardData {
   min_price_cents?: number | null;
 }
 
-export function PlateCard({ item }: { item: PlateCardData }) {
+export interface PlateCardProps {
+  item: PlateCardData;
+  /** Hide the price line on portfolio + marketing-home cards. Default true. */
+  showPrice?: boolean;
+  /**
+   * Link target prefix. Defaults to `/shop/artwork` so cards anchor in the
+   * shop's purchase flow. Pass an alternate base for portfolio-only contexts
+   * if needed.
+   */
+  linkBase?: string;
+}
+
+export function PlateCard({
+  item,
+  showPrice = true,
+  linkBase = '/shop/artwork',
+}: PlateCardProps) {
   const plate = plateNumber(item.slug);
   const fromStr =
-    item.min_price_cents != null && item.min_price_cents > 0
+    showPrice && item.min_price_cents != null && item.min_price_cents > 0
       ? `$${Math.floor(item.min_price_cents / 100)}+`
       : null;
 
@@ -26,7 +42,7 @@ export function PlateCard({ item }: { item: PlateCardData }) {
 
   return (
     <Link
-      href={`/shop/artwork/${item.slug}`}
+      href={`${linkBase}/${item.slug}`}
       className="wl-plate-card"
       style={{ textDecoration: 'none', color: 'inherit' }}
     >
