@@ -31,7 +31,7 @@ export function MoodSwitch({ size = 'md' }: { size?: 'sm' | 'md' }) {
 
   const options: { key: Mood; label: string }[] = [
     { key: 'bone', label: 'Bone' },
-    { key: 'ink', label: 'Ink' },
+    { key: 'ink', label: 'Black' },
   ];
 
   return (
