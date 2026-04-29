@@ -14,28 +14,41 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       ),
     ]);
     return [
+      // Marketing
       { url: `${base}/`, lastModified: new Date() },
-      { url: `${base}/shop`, lastModified: new Date() },
-      { url: `${base}/shop/collections`, lastModified: new Date() },
+      { url: `${base}/portfolio`, lastModified: new Date() },
+      { url: `${base}/services/portraits`, lastModified: new Date() },
       { url: `${base}/about`, lastModified: new Date() },
       { url: `${base}/contact`, lastModified: new Date() },
-      ...collections.rows.map((c) => ({
-        url: `${base}/shop/collections/${c.slug}`,
-        lastModified: c.created_at,
-      })),
+      // Shop
+      { url: `${base}/shop`, lastModified: new Date() },
+      { url: `${base}/shop/collections`, lastModified: new Date() },
+      // Per-collection portfolio + shop
+      ...collections.rows.flatMap((c) => [
+        {
+          url: `${base}/portfolio/${c.slug}`,
+          lastModified: c.created_at,
+        },
+        {
+          url: `${base}/shop/collections/${c.slug}`,
+          lastModified: c.created_at,
+        },
+      ]),
+      // Per-artwork shop pages
       ...artworks.rows.map((a) => ({
         url: `${base}/shop/artwork/${a.slug}`,
         lastModified: a.updated_at,
       })),
     ];
   } catch {
-    // DB may not be reachable during build/preview — fall back to the static routes only.
     return [
       { url: `${base}/`, lastModified: new Date() },
-      { url: `${base}/shop`, lastModified: new Date() },
-      { url: `${base}/shop/collections`, lastModified: new Date() },
+      { url: `${base}/portfolio`, lastModified: new Date() },
+      { url: `${base}/services/portraits`, lastModified: new Date() },
       { url: `${base}/about`, lastModified: new Date() },
       { url: `${base}/contact`, lastModified: new Date() },
+      { url: `${base}/shop`, lastModified: new Date() },
+      { url: `${base}/shop/collections`, lastModified: new Date() },
     ];
   }
 }
