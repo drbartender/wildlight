@@ -428,3 +428,10 @@ CREATE TABLE IF NOT EXISTS studio_reminders (
   delivered     BOOLEAN NOT NULL DEFAULT FALSE,
   trend_angles  JSONB
 );
+
+-- Limited editions: signed flag (paired with the existing
+-- artworks.edition_size from Phase 1). signed = print is signed by
+-- the artist; surfaces as a badge on the storefront when true AND
+-- edition_size is non-null.
+ALTER TABLE artworks
+  ADD COLUMN IF NOT EXISTS signed BOOLEAN NOT NULL DEFAULT FALSE;
