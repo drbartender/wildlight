@@ -125,6 +125,10 @@ export function JournalEditor({ initial, isEdit }: JournalEditorProps) {
       const j = (await r.json()) as { id: number; slug: string };
       if (!isEdit) {
         router.push(`/admin/journal/${j.id}`);
+      } else {
+        // Server may have normalized slug or stamped published_at —
+        // refresh the page so the editor sees the canonical state.
+        router.refresh();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'save failed');
@@ -148,6 +152,9 @@ export function JournalEditor({ initial, isEdit }: JournalEditorProps) {
         throw new Error(e.error || 'publish toggle failed');
       }
       setPublished((p) => !p);
+      // First publish stamps published_at server-side — refresh so the
+      // editor reflects the canonical timestamp.
+      router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'publish toggle failed');
     } finally {
