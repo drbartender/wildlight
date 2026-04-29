@@ -652,3 +652,59 @@ export async function sendBroadcast(
   }
   return results;
 }
+
+// ─── Studio quarterly reminder ───────────────────────────────────
+
+export interface StudioReminderData {
+  to: string;
+  siteUrl: string;
+  stats: { drafts: number; published: number; last_pub: string | null };
+  angles: Array<{ title: string; rationale: string; keywords: string[] }>;
+}
+
+function escapeHtmlAttr(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    c === '&'
+      ? '&amp;'
+      : c === '<'
+        ? '&lt;'
+        : c === '>'
+          ? '&gt;'
+          : c === '"'
+            ? '&quot;'
+            : '&#39;',
+  );
+}
+
+export async function sendStudioReminderEmail(data: StudioReminderData) {
+  const studioUrl = `${data.siteUrl.replace(/\/$/, '')}/admin/studio`;
+  const lastPubLine = data.stats.last_pub
+    ? `Last chapter published: <b>${new Date(data.stats.last_pub).toLocaleDateString()}</b>.`
+    : `No chapters published yet.`;
+  const anglesHtml =
+    data.angles.length > 0
+      ? `<h3 style="margin-top:24px;">Three angles to consider</h3><ul>${data.angles
+          .slice(0, 3)
+          .map(
+            (a) =>
+              `<li><b>${escapeHtmlAttr(a.title)}</b><br/><span style="color:#666;font-size:13px">${escapeHtmlAttr(a.rationale)}</span></li>`,
+          )
+          .join('')}</ul>`
+      : '';
+  const html = `<!doctype html><html><body style="font-family:Georgia,serif;max-width:560px;margin:24px auto;padding:24px;color:#16130c;line-height:1.55;">
+<h1 style="font-weight:400;font-size:24px;">Quarterly Wildlight Studio nudge</h1>
+<p>${lastPubLine} You have <b>${data.stats.drafts}</b> draft${data.stats.drafts === 1 ? '' : 's'} in flight and <b>${data.stats.published}</b> published.</p>
+<p>One click and you're at the studio:</p>
+<p><a href="${studioUrl}" style="background:#16130c;color:#f2ede1;padding:12px 20px;text-decoration:none;display:inline-block;">Open the studio →</a></p>
+${anglesHtml}
+<p style="color:#888;font-size:12px;margin-top:32px;">— Wildlight Imagery cron, sent quarterly.</p>
+</body></html>`;
+
+  // Reuse sendBroadcast plain-emails path so we don't add a Resend caller.
+  await sendBroadcast(
+    'Quarterly Wildlight Studio nudge',
+    html,
+    [data.to],
+    { siteUrl: data.siteUrl, plainEmails: true },
+  );
+}
