@@ -21,6 +21,7 @@ import {
 const ALLOWED_ORIGINS = [
   'https://wildlightimagery.shop',
   'https://www.wildlightimagery.shop',
+  'https://admin.wildlightimagery.shop',
   'https://wildlightimagery.com',
   'https://www.wildlightimagery.com',
   'https://wildlight-*.vercel.app',
