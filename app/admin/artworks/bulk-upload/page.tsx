@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
+import type { PrintResolution } from '@/lib/print-resolution';
 
 interface NeedsRow {
   id: number;
@@ -18,7 +19,7 @@ type RowState =
   | { kind: 'queued' }
   | { kind: 'uploading'; pct: number }
   | { kind: 'processing' }
-  | { kind: 'done'; webUrl: string }
+  | { kind: 'done'; webUrl: string; resolution: PrintResolution | null }
   | { kind: 'error'; message: string };
 
 async function presign(
@@ -59,10 +60,20 @@ function putWithProgress(
   });
 }
 
+interface FinalizeResponse {
+  artworkId: number;
+  slug: string;
+  image_web_url: string;
+  image_print_url: string;
+  print_width: number;
+  print_height: number;
+  resolution: PrintResolution;
+}
+
 async function finalizeUpdate(
   artworkId: number,
   stagedKey: string,
-): Promise<{ image_web_url: string }> {
+): Promise<FinalizeResponse> {
   const r = await fetch('/api/admin/artworks/bulk-upload/finalize', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -78,7 +89,7 @@ async function finalizeUpdate(
 async function finalizeCreate(
   stagedKey: string,
   collectionId: number | null,
-): Promise<{ artworkId: number; slug: string; image_web_url: string }> {
+): Promise<FinalizeResponse> {
   const r = await fetch('/api/admin/artworks/bulk-upload/finalize', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -121,7 +132,13 @@ interface CreatedRow {
     | { kind: 'queued' }
     | { kind: 'uploading'; pct: number }
     | { kind: 'processing' }
-    | { kind: 'done'; artworkId: number; slug: string; title: string }
+    | {
+        kind: 'done';
+        artworkId: number;
+        slug: string;
+        title: string;
+        resolution: PrintResolution | null;
+      }
     | { kind: 'error'; message: string };
 }
 
@@ -234,7 +251,11 @@ export default function BulkUploadPage() {
         );
         setRowState(row.id, { kind: 'processing' });
         const res = await finalizeUpdate(row.id, key);
-        setRowState(row.id, { kind: 'done', webUrl: res.image_web_url });
+        setRowState(row.id, {
+          kind: 'done',
+          webUrl: res.image_web_url,
+          resolution: res.resolution ?? null,
+        });
       } catch (err) {
         setRowState(row.id, {
           kind: 'error',
@@ -272,6 +293,7 @@ export default function BulkUploadPage() {
           artworkId: res.artworkId,
           slug: res.slug,
           title,
+          resolution: res.resolution ?? null,
         });
         void reload();
       } catch (err) {
@@ -397,9 +419,14 @@ export default function BulkUploadPage() {
                     <div className="wl-bulk-row-title">{c.filename}</div>
                     <div className="wl-bulk-row-sub">
                       {c.state.kind === 'done' && (
-                        <a href={`/admin/artworks/${c.state.artworkId}`}>
-                          → &ldquo;{c.state.title}&rdquo; ({c.state.slug}) — review &amp; publish
-                        </a>
+                        <>
+                          <a href={`/admin/artworks/${c.state.artworkId}`}>
+                            → &ldquo;{c.state.title}&rdquo; ({c.state.slug}) — review &amp; publish
+                          </a>
+                          {c.state.resolution && (
+                            <ResolutionBadge resolution={c.state.resolution} />
+                          )}
+                        </>
                       )}
                       {c.state.kind === 'error' && (
                         <span className="wl-bulk-error">{c.state.message}</span>
@@ -493,6 +520,9 @@ function BulkRow({
           ) : (
             <>
               {row.collection_title || 'no collection'} · {row.slug}
+              {state.kind === 'done' && state.resolution && (
+                <ResolutionBadge resolution={state.resolution} />
+              )}
             </>
           )}
         </div>
@@ -545,5 +575,21 @@ function BulkRow({
         )}
       </div>
     </li>
+  );
+}
+
+function ResolutionBadge({ resolution }: { resolution: PrintResolution }) {
+  const { level, effectiveDpi, width, height, message, maxGoodEdgeInches } =
+    resolution;
+  return (
+    <span
+      className={`wl-bulk-res wl-bulk-res-${level}`}
+      title={message}
+      aria-label={message}
+    >
+      {level === 'good'
+        ? `✓ ${width}×${height} · ${effectiveDpi} DPI`
+        : `⚠ ${width}×${height} · ${effectiveDpi} DPI · max ${maxGoodEdgeInches}"`}
+    </span>
   );
 }

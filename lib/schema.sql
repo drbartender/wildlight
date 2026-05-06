@@ -481,3 +481,12 @@ ALTER TABLE artworks
 -- every checkout submit. Critical once order_items grows past ~10K.
 CREATE INDEX IF NOT EXISTS idx_order_items_variant
   ON order_items(variant_id);
+
+-- Print master pixel dimensions (separate from image_width/image_height,
+-- which track the derived web JPEG, capped at 2000px long edge). Captured
+-- at upload via sharp.metadata() so the admin can see whether a master is
+-- high enough resolution for the largest sold size (24×36"). NULL until
+-- upload or backfill runs (scripts/backfill-print-dims.ts).
+ALTER TABLE artworks
+  ADD COLUMN IF NOT EXISTS print_width  INT,
+  ADD COLUMN IF NOT EXISTS print_height INT;

@@ -1,10 +1,12 @@
 export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 import { fileTypeFromBuffer } from 'file-type';
+import sharp from 'sharp';
 import { pool, withTransaction } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 import { uploadPublic, uploadPrivate } from '@/lib/r2';
 import { slugify, uniqueSlug } from '@/lib/slug';
+import { classifyPrintResolution } from '@/lib/print-resolution';
 
 const WEB_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 const PRINT_MAX_BYTES = 80 * 1024 * 1024; // 80 MB
@@ -59,6 +61,8 @@ export async function POST(req: Request) {
   const webUrl = await uploadPublic(webKey, webBuf, webSniff.mime);
 
   let printKey: string | null = null;
+  let printWidth: number | null = null;
+  let printHeight: number | null = null;
   if (printFile instanceof File && printFile.size > 0) {
     if (printFile.size > PRINT_MAX_BYTES) {
       return NextResponse.json(
@@ -74,6 +78,13 @@ export async function POST(req: Request) {
         { status: 400 },
       );
     }
+    // Header-only metadata read; orientations 5–8 swap w/h after EXIF rotation.
+    const meta = await sharp(printBuf).metadata();
+    if (meta.width && meta.height) {
+      const rotated = (meta.orientation ?? 1) >= 5 && (meta.orientation ?? 1) <= 8;
+      printWidth = rotated ? meta.height : meta.width;
+      printHeight = rotated ? meta.width : meta.height;
+    }
     const printExt =
       printSniff.ext === 'png' ? 'png' : printSniff.ext === 'tif' ? 'tif' : 'jpg';
     printKey = `artworks-print/${collectionSlugFolder}/${slug}.${printExt}`;
@@ -83,12 +94,24 @@ export async function POST(req: Request) {
   let id = 0;
   await withTransaction(async (client) => {
     const r = await client.query<{ id: number }>(
-      `INSERT INTO artworks (collection_id, slug, title, artist_note, image_web_url, image_print_url, status)
-       VALUES ($1, $2, $3, $4, $5, $6, 'draft') RETURNING id`,
-      [collectionId, slug, title, artistNote, webUrl, printKey],
+      `INSERT INTO artworks
+         (collection_id, slug, title, artist_note,
+          image_web_url, image_print_url,
+          print_width, print_height, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'draft') RETURNING id`,
+      [
+        collectionId, slug, title, artistNote,
+        webUrl, printKey,
+        printWidth, printHeight,
+      ],
     );
     id = r.rows[0].id;
   });
 
-  return NextResponse.json({ id, slug });
+  const resolution =
+    printWidth && printHeight
+      ? classifyPrintResolution(printWidth, printHeight)
+      : null;
+
+  return NextResponse.json({ id, slug, resolution });
 }

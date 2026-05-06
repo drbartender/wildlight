@@ -1111,6 +1111,24 @@
 .wl-adm-print-card .state.miss {
   color: var(--adm-red);
 }
+.wl-adm-print-card .state.res {
+  margin-top: 6px;
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+.wl-adm-print-card .state.res-good {
+  color: var(--adm-green);
+}
+.wl-adm-print-card .state.res-low {
+  color: var(--adm-amber);
+}
+.wl-adm-print-card .state.res-too_low {
+  color: var(--adm-red);
+}
+.wl-adm-print-card .state.res-unknown {
+  color: var(--adm-muted);
+}
 .wl-adm-print-card .path {
   font-family: var(--f-mono), 'JetBrains Mono', monospace;
   font-size: 11px;
@@ -2544,6 +2562,31 @@
 }
 .wl-bulk-error { color: var(--adm-red); }
 .wl-bulk-created { margin-top: 16px; }
+
+/* Inline resolution badge in bulk-upload row sub-line. Matches the
+   admin print-card colour bands (good/low/too_low). */
+.wl-bulk-res {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  border-radius: 4px;
+  vertical-align: baseline;
+}
+.wl-bulk-res-good {
+  color: var(--adm-green);
+  background: color-mix(in oklab, var(--adm-green) 10%, transparent);
+}
+.wl-bulk-res-low {
+  color: var(--adm-amber);
+  background: color-mix(in oklab, var(--adm-amber) 14%, transparent);
+}
+.wl-bulk-res-too_low {
+  color: var(--adm-red);
+  background: color-mix(in oklab, var(--adm-red) 14%, transparent);
+}
 
 .wl-bulk-cleanup {
   display: flex; align-items: center; justify-content: space-between;

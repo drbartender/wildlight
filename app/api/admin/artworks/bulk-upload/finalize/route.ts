@@ -14,6 +14,7 @@ import {
   deletePublic,
 } from '@/lib/r2';
 import { deriveWebFromPrint } from '@/lib/image-derive';
+import { classifyPrintResolution } from '@/lib/print-resolution';
 import { slugify } from '@/lib/slug';
 import { draftArtworkMetadata } from '@/lib/ai-draft';
 import { readExifFromBuffer } from '@/lib/exif';
@@ -240,9 +241,13 @@ export async function POST(req: Request) {
     await copyAndDeletePrivate(input.stagedKey, printKey);
     await pool.query(
       `UPDATE artworks
-       SET image_web_url = $1, image_print_url = $2, updated_at = NOW()
-       WHERE id = $3`,
-      [webUrl, printKey, artworkId],
+       SET image_web_url   = $1,
+           image_print_url = $2,
+           print_width     = $3,
+           print_height    = $4,
+           updated_at      = NOW()
+       WHERE id = $5`,
+      [webUrl, printKey, derived.masterWidth, derived.masterHeight, artworkId],
     );
   } catch (err) {
     logger.error('finalize: canonical write or DB update failed', err, {
@@ -267,10 +272,18 @@ export async function POST(req: Request) {
     }
   }
 
+  const resolution = classifyPrintResolution(
+    derived.masterWidth,
+    derived.masterHeight,
+  );
+
   return NextResponse.json({
     artworkId,
     slug,
     image_web_url: webUrl,
     image_print_url: printKey,
+    print_width: derived.masterWidth,
+    print_height: derived.masterHeight,
+    resolution,
   });
 }

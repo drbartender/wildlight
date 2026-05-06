@@ -52,4 +52,15 @@ describe('deriveWebFromPrint', () => {
     const meta = await sharp(out.buf).metadata();
     expect(meta.icc).toBeUndefined();
   });
+
+  it('returns master dimensions independent of resize output', async () => {
+    const input = await makeJpeg(8000, 5000);
+    const out = await deriveWebFromPrint(input);
+    expect(out.masterWidth).toBe(8000);
+    expect(out.masterHeight).toBe(5000);
+    // Web is still capped at 2000 on long edge
+    const meta = await sharp(out.buf).metadata();
+    expect(meta.width).toBe(2000);
+    expect(meta.height).toBe(1250);
+  });
 });

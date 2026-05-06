@@ -1,12 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useState, use } from 'react';
+import { useCallback, useEffect, useMemo, useState, use } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { VariantTable, type VRow } from '@/components/admin/VariantTable';
 import { AdminPill } from '@/components/admin/AdminPill';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
 import { AdminField } from '@/components/admin/AdminField';
+import { classifyPrintResolution } from '@/lib/print-resolution';
 
 interface Artwork {
   id: number;
@@ -19,6 +20,8 @@ interface Artwork {
   image_print_url: string | null;
   image_width: number | null;
   image_height: number | null;
+  print_width: number | null;
+  print_height: number | null;
   status: string;
   collection_id: number | null;
   collection_title: string | null;
@@ -146,6 +149,10 @@ export default function ArtworkEditPage({
 
   const a = data.artwork;
   const activeVariants = data.variants.filter((v) => v.active).length;
+  const printResolution = useMemo(() => {
+    if (!a.print_width || !a.print_height) return null;
+    return classifyPrintResolution(a.print_width, a.print_height);
+  }, [a.print_width, a.print_height]);
 
   return (
     <>
@@ -202,6 +209,46 @@ export default function ArtworkEditPage({
                     </svg>
                     Uploaded · R2 private
                   </div>
+                  {printResolution ? (
+                    <div
+                      className={`state res res-${printResolution.level}`}
+                      title={printResolution.message}
+                    >
+                      {printResolution.level === 'good' ? (
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <path d="M20 6L9 17l-5-5" />
+                        </svg>
+                      ) : (
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <path d="M12 9v4M12 17h.01" />
+                          <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                        </svg>
+                      )}
+                      <span>
+                        {a.print_width}×{a.print_height} · {printResolution.effectiveDpi} DPI at 24"
+                        {printResolution.level !== 'good' &&
+                          ` · max good size ${printResolution.maxGoodEdgeInches}"`}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="state res res-unknown">
+                      <span>Resolution unknown — re-upload or run backfill.</span>
+                    </div>
+                  )}
                   <div className="path">{a.image_print_url}</div>
                 </>
               ) : (
