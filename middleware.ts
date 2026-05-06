@@ -22,27 +22,21 @@ export function middleware(req: NextRequest) {
     /\.[a-z0-9]+$/i.test(path);
 
   if (host === ADMIN_HOST) {
-    // 308 normalize legacy /admin/* URLs to clean paths. Existing internal
-    // links and redirects (`<Link href="/admin/orders">`, `redirect('/admin')`)
-    // get bounced once and then rewritten back below — so the URL bar shows
-    // `/orders` instead of `/admin/orders`.
-    //
-    // Soft client navigations from `router.push('/admin/...')` arrive as RSC
-    // fetches; the App Router client does not reliably follow middleware
-    // redirects on those, and renders not-found.tsx instead. Pass them
-    // through so the existing /admin/[...] route serves directly. URL bar
-    // ends up showing /admin/... in that case — a refresh re-runs the
-    // redirect and restores the clean URL.
-    if (path === '/admin' || path.startsWith('/admin/')) {
-      const isRSC = req.headers.has('rsc') || req.headers.has('next-router-state-tree');
-      if (isRSC) return NextResponse.next();
-      const dest = url.clone();
-      dest.pathname = path.replace(/^\/admin/, '') || '/';
-      return NextResponse.redirect(dest, 308);
-    }
-
-    // Routes with their own files outside /admin/* — serve as-is.
-    if (path === '/login' || path.startsWith('/api/') || isStaticOrInternal) {
+    // /admin/* and the root admin routes serve directly. We previously
+    // redirected /admin/foo → /foo to keep the URL bar tidy, but Next.js 16
+    // strips RSC headers in middleware so we can't differentiate soft-nav
+    // RSC fetches from hard navigations — and redirects on RSC fetches
+    // render not-found.tsx instead of being followed. Letting /admin/* serve
+    // as-is keeps every internal Link / router.push working. The URL bar
+    // ends up showing /admin/... for internal navigation; bare /... paths
+    // still rewrite below for direct visitors.
+    if (
+      path === '/admin' ||
+      path.startsWith('/admin/') ||
+      path === '/login' ||
+      path.startsWith('/api/') ||
+      isStaticOrInternal
+    ) {
       return NextResponse.next();
     }
 
