@@ -1,4 +1,4 @@
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import {
   signAdminToken,
@@ -12,6 +12,21 @@ const COOKIE = 'wl_admin';
 const THIRTY_DAYS = 60 * 60 * 24 * 30;
 
 export async function setAdminSession(payload: AdminTokenPayload) {
+  // Defense-in-depth: never mint the admin cookie on a non-admin host. The
+  // middleware already redirects cookie-minting endpoints (/login,
+  // /api/auth/login) to ADMIN_HOST, but if a future endpoint forgets to do
+  // that — or middleware is bypassed — the cookie would otherwise scope to
+  // apex and become a cross-host credential. Throw instead.
+  const adminHost = process.env.ADMIN_HOST?.toLowerCase();
+  if (adminHost) {
+    const h = await headers();
+    const host = (h.get('host') ?? '').split(':')[0].toLowerCase();
+    if (host !== adminHost) {
+      throw new Error(
+        `setAdminSession refused on host '${host}' — must be called on ADMIN_HOST`,
+      );
+    }
+  }
   const token = signAdminToken(payload);
   const c = await cookies();
   c.set(COOKIE, token, {

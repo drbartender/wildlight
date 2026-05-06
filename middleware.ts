@@ -48,17 +48,23 @@ export function middleware(req: NextRequest) {
     return NextResponse.rewrite(rewritten);
   }
 
-  // Off-host (apex, www): keep the admin login surface bound to the admin
-  // subdomain so the session cookie can never be minted on apex. Redirect:
+  // Off-host (apex, www): keep the entire admin surface bound to the admin
+  // subdomain so the session cookie can never be minted on or replayed
+  // against apex. Redirect:
   //   - /admin/*           → admin host, with the /admin prefix stripped
   //   - /login             → admin host /login (so the form posts there)
   //   - /api/auth/login    → admin host (so setAdminSession scopes the
   //                          cookie to admin.<host>, not apex)
+  //   - /api/admin/*       → admin host (defense-in-depth — if a cookie
+  //                          ever ends up scoped to apex, the redirect
+  //                          stops the apex-scoped cookie from being
+  //                          replayed against admin endpoints)
   if (
     path === '/admin' ||
     path.startsWith('/admin/') ||
     path === '/login' ||
-    path === '/api/auth/login'
+    path === '/api/auth/login' ||
+    path.startsWith('/api/admin/')
   ) {
     const dest = url.clone();
     dest.host = ADMIN_HOST;
