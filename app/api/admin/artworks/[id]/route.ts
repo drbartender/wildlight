@@ -3,9 +3,14 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { pool, parsePathId, withTransaction } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
+import { requireSameOrigin } from '@/lib/origin-check';
 import { applyTemplate, type TemplateKey } from '@/lib/variant-templates';
 import { publishArtworks } from '@/lib/publish-artworks';
 import { ConflictError, NotFoundError } from '@/lib/errors';
+
+function isFkViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23503';
+}
 
 export async function GET(
   _req: Request,
@@ -70,6 +75,7 @@ export async function PATCH(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  await requireSameOrigin();
   await requireAdmin();
   const { id: raw } = await ctx.params;
   const id = parsePathId(raw);
@@ -137,6 +143,14 @@ export async function PATCH(
     if (err instanceof NotFoundError) {
       return NextResponse.json({ error: 'not found' }, { status: 404 });
     }
+    if (isFkViolation(err)) {
+      // e.g. collection_id pointing at a deleted collection. The FK rejects
+      // before our update lands; surface as a friendly 400 instead of 500.
+      return NextResponse.json(
+        { error: 'referenced row does not exist' },
+        { status: 400 },
+      );
+    }
     throw err;
   }
 
@@ -147,10 +161,44 @@ export async function DELETE(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  await requireSameOrigin();
   await requireAdmin();
   const { id: raw } = await ctx.params;
   const id = parsePathId(raw);
   if (id == null) return NextResponse.json({ error: 'invalid id' }, { status: 400 });
-  await pool.query('DELETE FROM artworks WHERE id = $1', [id]);
+  // Block delete when the artwork has any non-canceled order_items
+  // referencing its variants. The schema's ON DELETE SET NULL on
+  // order_items.variant_id would silently sever the live link to historical
+  // sales (the snapshot JSONB preserves data, but live joins like the
+  // sold-count query would undercount). Steer admins to "Retire" instead.
+  const sold = await pool.query<{ sold: number }>(
+    `SELECT COUNT(oi.id)::int AS sold
+     FROM order_items oi
+     JOIN artwork_variants vv ON vv.id = oi.variant_id
+     JOIN orders o ON o.id = oi.order_id
+     WHERE vv.artwork_id = $1
+       AND o.status NOT IN ('canceled', 'refunded')`,
+    [id],
+  );
+  if ((sold.rows[0]?.sold ?? 0) > 0) {
+    return NextResponse.json(
+      {
+        error:
+          'Cannot delete: artwork has sold orders. Retire it instead to hide it from the shop while preserving order history.',
+      },
+      { status: 409 },
+    );
+  }
+  try {
+    await pool.query('DELETE FROM artworks WHERE id = $1', [id]);
+  } catch (err) {
+    if (isFkViolation(err)) {
+      return NextResponse.json(
+        { error: 'Cannot delete: artwork is still referenced. Retire it instead.' },
+        { status: 409 },
+      );
+    }
+    throw err;
+  }
   return NextResponse.json({ ok: true });
 }

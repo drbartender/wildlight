@@ -3,7 +3,12 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { pool, withTransaction } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
+import { requireSameOrigin } from '@/lib/origin-check';
 import { publishArtworks } from '@/lib/publish-artworks';
+
+function isFkViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23503';
+}
 
 export async function GET(req: Request) {
   await requireAdmin();
@@ -57,6 +62,7 @@ const BulkBody = z.object({
 });
 
 export async function POST(req: Request) {
+  await requireSameOrigin();
   await requireAdmin();
   const parsed = BulkBody.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
@@ -81,15 +87,64 @@ export async function POST(req: Request) {
       [ids],
     );
   } else if (action === 'delete') {
-    await pool.query('DELETE FROM artworks WHERE id = ANY($1)', [ids]);
+    // Same sold-count gate as the per-artwork DELETE — block the whole
+    // batch if any selected artwork has live order_items references.
+    const blocked = await pool.query<{ id: number; title: string }>(
+      `SELECT a.id, a.title
+       FROM artworks a
+       WHERE a.id = ANY($1)
+         AND EXISTS (
+           SELECT 1 FROM order_items oi
+           JOIN artwork_variants vv ON vv.id = oi.variant_id
+           JOIN orders o ON o.id = oi.order_id
+           WHERE vv.artwork_id = a.id
+             AND o.status NOT IN ('canceled', 'refunded')
+         )`,
+      [ids],
+    );
+    if (blocked.rowCount && blocked.rowCount > 0) {
+      const titles = blocked.rows
+        .slice(0, 3)
+        .map((r) => r.title)
+        .join(', ');
+      const more =
+        blocked.rowCount > 3 ? ` and ${blocked.rowCount - 3} more` : '';
+      return NextResponse.json(
+        {
+          error: `Cannot delete: ${titles}${more} ${blocked.rowCount === 1 ? 'has' : 'have'} sold orders. Retire instead.`,
+        },
+        { status: 409 },
+      );
+    }
+    try {
+      await pool.query('DELETE FROM artworks WHERE id = ANY($1)', [ids]);
+    } catch (err) {
+      if (isFkViolation(err)) {
+        return NextResponse.json(
+          { error: 'Cannot delete: one or more artworks are still referenced.' },
+          { status: 409 },
+        );
+      }
+      throw err;
+    }
   } else if (action === 'move') {
     if (!collectionId) {
       return NextResponse.json({ error: 'collectionId required' }, { status: 400 });
     }
-    await pool.query(
-      `UPDATE artworks SET collection_id=$2, updated_at=NOW() WHERE id = ANY($1)`,
-      [ids, collectionId],
-    );
+    try {
+      await pool.query(
+        `UPDATE artworks SET collection_id=$2, updated_at=NOW() WHERE id = ANY($1)`,
+        [ids, collectionId],
+      );
+    } catch (err) {
+      if (isFkViolation(err)) {
+        return NextResponse.json(
+          { error: 'Target collection does not exist.' },
+          { status: 400 },
+        );
+      }
+      throw err;
+    }
   }
   return NextResponse.json({ ok: true });
 }

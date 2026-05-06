@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { AdminPill } from '@/components/admin/AdminPill';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
 import { ArtworkRowMenu } from '@/components/admin/ArtworkRowMenu';
@@ -60,65 +60,88 @@ export default function AdminArtworksPage() {
 
   const reload = useCallback(async () => {
     setLoading(true);
-    const qs = new URLSearchParams();
-    if (status !== 'all') qs.set('status', status);
-    const r = await fetch('/api/admin/artworks?' + qs);
+    // Fetch the full set; status filter is applied client-side from `rows`.
+    // The list caps at LIMIT 1000 server-side and the page already iterates
+    // `rows` for tab counts — no benefit to round-tripping per tab.
+    const r = await fetch('/api/admin/artworks');
+    if (!r.ok) {
+      setLoading(false);
+      return;
+    }
     const d = (await r.json()) as { rows: Row[] };
     setRows(d.rows);
     setLoading(false);
     setSel(new Set());
-  }, [status]);
+  }, []);
 
   useEffect(() => {
     void reload();
   }, [reload]);
 
   useEffect(() => {
+    let cancelled = false;
     void (async () => {
       const r = await fetch('/api/admin/collections');
-      if (!r.ok) return;
+      if (!r.ok || cancelled) return;
       const d = (await r.json()) as { rows: CollectionOpt[] };
+      if (cancelled) return;
       setCollections(d.rows.map((c) => ({ id: c.id, title: c.title })));
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  async function moveOne(id: number, collectionId: number | null) {
-    const r = await fetch(`/api/admin/artworks/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ collection_id: collectionId }),
-    });
-    if (!r.ok) {
-      alert('Move failed.');
-      return;
-    }
-    void reload();
+  async function surfaceError(r: Response, fallback: string) {
+    const body = (await r.json().catch(() => null)) as { error?: string } | null;
+    alert(body?.error ?? `${fallback} (HTTP ${r.status}).`);
   }
 
-  async function togglePublishOne(row: Row) {
-    const next = row.status === 'published' ? 'retired' : 'published';
-    const r = await fetch(`/api/admin/artworks/${row.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: next }),
-    });
-    if (!r.ok) {
-      const body = (await r.json().catch(() => null)) as { error?: string } | null;
-      alert(body?.error ?? `Failed (HTTP ${r.status}).`);
-      return;
-    }
-    void reload();
-  }
+  const moveOne = useCallback(
+    async (id: number, collectionId: number | null) => {
+      const r = await fetch(`/api/admin/artworks/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ collection_id: collectionId }),
+      });
+      if (!r.ok) {
+        await surfaceError(r, 'Move failed');
+        return;
+      }
+      void reload();
+    },
+    [reload],
+  );
 
-  async function deleteOne(row: Row) {
-    if (!confirm(`Delete "${row.title}"?`)) return;
-    const r = await fetch(`/api/admin/artworks/${row.id}`, { method: 'DELETE' });
-    if (!r.ok) {
-      alert('Delete failed.');
-      return;
-    }
-    void reload();
-  }
+  const togglePublishOne = useCallback(
+    async (row: Row) => {
+      const next = row.status === 'published' ? 'retired' : 'published';
+      const r = await fetch(`/api/admin/artworks/${row.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: next }),
+      });
+      if (!r.ok) {
+        await surfaceError(r, 'Failed');
+        return;
+      }
+      void reload();
+    },
+    [reload],
+  );
+
+  const deleteOne = useCallback(
+    async (row: Row) => {
+      if (!confirm(`Delete "${row.title}"?`)) return;
+      const r = await fetch(`/api/admin/artworks/${row.id}`, { method: 'DELETE' });
+      if (!r.ok) {
+        await surfaceError(r, 'Delete failed');
+        return;
+      }
+      void reload();
+    },
+    [reload],
+  );
 
   async function bulk(action: string) {
     if (!sel.size) return;
@@ -128,10 +151,14 @@ export default function AdminArtworksPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids: [...sel], action }),
     });
+    if (!r.ok) {
+      await surfaceError(r, `${action} failed`);
+      return;
+    }
     // The publish action silently filters out artworks missing a print
     // master (server-side gate). Surface the skip count so the admin
     // doesn't think every selected row was published.
-    if (action === 'publish' && r.ok) {
+    if (action === 'publish') {
       const body = (await r.json().catch(() => null)) as
         | { published?: number; skipped?: number }
         | null;
@@ -152,7 +179,15 @@ export default function AdminArtworksPage() {
     failed: number;
   }>({ done: 0, total: 0, failed: 0 });
 
-  const emptyVariants = rows.filter((r) => r.variant_count === 0);
+  const emptyVariants = useMemo(
+    () => rows.filter((r) => r.variant_count === 0),
+    [rows],
+  );
+
+  const visibleRows = useMemo(
+    () => (status === 'all' ? rows : rows.filter((r) => r.status === status)),
+    [rows, status],
+  );
 
   async function batchAiDraft() {
     if (batchRunning) return;
@@ -259,12 +294,15 @@ export default function AdminArtworksPage() {
   }
 
   const tabs = ['all', 'published', 'draft', 'retired'] as const;
-  const counts: Record<string, number> = {
-    all: rows.length,
-    published: rows.filter((r) => r.status === 'published').length,
-    draft: rows.filter((r) => r.status === 'draft').length,
-    retired: rows.filter((r) => r.status === 'retired').length,
-  };
+  const counts: Record<string, number> = useMemo(
+    () => ({
+      all: rows.length,
+      published: rows.filter((r) => r.status === 'published').length,
+      draft: rows.filter((r) => r.status === 'draft').length,
+      retired: rows.filter((r) => r.status === 'retired').length,
+    }),
+    [rows],
+  );
 
   return (
     <>
@@ -351,7 +389,7 @@ export default function AdminArtworksPage() {
             >
               Loading…
             </div>
-          ) : rows.length === 0 ? (
+          ) : visibleRows.length === 0 ? (
             <div
               style={{
                 padding: 40,
@@ -379,7 +417,7 @@ export default function AdminArtworksPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {visibleRows.map((r) => (
                   <tr key={r.id} className={sel.has(r.id) ? 'selected' : ''}>
                     <td style={{ paddingLeft: 16 }}>
                       <input

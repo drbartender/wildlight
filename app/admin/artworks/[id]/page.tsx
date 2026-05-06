@@ -58,21 +58,35 @@ export default function ArtworkEditPage({
   }, [load]);
 
   useEffect(() => {
+    let cancelled = false;
     void (async () => {
       const r = await fetch('/api/admin/collections');
-      if (!r.ok) return;
+      if (!r.ok || cancelled) return;
       const d = (await r.json()) as { rows: CollectionOpt[] };
+      if (cancelled) return;
       setCollections(d.rows.map((c) => ({ id: c.id, title: c.title })));
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   async function save(patch: Record<string, unknown>) {
     setSaving(true);
-    await fetch(`/api/admin/artworks/${id}`, {
+    setSaveError(null);
+    const r = await fetch(`/api/admin/artworks/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
     });
+    if (!r.ok) {
+      const body = (await r.json().catch(() => null)) as { error?: string } | null;
+      setSaveError(body?.error ?? `Save failed (HTTP ${r.status}).`);
+      setSaving(false);
+      return;
+    }
     await load();
     setSaving(false);
   }
@@ -424,6 +438,18 @@ export default function ArtworkEditPage({
                 }}
               >
                 Saving…
+              </p>
+            )}
+            {saveError && (
+              <p
+                style={{
+                  color: 'var(--adm-red)',
+                  fontSize: 12,
+                  marginTop: 12,
+                }}
+                role="alert"
+              >
+                {saveError}
               </p>
             )}
           </div>
