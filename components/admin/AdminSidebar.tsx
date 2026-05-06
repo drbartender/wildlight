@@ -274,18 +274,25 @@ export function AdminSidebar({ needsReview, email }: Props) {
         inert={isMobile && !open}
       >
         <div className="wl-adm-sidebar-head">
-          <div className="atelier-head">
-            <ApertureMark size={26} />
-            <div className="atelier-head-text">
-              <div className="wordmark">Wildlight</div>
-              <div className="sub">Imagery · Studio</div>
+          <Link
+            href="/admin"
+            className="wl-adm-sidebar-brand"
+            aria-label="Wildlight admin home"
+            onClick={() => setOpen(false)}
+          >
+            <div className="atelier-head">
+              <ApertureMark size={26} />
+              <div className="atelier-head-text">
+                <div className="wordmark">Wildlight</div>
+                <div className="sub">Imagery · Studio</div>
+              </div>
             </div>
-          </div>
-          <div className="darkroom-head">
-            <ApertureMark size={20} />
-            <div className="wordmark">wildlight</div>
-            <div className="version">v2.4</div>
-          </div>
+            <div className="darkroom-head">
+              <ApertureMark size={20} />
+              <div className="wordmark">wildlight</div>
+              <div className="version">v2.4</div>
+            </div>
+          </Link>
         </div>
 
         <nav className="wl-adm-sidebar-nav">

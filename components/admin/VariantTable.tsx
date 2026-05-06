@@ -29,8 +29,8 @@ export function VariantTable({ variants }: { variants: VRow[] }) {
           <th>Type</th>
           <th>Size</th>
           <th>Finish</th>
-          <th className="right">Cost</th>
-          <th className="right">Price</th>
+          <th>Cost</th>
+          <th>Price</th>
           <th>Printful ID</th>
           <th style={{ textAlign: 'center' }}>Active</th>
         </tr>
@@ -41,8 +41,8 @@ export function VariantTable({ variants }: { variants: VRow[] }) {
             <td>{TYPE_LABEL[v.type] ?? v.type}</td>
             <td className="mono">{v.size}</td>
             <td>{v.finish || '—'}</td>
-            <td className="right mono muted">{formatUSD(v.cost_cents)}</td>
-            <td className="right mono">{formatUSD(v.price_cents)}</td>
+            <td className="mono muted">{formatUSD(v.cost_cents)}</td>
+            <td className="mono">{formatUSD(v.price_cents)}</td>
             <td className="mono muted">
               {v.printful_sync_variant_id || 'not synced'}
             </td>
