@@ -26,7 +26,16 @@ export function middleware(req: NextRequest) {
     // links and redirects (`<Link href="/admin/orders">`, `redirect('/admin')`)
     // get bounced once and then rewritten back below — so the URL bar shows
     // `/orders` instead of `/admin/orders`.
+    //
+    // Soft client navigations from `router.push('/admin/...')` arrive as RSC
+    // fetches; the App Router client does not reliably follow middleware
+    // redirects on those, and renders not-found.tsx instead. Pass them
+    // through so the existing /admin/[...] route serves directly. URL bar
+    // ends up showing /admin/... in that case — a refresh re-runs the
+    // redirect and restores the clean URL.
     if (path === '/admin' || path.startsWith('/admin/')) {
+      const isRSC = req.headers.has('rsc') || req.headers.has('next-router-state-tree');
+      if (isRSC) return NextResponse.next();
       const dest = url.clone();
       dest.pathname = path.replace(/^\/admin/, '') || '/';
       return NextResponse.redirect(dest, 308);
