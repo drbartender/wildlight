@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 
 interface CollectionOpt {
   id: number;
@@ -40,13 +39,8 @@ export function ArtworkRowMenu({
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<'main' | 'move'>('main');
   const [pos, setPos] = useState<PopRect | null>(null);
-  const [mounted, setMounted] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   function close() {
     setOpen(false);
@@ -62,10 +56,12 @@ export function ArtworkRowMenu({
     }
   }
 
-  // Position the popover via a body portal + fixed coords. The artworks
-  // table card uses overflow: hidden, so an absolutely positioned popover
-  // anchored to a row would clip on the bottom-most row. Portaling to
-  // <body> with viewport-relative coords sidesteps the ancestor entirely.
+  // The artworks table card uses overflow: hidden, so an absolutely
+  // positioned popover would clip on the bottom-most row. position: fixed
+  // is positioned against the viewport and escapes ancestor overflow as
+  // long as no ancestor sets transform/contain/will-change. The popover
+  // stays in the DOM tree (inside .wl-admin-surface) so the admin theme
+  // variables resolve correctly.
   useLayoutEffect(() => {
     if (!open || !btnRef.current) return;
     function updatePos() {
@@ -240,7 +236,7 @@ export function ArtworkRowMenu({
       >
         ⋯
       </button>
-      {mounted && popover ? createPortal(popover, document.body) : null}
+      {popover}
     </div>
   );
 }
