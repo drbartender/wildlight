@@ -32,6 +32,11 @@ interface Data {
   soldCount: number;
 }
 
+interface CollectionOpt {
+  id: number;
+  title: string;
+}
+
 export default function ArtworkEditPage({
   params,
 }: {
@@ -39,6 +44,7 @@ export default function ArtworkEditPage({
 }) {
   const { id } = use(params);
   const [data, setData] = useState<Data | null>(null);
+  const [collections, setCollections] = useState<CollectionOpt[]>([]);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -50,6 +56,15 @@ export default function ArtworkEditPage({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    void (async () => {
+      const r = await fetch('/api/admin/collections');
+      if (!r.ok) return;
+      const d = (await r.json()) as { rows: CollectionOpt[] };
+      setCollections(d.rows.map((c) => ({ id: c.id, title: c.title })));
+    })();
+  }, []);
 
   async function save(patch: Record<string, unknown>) {
     setSaving(true);
@@ -246,6 +261,23 @@ export default function ArtworkEditPage({
                 value={a.title}
                 onSave={(v) => save({ title: v })}
               />
+              <AdminField label="Collection">
+                <select
+                  className="wl-adm-field-select"
+                  value={a.collection_id ?? ''}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    save({ collection_id: v === '' ? null : Number(v) });
+                  }}
+                >
+                  <option value="">Uncategorized</option>
+                  {collections.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.title}
+                    </option>
+                  ))}
+                </select>
+              </AdminField>
               <AdminField
                 label="Location"
                 value={a.location || ''}

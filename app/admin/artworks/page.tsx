@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useEffect, useState, useCallback } from 'react';
 import { AdminPill } from '@/components/admin/AdminPill';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
+import { ArtworkRowMenu } from '@/components/admin/ArtworkRowMenu';
 
 interface Row {
   id: number;
@@ -16,11 +17,17 @@ interface Row {
   has_note: boolean;
   year_shot: number | null;
   location: string | null;
+  collection_id: number | null;
   collection_title: string | null;
   variant_count: number;
   min_price_cents: number | null;
   max_price_cents: number | null;
   updated_at: string;
+}
+
+interface CollectionOpt {
+  id: number;
+  title: string;
 }
 
 function fmtRelative(iso: string): string {
@@ -46,6 +53,7 @@ function fmtPrice(min: number | null, max: number | null): string {
 
 export default function AdminArtworksPage() {
   const [rows, setRows] = useState<Row[]>([]);
+  const [collections, setCollections] = useState<CollectionOpt[]>([]);
   const [status, setStatus] = useState<string>('all');
   const [sel, setSel] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -64,6 +72,53 @@ export default function AdminArtworksPage() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    void (async () => {
+      const r = await fetch('/api/admin/collections');
+      if (!r.ok) return;
+      const d = (await r.json()) as { rows: CollectionOpt[] };
+      setCollections(d.rows.map((c) => ({ id: c.id, title: c.title })));
+    })();
+  }, []);
+
+  async function moveOne(id: number, collectionId: number | null) {
+    const r = await fetch(`/api/admin/artworks/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ collection_id: collectionId }),
+    });
+    if (!r.ok) {
+      alert('Move failed.');
+      return;
+    }
+    void reload();
+  }
+
+  async function togglePublishOne(row: Row) {
+    const next = row.status === 'published' ? 'retired' : 'published';
+    const r = await fetch(`/api/admin/artworks/${row.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: next }),
+    });
+    if (!r.ok) {
+      const body = (await r.json().catch(() => null)) as { error?: string } | null;
+      alert(body?.error ?? `Failed (HTTP ${r.status}).`);
+      return;
+    }
+    void reload();
+  }
+
+  async function deleteOne(row: Row) {
+    if (!confirm(`Delete "${row.title}"?`)) return;
+    const r = await fetch(`/api/admin/artworks/${row.id}`, { method: 'DELETE' });
+    if (!r.ok) {
+      alert('Delete failed.');
+      return;
+    }
+    void reload();
+  }
 
   async function bulk(action: string) {
     if (!sel.size) return;
@@ -376,8 +431,17 @@ export default function AdminArtworksPage() {
                     <td className="muted" style={{ fontSize: 12 }}>
                       {fmtRelative(r.updated_at)}
                     </td>
-                    <td className="muted right" style={{ paddingRight: 16 }}>
-                      ⋯
+                    <td className="right" style={{ paddingRight: 8 }}>
+                      <ArtworkRowMenu
+                        status={r.status}
+                        hasPrintMaster={!!r.image_print_url}
+                        slug={r.slug}
+                        collectionId={r.collection_id}
+                        collections={collections}
+                        onMove={(cid) => moveOne(r.id, cid)}
+                        onTogglePublish={() => togglePublishOne(r)}
+                        onDelete={() => deleteOne(r)}
+                      />
                     </td>
                   </tr>
                 ))}

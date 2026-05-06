@@ -33,6 +33,7 @@ export async function GET(req: Request) {
             (a.artist_note IS NOT NULL AND length(trim(a.artist_note)) > 0) AS has_note,
             a.year_shot, a.location,
             a.updated_at,
+            a.collection_id,
             c.title AS collection_title, c.slug AS collection_slug,
             (SELECT COUNT(*)::int FROM artwork_variants v
               WHERE v.artwork_id = a.id AND v.active) AS variant_count,
