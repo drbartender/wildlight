@@ -17,9 +17,21 @@
 // following — so an attacker can't 302 us into the metadata service.
 
 import Anthropic from '@anthropic-ai/sdk';
+import sharp from 'sharp';
 import { logger } from './logger';
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+// Anthropic's documented per-image cap for `source.type=base64` is 5 MB.
+// We fetch up to MAX_FETCH_BYTES from R2 (since admin-uploaded web images
+// can legitimately exceed 5 MB — PNGs of photo content, accidental
+// originals from bulk-upload), then if the buffer is over RECOMPRESS_OVER
+// we run it through sharp to land safely under the API limit. This is
+// the second half of WILDLIGHT-7/8 — the duck-type fix made the fallback
+// engage; this fix lets the fallback actually succeed against oversized
+// web images (Sentry: WILDLIGHT-A).
+const MAX_FETCH_BYTES = 25 * 1024 * 1024;
+const RECOMPRESS_OVER = 4 * 1024 * 1024;
+const RECOMPRESS_LONG_EDGE = 2000;
+const RECOMPRESS_QUALITY = 82;
 const FETCH_TIMEOUT_MS = 10_000;
 const ALLOWED_MIMES: ReadonlySet<Anthropic.Base64ImageSource['media_type']> =
   new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
@@ -67,6 +79,30 @@ export function isRetryableAnthropicError(err: unknown): boolean {
   return status === 429 || status === 529 || status >= 500;
 }
 
+/**
+ * Recompress oversized buffers through sharp so the resulting base64 fits
+ * under Anthropic's 5 MB per-image limit. Always emits JPEG — the SDK and
+ * Anthropic both accept it, and JPEG of a 2000px photo at q82 lands well
+ * under the limit even from a print-master input.
+ */
+export async function recompressForAnthropic(buf: Buffer): Promise<{
+  data: Buffer;
+  mediaType: Anthropic.Base64ImageSource['media_type'];
+}> {
+  const out = await sharp(buf)
+    .rotate()
+    .resize({
+      width: RECOMPRESS_LONG_EDGE,
+      height: RECOMPRESS_LONG_EDGE,
+      fit: 'inside',
+      withoutEnlargement: true,
+    })
+    .toColorspace('srgb')
+    .jpeg({ quality: RECOMPRESS_QUALITY, mozjpeg: true })
+    .toBuffer();
+  return { data: out, mediaType: 'image/jpeg' };
+}
+
 async function fetchImageAsBase64(url: string): Promise<{
   data: string;
   mediaType: Anthropic.Base64ImageSource['media_type'];
@@ -96,12 +132,13 @@ async function fetchImageAsBase64(url: string): Promise<{
   });
   if (!r.ok) throw new Error(`fetch ${url} failed (${r.status})`);
 
-  // Trust Content-Length when present so we can fail fast — but still
-  // streamcheck on read since the header can lie.
+  // Hard cap is the fetch-side DoS guard — sharp can decode large inputs
+  // but we don't want a 1 GB body to land in memory. A buffer between
+  // RECOMPRESS_OVER and MAX_FETCH_BYTES gets piped through sharp below.
   const declared = Number(r.headers.get('content-length') ?? '0');
-  if (declared > MAX_IMAGE_BYTES) {
+  if (declared > MAX_FETCH_BYTES) {
     throw new Error(
-      `image declared ${declared} bytes, over ${MAX_IMAGE_BYTES} cap`,
+      `image declared ${declared} bytes, over ${MAX_FETCH_BYTES} cap`,
     );
   }
 
@@ -115,7 +152,7 @@ async function fetchImageAsBase64(url: string): Promise<{
   ) {
     throw new Error(`unsupported content-type: ${ctRaw || 'missing'}`);
   }
-  const mediaType = ctRaw as Anthropic.Base64ImageSource['media_type'];
+  let mediaType = ctRaw as Anthropic.Base64ImageSource['media_type'];
 
   // Stream-with-cap so a 1 GB body can't OOM the function before the
   // size check fires (the prior `Buffer.from(await arrayBuffer())`
@@ -130,13 +167,27 @@ async function fetchImageAsBase64(url: string): Promise<{
     if (done) break;
     if (!value) continue;
     total += value.byteLength;
-    if (total > MAX_IMAGE_BYTES) {
+    if (total > MAX_FETCH_BYTES) {
       await reader.cancel();
-      throw new Error(`image exceeds ${MAX_IMAGE_BYTES} bytes`);
+      throw new Error(`image exceeds ${MAX_FETCH_BYTES} bytes`);
     }
     chunks.push(value);
   }
-  const buf = Buffer.concat(chunks.map((c) => Buffer.from(c)), total);
+  let buf: Buffer = Buffer.concat(chunks.map((c) => Buffer.from(c)), total);
+
+  if (buf.length > RECOMPRESS_OVER) {
+    // Anthropic rejects > 5 MB base64; admin-side web images sometimes
+    // come in as PNGs or unsized originals. Recompress in-place so the
+    // generation actually succeeds rather than 400ing on size.
+    const before = buf.length;
+    const out = await recompressForAnthropic(buf);
+    buf = out.data;
+    mediaType = out.mediaType;
+    logger.warn('anthropic image recompressed for size cap', {
+      before,
+      after: buf.length,
+    });
+  }
   return { data: buf.toString('base64'), mediaType };
 }
 
@@ -144,8 +195,8 @@ export async function inlineUrlImagesAsBase64(
   messages: Anthropic.MessageParam[],
 ): Promise<Anthropic.MessageParam[]> {
   // Parallelise the per-image fetches — bounded to ≤4 by upstream
-  // (lib/studio.ts caps `all` at 4) and 5 MB each, so the burst is
-  // safe without a concurrency limiter.
+  // (lib/studio.ts caps `all` at 4) and 25 MB each, recompressed if
+  // needed, so the burst is safe without a concurrency limiter.
   return Promise.all(
     messages.map(async (m) => {
       if (typeof m.content === 'string') return m;

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { isUrlFetchError, isRetryableAnthropicError } from '@/lib/anthropic-image';
+import sharp from 'sharp';
+import {
+  isUrlFetchError,
+  isRetryableAnthropicError,
+  recompressForAnthropic,
+} from '@/lib/anthropic-image';
 
 describe('isUrlFetchError', () => {
   // The shape Anthropic's SDK throws on a URL-fetch failure. Reproduced
@@ -82,5 +87,40 @@ describe('isRetryableAnthropicError', () => {
     expect(isRetryableAnthropicError(null)).toBe(false);
     expect(isRetryableAnthropicError(undefined)).toBe(false);
     expect(isRetryableAnthropicError(new Error('plain'))).toBe(false);
+  });
+});
+
+describe('recompressForAnthropic', () => {
+  // Builds a PNG large enough to exceed Anthropic's 5 MB base64 cap. A
+  // 4000x4000 random-noise PNG resists compression and lands ~30-50 MB —
+  // plenty to reproduce the WILDLIGHT-A failure mode locally without
+  // needing a fixture file.
+  async function makeOversizedPng(): Promise<Buffer> {
+    const size = 4000;
+    const bytes = Buffer.alloc(size * size * 3);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 2654435761) & 0xff;
+    return sharp(bytes, { raw: { width: size, height: size, channels: 3 } })
+      .png({ compressionLevel: 0 })
+      .toBuffer();
+  }
+
+  it('recompresses an oversized PNG to a sub-5MB JPEG', async () => {
+    const big = await makeOversizedPng();
+    expect(big.length).toBeGreaterThan(5 * 1024 * 1024);
+    const out = await recompressForAnthropic(big);
+    expect(out.mediaType).toBe('image/jpeg');
+    expect(out.data.length).toBeLessThan(5 * 1024 * 1024);
+    // Sanity: the recompressed buffer is a real JPEG (FF D8 FF magic bytes).
+    expect(out.data[0]).toBe(0xff);
+    expect(out.data[1]).toBe(0xd8);
+    expect(out.data[2]).toBe(0xff);
+  });
+
+  it('caps long edge at 2000px regardless of input dimensions', async () => {
+    const big = await makeOversizedPng();
+    const out = await recompressForAnthropic(big);
+    const meta = await sharp(out.data).metadata();
+    expect(meta.width).toBeLessThanOrEqual(2000);
+    expect(meta.height).toBeLessThanOrEqual(2000);
   });
 });
