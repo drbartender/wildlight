@@ -61,3 +61,35 @@ export function parsePathId(raw: string | undefined | null): number | null {
   const n = Number(raw);
   return Number.isInteger(n) && n > 0 ? n : null;
 }
+
+/**
+ * Recognises transient pg connection drops (WILDLIGHT-1 in Sentry —
+ * Neon idle-kills pool connections faster than pg notices). Use to
+ * decide whether to retry a single failed query rather than surfacing
+ * an opaque 500 to the client.
+ */
+export function isTransientPgError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  if (/connection terminated/i.test(err.message)) return true;
+  const code = (err as { code?: string }).code;
+  // ECONNRESET — TCP drop. 57P01 admin_shutdown / 57P02 crash_shutdown —
+  // Postgres-side connection close.
+  return code === 'ECONNRESET' || code === '57P01' || code === '57P02';
+}
+
+/**
+ * Run `fn` once, and if it fails with a transient connection drop,
+ * retry it exactly once. The pg pool will hand out a fresh connection
+ * on the second attempt. Caller is responsible for keeping `fn`
+ * idempotent — slug-uniquify loops, INSERT-ON-CONFLICT, etc are safe;
+ * naked INSERTs that allocate sequence ids may double-allocate, which
+ * is fine because the first attempt's row never committed.
+ */
+export async function withConnRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (!isTransientPgError(err)) throw err;
+    return await fn();
+  }
+}

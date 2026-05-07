@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { callWithBase64Fallback } from './anthropic-image';
 
 const MODEL = 'claude-sonnet-4-6';
 const MAX_NOTE_CHARS = 180;
@@ -143,43 +144,48 @@ export async function draftArtworkMetadata(
 ): Promise<DraftResult> {
   const c = getClient();
 
+  const baseMessages: Anthropic.MessageParam[] = [
+    {
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'url', url: input.imageUrl } },
+        { type: 'text', text: userPreamble(input) },
+      ],
+    },
+  ];
+
   let lastErr: unknown = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await c.messages.create({
-        model: MODEL,
-        max_tokens: 512,
-        // Cache the static system prompt so a bulk run (~50 sequential calls
-        // within the 5-minute TTL) pays for it once. Requires the array form.
-        system: [
-          {
-            type: 'text',
-            text: SYSTEM,
-            cache_control: { type: 'ephemeral' },
-          },
-        ],
-        tools: [DRAFT_TOOL],
-        tool_choice: { type: 'tool', name: DRAFT_TOOL.name },
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'image',
-                source: { type: 'url', url: input.imageUrl },
-              },
-              { type: 'text', text: userPreamble(input) },
-            ],
-          },
-        ],
-      });
+      // Wrap in callWithBase64Fallback so the inner closure transparently
+      // retries with server-fetched base64 when Anthropic returns
+      // "Unable to download the file" — the chronic Cloudflare-cache /
+      // regional-fetch failure mode behind WILDLIGHT-7.
+      return await callWithBase64Fallback(baseMessages, async (messages) => {
+        const res = await c.messages.create({
+          model: MODEL,
+          max_tokens: 512,
+          // Cache the static system prompt so a bulk run (~50 sequential calls
+          // within the 5-minute TTL) pays for it once. Requires the array form.
+          system: [
+            {
+              type: 'text',
+              text: SYSTEM,
+              cache_control: { type: 'ephemeral' },
+            },
+          ],
+          tools: [DRAFT_TOOL],
+          tool_choice: { type: 'tool', name: DRAFT_TOOL.name },
+          messages,
+        });
 
-      const toolBlock = res.content.find(
-        (b): b is Anthropic.ToolUseBlock =>
-          b.type === 'tool_use' && b.name === DRAFT_TOOL.name,
-      );
-      if (!toolBlock) throw new Error('no tool_use response');
-      return validate(toolBlock.input);
+        const toolBlock = res.content.find(
+          (b): b is Anthropic.ToolUseBlock =>
+            b.type === 'tool_use' && b.name === DRAFT_TOOL.name,
+        );
+        if (!toolBlock) throw new Error('no tool_use response');
+        return validate(toolBlock.input);
+      });
     } catch (err) {
       lastErr = err;
       // Only retry transient upstream failures. A shape error from the model

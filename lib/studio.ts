@@ -6,6 +6,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { VOICE_LETTER, VOICE_NOTE_SAMPLES } from './studio-voice';
+import { callWithBase64Fallback } from './anthropic-image';
 
 const MODEL = 'claude-sonnet-4-6';
 const MAX_OUTPUT_TOKENS = 4096;
@@ -399,25 +400,29 @@ async function generateFromImage(input: {
     ? `${baseText}Write a journal entry inspired by this set of ${all.length} images — they belong together (same subject, sitting, or place). Treat them as one set, not as separate captions.`
     : `${baseText}Write a journal entry inspired by this image.${input.titleHint ? ' The optional title hint above suggests an angle.' : ''}`;
 
-  return withRetry(async () => {
-    const res = await c.messages.create({
-      model: MODEL,
-      max_tokens: MAX_OUTPUT_TOKENS,
-      system: systemFor(input.kind),
-      tools: [DRAFT_TOOL],
-      tool_choice: { type: 'tool', name: DRAFT_TOOL.name },
-      messages: [
-        {
-          role: 'user',
-          content: [
-            ...all.map((img) => imageContentBlock(img)),
-            { type: 'text', text: promptText },
-          ],
-        },
+  const messages: Anthropic.MessageParam[] = [
+    {
+      role: 'user',
+      content: [
+        ...all.map((img) => imageContentBlock(img)),
+        { type: 'text', text: promptText },
       ],
-    });
-    return validateDraft(extractToolUse(res, DRAFT_TOOL.name));
-  });
+    },
+  ];
+
+  return withRetry(() =>
+    callWithBase64Fallback(messages, async (msgs) => {
+      const res = await c.messages.create({
+        model: MODEL,
+        max_tokens: MAX_OUTPUT_TOKENS,
+        system: systemFor(input.kind),
+        tools: [DRAFT_TOOL],
+        tool_choice: { type: 'tool', name: DRAFT_TOOL.name },
+        messages: msgs,
+      });
+      return validateDraft(extractToolUse(res, DRAFT_TOOL.name));
+    }),
+  );
 }
 
 // ─── Mode B · Title ───────────────────────────────────────────
