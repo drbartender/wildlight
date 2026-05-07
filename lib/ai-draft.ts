@@ -102,6 +102,35 @@ function userPreamble(input: DraftInput): string {
   return lines.join('\n');
 }
 
+/**
+ * Soft-trim a model-generated string to a max length. Anthropic uses a
+ * tool's `input_schema.maxLength` as a hint, not a hard gate, so the
+ * model occasionally goes a few characters over (Sentry: WILDLIGHT-B,
+ * `Error: artist_note too long`). Throwing back to the user discards a
+ * usable draft over a tail-end few chars; clamp to the cap and prefer
+ * the last sentence-end boundary, falling back to the last whitespace,
+ * then a hard cut as the last resort.
+ */
+export function clampToBoundary(s: string, max: number): string {
+  if (s.length <= max) return s;
+  const slice = s.slice(0, max);
+  // Sentence boundaries first. Only trim mid-string — a final '.' inside
+  // an abbreviation like "Mr." would be a bad cut, but at the tail it's
+  // either a real sentence end or close enough.
+  const sentenceEnd = Math.max(
+    slice.lastIndexOf('. '),
+    slice.lastIndexOf('? '),
+    slice.lastIndexOf('! '),
+  );
+  if (sentenceEnd >= max * 0.6) return slice.slice(0, sentenceEnd + 1).trimEnd();
+  // Word boundary fallback. 0.6 floor keeps us from chopping the string
+  // in half if the model wrote one long sentence with no spaces near the
+  // tail (rare, but possible).
+  const wordEnd = slice.lastIndexOf(' ');
+  if (wordEnd >= max * 0.6) return slice.slice(0, wordEnd).trimEnd();
+  return slice.trimEnd();
+}
+
 function validate(raw: unknown): DraftResult {
   if (!raw || typeof raw !== 'object') throw new Error('non-object tool input');
   const r = raw as Record<string, unknown>;
@@ -110,13 +139,16 @@ function validate(raw: unknown): DraftResult {
   const note = r.artist_note;
   const conf = r.confidence;
   if (typeof title !== 'string' || !title.trim()) throw new Error('missing title');
-  if (title.length > MAX_TITLE_CHARS) throw new Error('title too long');
   if (typeof note !== 'string' || !note.trim()) throw new Error('missing artist_note');
-  if (note.length > MAX_NOTE_CHARS) throw new Error('artist_note too long');
   if (conf !== 'high' && conf !== 'low') throw new Error('bad confidence');
   const location =
     loc == null ? null : typeof loc === 'string' && loc.trim() ? loc : null;
-  return { title: title.trim(), location, artist_note: note, confidence: conf };
+  return {
+    title: clampToBoundary(title.trim(), MAX_TITLE_CHARS),
+    location,
+    artist_note: clampToBoundary(note, MAX_NOTE_CHARS),
+    confidence: conf,
+  };
 }
 
 // Lazy module-level singleton. A bulk run of ~50 sequential calls would
