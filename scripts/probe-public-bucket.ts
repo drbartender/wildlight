@@ -9,10 +9,10 @@ import { listPublicPrefix, publicUrlFor } from '../lib/r2';
 async function main() {
   const prefixes = ['journal/', 'incoming/', 'artworks/'];
   for (const prefix of prefixes) {
-    process.stdout.write(`\n── prefix: ${prefix} ──\n`);
+    console.log(`\n── prefix: ${prefix} ──`);
     const all = await listPublicPrefix(prefix);
     if (all.length === 0) {
-      process.stdout.write('  (no objects)\n');
+      console.log('  (no objects)');
       continue;
     }
     // Sort newest first so we test recent uploads (most likely the ones
@@ -28,12 +28,12 @@ async function main() {
       const url = publicUrlFor(obj.key);
       try {
         const r = await fetch(url, { method: 'HEAD' });
-        process.stdout.write(
-          `  ${r.status}  ${url}  (size: ${obj.size}, served-len: ${r.headers.get('content-length') ?? '—'}, ct: ${r.headers.get('content-type') ?? '—'}, cf: ${r.headers.get('cf-cache-status') ?? '—'})\n`,
+        console.log(
+          `  ${r.status}  ${url}  (size: ${obj.size}, served-len: ${r.headers.get('content-length') ?? '—'}, ct: ${r.headers.get('content-type') ?? '—'}, cf: ${r.headers.get('cf-cache-status') ?? '—'})`,
         );
       } catch (err) {
-        process.stdout.write(
-          `  ERR  ${url}  ${err instanceof Error ? err.message : String(err)}\n`,
+        console.error(
+          `  ERR  ${url}  ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }

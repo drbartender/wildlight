@@ -34,7 +34,9 @@ export function classifyPrintResolution(
 ): PrintResolution {
   const shortEdge = Math.min(width, height);
   const effectiveDpi = Math.round(shortEdge / MAX_SHORT_EDGE_INCHES);
-  const maxGoodEdgeInches = Math.floor(shortEdge / GOOD_DPI);
+  // Floor so a sub-240px edge would compute 0; clamp at 1" so the UI
+  // shows `max 1"` instead of `max 0"` for absurdly small masters.
+  const maxGoodEdgeInches = Math.max(1, Math.floor(shortEdge / GOOD_DPI));
 
   let level: PrintResolutionLevel;
   let message: string;

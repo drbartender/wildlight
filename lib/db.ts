@@ -81,15 +81,23 @@ export function isTransientPgError(err: unknown): boolean {
  * Run `fn` once, and if it fails with a transient connection drop,
  * retry it exactly once. The pg pool will hand out a fresh connection
  * on the second attempt. Caller is responsible for keeping `fn`
- * idempotent — slug-uniquify loops, INSERT-ON-CONFLICT, etc are safe;
- * naked INSERTs that allocate sequence ids may double-allocate, which
- * is fine because the first attempt's row never committed.
+ * idempotent — slug-uniquify loops, INSERT-ON-CONFLICT, and naked
+ * single-statement inserts are safe (a failed attempt rolls back, so
+ * no row is left behind; a sequence gap is harmless). Multi-statement
+ * fn() that wraps `withTransaction` is also safe in the common case
+ * — only a COMMIT-ack loss could cause a duplicate write, which is
+ * rare under Neon's typical idle-drop pattern.
+ *
+ * 50 ms pause before retry so we don't hammer a Neon endpoint that's
+ * currently rotating connections; cheap relative to the ~300 ms a
+ * fresh pool connect already costs.
  */
 export async function withConnRetry<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (err) {
     if (!isTransientPgError(err)) throw err;
+    await new Promise((resolve) => setTimeout(resolve, 50));
     return await fn();
   }
 }

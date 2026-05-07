@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, use } from 'react';
+import { useCallback, useEffect, useState, use } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { VariantTable, type VRow } from '@/components/admin/VariantTable';
@@ -149,10 +149,10 @@ export default function ArtworkEditPage({
 
   const a = data.artwork;
   const activeVariants = data.variants.filter((v) => v.active).length;
-  const printResolution = useMemo(() => {
-    if (!a.print_width || !a.print_height) return null;
-    return classifyPrintResolution(a.print_width, a.print_height);
-  }, [a.print_width, a.print_height]);
+  const printResolution =
+    a.print_width && a.print_height
+      ? classifyPrintResolution(a.print_width, a.print_height)
+      : null;
 
   return (
     <>
