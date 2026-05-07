@@ -7,9 +7,14 @@ import { requireAdmin } from '@/lib/session';
 import { uploadPublic, uploadPrivate } from '@/lib/r2';
 import { slugify, uniqueSlug } from '@/lib/slug';
 import { classifyPrintResolution } from '@/lib/print-resolution';
+import { deriveWebFromPrint } from '@/lib/image-derive';
 import { logger } from '@/lib/logger';
 
-const WEB_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+// 25 MB matches the AI-fallback fetch cap in lib/anthropic-image.ts and
+// gives admins room to drop in print-quality JPEGs at the form. Sharp
+// downsizes anything over ~2 MB to a 2000px catalog JPEG before we
+// store it, so the admin never sees a 9-MB PNG land verbatim in R2.
+const WEB_MAX_BYTES = 25 * 1024 * 1024;
 const PRINT_MAX_BYTES = 80 * 1024 * 1024; // 80 MB
 const WEB_ALLOWED_MIMES = new Set(['image/jpeg', 'image/png']);
 const PRINT_ALLOWED_MIMES = new Set(['image/jpeg', 'image/png', 'image/tiff']);
@@ -49,17 +54,35 @@ export async function POST(req: Request) {
       { status: 413 },
     );
   }
-  const webBuf = Buffer.from(await webFile.arrayBuffer());
-  const webSniff = await fileTypeFromBuffer(webBuf);
+  const webBufRaw = Buffer.from(await webFile.arrayBuffer());
+  const webSniff = await fileTypeFromBuffer(webBufRaw);
   if (!webSniff || !WEB_ALLOWED_MIMES.has(webSniff.mime)) {
     return NextResponse.json(
       { error: 'unsupported web image format (jpeg/png only)' },
       { status: 400 },
     );
   }
-  const webExt = webSniff.ext === 'png' ? 'png' : 'jpg';
-  const webKey = `artworks/${collectionSlugFolder}/${slug}.${webExt}`;
-  const webUrl = await uploadPublic(webKey, webBuf, webSniff.mime);
+  // Always pipe through the catalog-resize helper. Name reads as
+  // "from print", but the implementation accepts any image source —
+  // we land at a 2000px sRGB JPEG q85 regardless of whether the
+  // admin uploaded a 12-MB PNG, a 4-MB JPEG, or a 600-KB thumbnail.
+  // Keeps every stored web image under Anthropic's 5-MB base64 cap
+  // so AI-draft never has to recompress on the hot path.
+  let derivedWeb;
+  try {
+    derivedWeb = await deriveWebFromPrint(webBufRaw);
+  } catch (err) {
+    logger.error('upload: web image derive failed', err, {
+      mime: webSniff.mime,
+      size: webBufRaw.length,
+    });
+    return NextResponse.json(
+      { error: 'could not process web image — please export as standard JPEG or PNG' },
+      { status: 415 },
+    );
+  }
+  const webKey = `artworks/${collectionSlugFolder}/${slug}.jpg`;
+  const webUrl = await uploadPublic(webKey, derivedWeb.buf, derivedWeb.contentType);
 
   let printKey: string | null = null;
   let printWidth: number | null = null;

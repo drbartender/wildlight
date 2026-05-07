@@ -12,14 +12,19 @@ const MAX_LONG_EDGE = 2000;
 const JPEG_QUALITY = 85;
 
 /**
- * Resize a print master to a web-tier JPEG. The long edge is capped at
+ * Resize an image source to a web-tier JPEG. The long edge is capped at
  * MAX_LONG_EDGE without upscaling smaller inputs. ICC and arbitrary EXIF
  * are stripped; sRGB is forced. Sharp auto-rotates per the orientation tag
  * before stripping.
  *
- * Also returns the master's post-rotation dimensions so the caller can
+ * Also returns the input's post-rotation dimensions so the caller can
  * persist them on the artwork row and classify print resolution without
  * a second sharp pass.
+ *
+ * Name says "from print" because the original use was deriving a web
+ * tier from a print master — the implementation has always accepted
+ * any Buffer input, and is now also called from the single-upload
+ * route to size raw web uploads.
  */
 export async function deriveWebFromPrint(
   source: Buffer,
