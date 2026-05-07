@@ -1,5 +1,10 @@
 import sharp from 'sharp';
 
+// Bound libvips threading on Vercel functions (~1-2 vCPU but `os.cpus()`
+// reports the host count). Module-level call so any sharp() instance —
+// here, in lib/anthropic-image.ts, or anywhere else — picks it up.
+sharp.concurrency(1);
+
 export interface DerivedImage {
   buf: Buffer;
   contentType: 'image/jpeg';
@@ -10,6 +15,11 @@ export interface DerivedImage {
 
 const MAX_LONG_EDGE = 2000;
 const JPEG_QUALITY = 85;
+// Decompression-bomb guard. A 25 MB PNG can decode to 1+ GB RGBA at
+// pathological dimensions (16k+ on a side); 100 MP comfortably covers
+// any real camera output (~12k × 8k). Sharp's default of ~268 MP is
+// too permissive given the upload caps in our routes.
+const LIMIT_INPUT_PIXELS = 100_000_000;
 
 /**
  * Resize an image source to a web-tier JPEG. The long edge is capped at
@@ -32,7 +42,8 @@ export async function deriveWebFromPrint(
   // Header-only metadata read — chaining .rotate() before .metadata()
   // does NOT swap w/h on every sharp version, so we read raw dims +
   // orientation and swap manually for orientations 5–8 (90/270° rotations).
-  const meta = await sharp(source).metadata();
+  const meta = await sharp(source, { limitInputPixels: LIMIT_INPUT_PIXELS })
+    .metadata();
   if (!meta.width || !meta.height) {
     throw new Error('image-derive: could not read master dimensions');
   }
@@ -40,7 +51,7 @@ export async function deriveWebFromPrint(
   const masterWidth = rotated ? meta.height : meta.width;
   const masterHeight = rotated ? meta.width : meta.height;
 
-  const buf = await sharp(source)
+  const buf = await sharp(source, { limitInputPixels: LIMIT_INPUT_PIXELS })
     .rotate()
     .resize({
       width: MAX_LONG_EDGE,

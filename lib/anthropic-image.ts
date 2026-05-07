@@ -28,10 +28,20 @@ import { logger } from './logger';
 // the second half of WILDLIGHT-7/8 — the duck-type fix made the fallback
 // engage; this fix lets the fallback actually succeed against oversized
 // web images (Sentry: WILDLIGHT-A).
+//
+// Once the upload-time resize from b3df091 has been live long enough that
+// no oversized rows remain in the bucket, MAX_FETCH_BYTES can drop back
+// to ~6 MB and the recompress branch becomes pure dead-code defense.
+// Until a backfill script runs, both halves are load-bearing.
 const MAX_FETCH_BYTES = 25 * 1024 * 1024;
 const RECOMPRESS_OVER = 4 * 1024 * 1024;
 const RECOMPRESS_LONG_EDGE = 2000;
+// q82 vs lib/image-derive.ts's q85 — 3-pt drop is intentional headroom
+// for Anthropic's 5 MB base64 cap, since this path runs on whatever
+// already lives in R2 (sometimes a 12+ MB PNG of photo content).
 const RECOMPRESS_QUALITY = 82;
+// Decompression-bomb guard. See lib/image-derive.ts for context.
+const LIMIT_INPUT_PIXELS = 100_000_000;
 const FETCH_TIMEOUT_MS = 10_000;
 const ALLOWED_MIMES: ReadonlySet<Anthropic.Base64ImageSource['media_type']> =
   new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
@@ -84,12 +94,19 @@ export function isRetryableAnthropicError(err: unknown): boolean {
  * under Anthropic's 5 MB per-image limit. Always emits JPEG — the SDK and
  * Anthropic both accept it, and JPEG of a 2000px photo at q82 lands well
  * under the limit even from a print-master input.
+ *
+ * @internal — exported only so tests can reach it. Production callers
+ * should let `fetchImageAsBase64` decide when to invoke it.
+ *
+ * Near-twin of `deriveWebFromPrint` in lib/image-derive.ts. Kept separate
+ * because the two have different quality targets (q82 vs q85) and
+ * different return shapes; consolidate if a third caller appears.
  */
 export async function recompressForAnthropic(buf: Buffer): Promise<{
   data: Buffer;
   mediaType: Anthropic.Base64ImageSource['media_type'];
 }> {
-  const out = await sharp(buf)
+  const out = await sharp(buf, { limitInputPixels: LIMIT_INPUT_PIXELS })
     .rotate()
     .resize({
       width: RECOMPRESS_LONG_EDGE,

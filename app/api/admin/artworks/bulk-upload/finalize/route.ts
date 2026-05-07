@@ -114,7 +114,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error:
-          "couldn't process this format — please export as standard JPEG or TIFF",
+          "couldn't process this format — please export as standard JPEG, PNG, or TIFF",
       },
       { status: 415 },
     );
