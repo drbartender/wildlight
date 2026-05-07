@@ -19,7 +19,7 @@ type RowState =
   | { kind: 'queued' }
   | { kind: 'uploading'; pct: number }
   | { kind: 'processing' }
-  | { kind: 'done'; webUrl: string; resolution: PrintResolution | null }
+  | { kind: 'done'; webUrl: string; resolution: PrintResolution }
   | { kind: 'error'; message: string };
 
 async function presign(
@@ -137,7 +137,7 @@ interface CreatedRow {
         artworkId: number;
         slug: string;
         title: string;
-        resolution: PrintResolution | null;
+        resolution: PrintResolution;
       }
     | { kind: 'error'; message: string };
 }
@@ -254,7 +254,7 @@ export default function BulkUploadPage() {
         setRowState(row.id, {
           kind: 'done',
           webUrl: res.image_web_url,
-          resolution: res.resolution ?? null,
+          resolution: res.resolution,
         });
       } catch (err) {
         setRowState(row.id, {
@@ -293,7 +293,7 @@ export default function BulkUploadPage() {
           artworkId: res.artworkId,
           slug: res.slug,
           title,
-          resolution: res.resolution ?? null,
+          resolution: res.resolution,
         });
         void reload();
       } catch (err) {
@@ -423,9 +423,7 @@ export default function BulkUploadPage() {
                           <a href={`/admin/artworks/${c.state.artworkId}`}>
                             → &ldquo;{c.state.title}&rdquo; ({c.state.slug}) — review &amp; publish
                           </a>
-                          {c.state.resolution && (
-                            <ResolutionBadge resolution={c.state.resolution} />
-                          )}
+                          <ResolutionBadge resolution={c.state.resolution} />
                         </>
                       )}
                       {c.state.kind === 'error' && (
@@ -520,7 +518,7 @@ function BulkRow({
           ) : (
             <>
               {row.collection_title || 'no collection'} · {row.slug}
-              {state.kind === 'done' && state.resolution && (
+              {state.kind === 'done' && (
                 <ResolutionBadge resolution={state.resolution} />
               )}
             </>

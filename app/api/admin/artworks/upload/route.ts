@@ -7,6 +7,7 @@ import { requireAdmin } from '@/lib/session';
 import { uploadPublic, uploadPrivate } from '@/lib/r2';
 import { slugify, uniqueSlug } from '@/lib/slug';
 import { classifyPrintResolution } from '@/lib/print-resolution';
+import { logger } from '@/lib/logger';
 
 const WEB_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 const PRINT_MAX_BYTES = 80 * 1024 * 1024; // 80 MB
@@ -79,11 +80,19 @@ export async function POST(req: Request) {
       );
     }
     // Header-only metadata read; orientations 5–8 swap w/h after EXIF rotation.
-    const meta = await sharp(printBuf).metadata();
-    if (meta.width && meta.height) {
-      const rotated = (meta.orientation ?? 1) >= 5 && (meta.orientation ?? 1) <= 8;
-      printWidth = rotated ? meta.height : meta.width;
-      printHeight = rotated ? meta.width : meta.height;
+    // Sharp can throw on exotic TIFF tags or truncated headers — treat that
+    // as "dims unknown" and proceed (the row gets created without dims and
+    // backfill:print-dims can fill them later) rather than 500ing the upload.
+    try {
+      const meta = await sharp(printBuf).metadata();
+      if (meta.width && meta.height) {
+        const rotated =
+          (meta.orientation ?? 1) >= 5 && (meta.orientation ?? 1) <= 8;
+        printWidth = rotated ? meta.height : meta.width;
+        printHeight = rotated ? meta.width : meta.height;
+      }
+    } catch (err) {
+      logger.warn('upload: print metadata read failed', { err });
     }
     const printExt =
       printSniff.ext === 'png' ? 'png' : printSniff.ext === 'tif' ? 'tif' : 'jpg';
