@@ -1,5 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { callWithBase64Fallback } from './anthropic-image';
+import {
+  callWithBase64Fallback,
+  isRetryableAnthropicError,
+} from './anthropic-image';
 
 const MODEL = 'claude-sonnet-4-6';
 const MAX_NOTE_CHARS = 180;
@@ -114,18 +117,6 @@ function validate(raw: unknown): DraftResult {
   const location =
     loc == null ? null : typeof loc === 'string' && loc.trim() ? loc : null;
   return { title: title.trim(), location, artist_note: note, confidence: conf };
-}
-
-/**
- * Classify an error from the Anthropic SDK as retryable. Transient upstream
- * failures (rate limits, 5xx, overload) are worth another shot; shape
- * violations from the model are not.
- */
-export function isRetryableAnthropicError(err: unknown): boolean {
-  if (err instanceof Anthropic.APIError) {
-    return err.status === 429 || err.status === 529 || err.status >= 500;
-  }
-  return false;
 }
 
 // Lazy module-level singleton. A bulk run of ~50 sequential calls would

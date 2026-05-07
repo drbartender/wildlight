@@ -34,11 +34,37 @@ function allowedImageHost(): string {
   }
 }
 
+// Duck-type on shape rather than `err instanceof Anthropic.APIError`.
+// The SDK class is imported by every Anthropic caller (studio, ai-draft,
+// this file); production Turbopack chunks can give those imports separate
+// class identities, in which case instanceof returns false against the
+// very error the SDK threw — and the URL-fetch fallback never engages
+// nor do transient retries fire. That was the silent failure behind
+// WILDLIGHT-7/8 even after the base64 fallback shipped. The two helpers
+// below stay in this file so the duck-typed contract has one home.
+function readNumericStatus(err: unknown): number | null {
+  if (!err || typeof err !== 'object') return null;
+  const s = (err as { status?: unknown }).status;
+  return typeof s === 'number' ? s : null;
+}
+
 export function isUrlFetchError(err: unknown): boolean {
-  if (!(err instanceof Anthropic.APIError)) return false;
-  if (err.status !== 400) return false;
-  const msg = err.message ?? '';
+  if (readNumericStatus(err) !== 400) return false;
+  const msg = (err as { message?: unknown }).message;
+  if (typeof msg !== 'string') return false;
   return /unable to download/i.test(msg) || /verify the URL/i.test(msg);
+}
+
+/**
+ * Classify a thrown Anthropic SDK error as retryable. Transient upstream
+ * failures (rate limits, 5xx, overload) are worth another shot; shape
+ * violations from the model are not. Single source of truth for both
+ * lib/ai-draft.ts and lib/studio.ts retry loops.
+ */
+export function isRetryableAnthropicError(err: unknown): boolean {
+  const status = readNumericStatus(err);
+  if (status === null) return false;
+  return status === 429 || status === 529 || status >= 500;
 }
 
 async function fetchImageAsBase64(url: string): Promise<{

@@ -5,7 +5,9 @@ import { NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 import { readExifFromBuffer } from '@/lib/exif';
-import { draftArtworkMetadata, isRetryableAnthropicError } from '@/lib/ai-draft';
+import { draftArtworkMetadata } from '@/lib/ai-draft';
+import { isRetryableAnthropicError } from '@/lib/anthropic-image';
+import { logger } from '@/lib/logger';
 
 function isAllowedImageHost(url: string): boolean {
   const base = process.env.R2_PUBLIC_BASE_URL;
@@ -94,10 +96,11 @@ export async function POST(
     // Map rate-limit / transient upstream errors to 429 so the UI can
     // distinguish them from other failures.
     const status = isRetryableAnthropicError(err) ? 429 : 502;
-    // Log the full error server-side; only leak details to the client in
-    // non-production builds. Admin-only, but stack text on the wire is
-    // still a smell.
-    console.error('ai-draft failed', err);
+    // logger.error so Sentry captures it. console.error inside a try/catch
+    // is not auto-instrumented, so prior failures here were invisible.
+    // Only leak details to the client in non-production builds. Admin-only,
+    // but stack text on the wire is still a smell.
+    logger.error('ai-draft failed', err, { id: numericId, status });
     const body: { error: string; detail?: string } = { error: 'ai-draft failed' };
     if (process.env.NODE_ENV !== 'production') body.detail = String(err);
     return NextResponse.json(body, { status });

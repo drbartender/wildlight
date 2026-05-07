@@ -6,7 +6,10 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { VOICE_LETTER, VOICE_NOTE_SAMPLES } from './studio-voice';
-import { callWithBase64Fallback } from './anthropic-image';
+import {
+  callWithBase64Fallback,
+  isRetryableAnthropicError,
+} from './anthropic-image';
 
 const MODEL = 'claude-sonnet-4-6';
 const MAX_OUTPUT_TOKENS = 4096;
@@ -284,13 +287,6 @@ function getClient(): Anthropic {
   return client;
 }
 
-function isRetryable(err: unknown): boolean {
-  if (err instanceof Anthropic.APIError) {
-    return err.status === 429 || err.status === 529 || err.status >= 500;
-  }
-  return false;
-}
-
 async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
   let lastErr: unknown = null;
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -298,7 +294,7 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
       return await fn();
     } catch (err) {
       lastErr = err;
-      if (!isRetryable(err)) break;
+      if (!isRetryableAnthropicError(err)) break;
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error('studio call failed');
