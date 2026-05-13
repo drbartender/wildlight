@@ -5,7 +5,7 @@
 // resistance.
 
 import Anthropic from '@anthropic-ai/sdk';
-import { VOICE_LETTER, VOICE_NOTE_SAMPLES } from './studio-voice';
+import { loadActiveVoice, type VoiceProfile } from './voice-profile';
 import {
   callWithBase64Fallback,
   isRetryableAnthropicError,
@@ -141,14 +141,50 @@ function escapeXml(s: string): string {
 
 // ─── System prompt builder ────────────────────────────────────
 
-function buildSystemPrompt(): Anthropic.TextBlockParam[] {
-  const letterXml = VOICE_LETTER.map(
-    (p, i) => `  <paragraph idx="${i + 1}">${escapeXml(p)}</paragraph>`,
-  ).join('\n');
-  const samplesXml = VOICE_NOTE_SAMPLES.map(
-    (s, i) =>
-      `  <sample idx="${i + 1}">\n    <title>${escapeXml(s.title)}</title>\n    <note>${escapeXml(s.artist_note)}</note>\n  </sample>`,
-  ).join('\n');
+// Render the active voice profile's rules block. Returns empty string
+// when there are no trained rules so the prompt collapses cleanly back
+// to the static defaults.
+function renderProfileRulesBlock(profile: VoiceProfile): string {
+  if (profile.rules.length === 0 && !profile.summary) return '';
+  const lines: string[] = [];
+  if (profile.summary) {
+    lines.push(
+      `<voice_summary>${escapeXml(profile.summary)}</voice_summary>`,
+    );
+  }
+  if (profile.rules.length > 0) {
+    const grouped = new Map<string, string[]>();
+    for (const r of profile.rules) {
+      const list = grouped.get(r.category) ?? [];
+      list.push(r.text);
+      grouped.set(r.category, list);
+    }
+    const inner: string[] = [];
+    for (const [cat, items] of grouped) {
+      inner.push(`  <category name="${escapeXml(cat)}">`);
+      for (const t of items) {
+        inner.push(`    <rule>${escapeXml(t)}</rule>`);
+      }
+      inner.push('  </category>');
+    }
+    lines.push(`<voice_rules>\n${inner.join('\n')}\n</voice_rules>`);
+  }
+  return `\n\nTRAINED VOICE PROFILE — these refinements override conflicting defaults above.\n\n${lines.join('\n')}\n`;
+}
+
+function buildSystemPrompt(profile: VoiceProfile): Anthropic.TextBlockParam[] {
+  const letterXml = profile.letter
+    .map(
+      (p, i) => `  <paragraph idx="${i + 1}">${escapeXml(p)}</paragraph>`,
+    )
+    .join('\n');
+  const samplesXml = profile.samples
+    .map(
+      (s, i) =>
+        `  <sample idx="${i + 1}">\n    <title>${escapeXml(s.title)}</title>\n    <note>${escapeXml(s.artist_note)}</note>\n  </sample>`,
+    )
+    .join('\n');
+  const trained = renderProfileRulesBlock(profile);
 
   const prompt = `You write fine-art photography journal entries in the voice of Dan Raby — owner and chief photographer at Wildlight Imagery, Aurora, Colorado.
 
@@ -179,8 +215,7 @@ ${letterXml}
 
 <voice_samples>
 ${samplesXml}
-</voice_samples>
-
+</voice_samples>${trained}
 Return your answer by calling the draft_journal tool exactly once.`;
 
   return [
@@ -197,14 +232,21 @@ Return your answer by calling the draft_journal tool exactly once.`;
 // with a sign-off. The body is shorter (300-600 words) and pitches
 // toward whichever frame the email needs: a release announcement, a
 // season note, or a quiet update. Reference materials stay the same.
-function buildNewsletterSystemPrompt(): Anthropic.TextBlockParam[] {
-  const letterXml = VOICE_LETTER.map(
-    (p, i) => `  <paragraph idx="${i + 1}">${escapeXml(p)}</paragraph>`,
-  ).join('\n');
-  const samplesXml = VOICE_NOTE_SAMPLES.map(
-    (s, i) =>
-      `  <sample idx="${i + 1}">\n    <title>${escapeXml(s.title)}</title>\n    <note>${escapeXml(s.artist_note)}</note>\n  </sample>`,
-  ).join('\n');
+function buildNewsletterSystemPrompt(
+  profile: VoiceProfile,
+): Anthropic.TextBlockParam[] {
+  const letterXml = profile.letter
+    .map(
+      (p, i) => `  <paragraph idx="${i + 1}">${escapeXml(p)}</paragraph>`,
+    )
+    .join('\n');
+  const samplesXml = profile.samples
+    .map(
+      (s, i) =>
+        `  <sample idx="${i + 1}">\n    <title>${escapeXml(s.title)}</title>\n    <note>${escapeXml(s.artist_note)}</note>\n  </sample>`,
+    )
+    .join('\n');
+  const trained = renderProfileRulesBlock(profile);
 
   const prompt = `You write newsletter broadcasts in the voice of Dan Raby — owner and chief photographer at Wildlight Imagery, Aurora, Colorado. These go to subscribers, not the public journal.
 
@@ -235,8 +277,7 @@ ${letterXml}
 
 <voice_samples>
 ${samplesXml}
-</voice_samples>
-
+</voice_samples>${trained}
 Return your answer by calling the draft_journal tool exactly once.`;
 
   return [
@@ -355,11 +396,16 @@ function imageContentBlock(img: ImageInput): Anthropic.ImageBlockParam {
 
 // Picks the right system prompt for the surface. Both prompts call the
 // same draft_journal tool so the structured output round-trips
-// uniformly.
-function systemFor(kind: 'journal' | 'newsletter' | undefined) {
+// uniformly. Async because we read the active voice profile from the DB
+// on every call so trained rules + curated samples flow into the prompt
+// without a redeploy.
+async function systemFor(
+  kind: 'journal' | 'newsletter' | undefined,
+): Promise<Anthropic.TextBlockParam[]> {
+  const profile = await loadActiveVoice();
   return kind === 'newsletter'
-    ? buildNewsletterSystemPrompt()
-    : buildSystemPrompt();
+    ? buildNewsletterSystemPrompt(profile)
+    : buildSystemPrompt(profile);
 }
 
 // ─── Mode A · Image (single or multi) ───────────────────────────
@@ -406,12 +452,13 @@ async function generateFromImage(input: {
     },
   ];
 
+  const system = await systemFor(input.kind);
   return withRetry(() =>
     callWithBase64Fallback(messages, async (msgs) => {
       const res = await c.messages.create({
         model: MODEL,
         max_tokens: MAX_OUTPUT_TOKENS,
-        system: systemFor(input.kind),
+        system,
         tools: [DRAFT_TOOL],
         tool_choice: { type: 'tool', name: DRAFT_TOOL.name },
         messages: msgs,
@@ -433,11 +480,12 @@ async function generateFromTitle(input: {
       ? `<subject_or_topic>${escapeXml(input.title.slice(0, MAX_TITLE_HINT))}</subject_or_topic>\nWrite a newsletter broadcast on this topic.`
       : `<title_or_topic>${escapeXml(input.title.slice(0, MAX_TITLE_HINT))}</title_or_topic>\nWrite a journal entry on this topic.`;
 
+  const system = await systemFor(input.kind);
   return withRetry(async () => {
     const res = await c.messages.create({
       model: MODEL,
       max_tokens: MAX_OUTPUT_TOKENS,
-      system: systemFor(input.kind),
+      system,
       tools: [DRAFT_TOOL],
       tool_choice: { type: 'tool', name: DRAFT_TOOL.name },
       messages: [{ role: 'user', content: [{ type: 'text', text: userText }] }],
@@ -478,11 +526,12 @@ async function generateImproved(input: {
     safeFeedback ? `<feedback>${escapeXml(safeFeedback)}</feedback>\n` : ''
   }Refine the existing ${surface} body. Tighten for voice, readability, and flow. Preserve the author's intent and overall structure. Apply any feedback above. Return the full refined ${surface} (title may stay the same or improve).`;
 
+  const system = await systemFor(input.kind);
   return withRetry(async () => {
     const res = await c.messages.create({
       model: MODEL,
       max_tokens: MAX_OUTPUT_TOKENS,
-      system: systemFor(input.kind),
+      system,
       tools: [DRAFT_TOOL],
       tool_choice: { type: 'tool', name: DRAFT_TOOL.name },
       messages: [{ role: 'user', content: [{ type: 'text', text: userText }] }],

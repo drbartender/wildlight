@@ -72,6 +72,13 @@ const STUDIO: NavDef[] = [
       path.startsWith('/admin/studio') &&
       search.get('kind') === 'newsletter',
   },
+  {
+    id: 'voice-training',
+    label: 'Voice training',
+    href: '/admin/voice-training',
+    icon: 'M12 1a4 4 0 014 4v6a4 4 0 01-8 0V5a4 4 0 014-4zM19 11a7 7 0 01-14 0M12 18v4M8 22h8',
+    match: ({ path }) => path.startsWith('/admin/voice-training'),
+  },
 ];
 
 const COMMERCE: NavDef[] = [

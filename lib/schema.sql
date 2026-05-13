@@ -490,3 +490,94 @@ CREATE INDEX IF NOT EXISTS idx_order_items_variant
 ALTER TABLE artworks
   ADD COLUMN IF NOT EXISTS print_width  INT,
   ADD COLUMN IF NOT EXISTS print_height INT;
+
+-- ─── Voice-training app ────────────────────────────────────────────
+-- Trains the generator (lib/studio.ts) on Dan's voice. Inputs accumulate
+-- across interview answers, pasted writing samples, A/B preferences,
+-- and anti-voice examples; a "synthesize" step rolls everything into a
+-- versioned voice_profile row with rules + summary + curated samples.
+-- One profile may be active at a time; the studio prompts read it on
+-- every request and merge it with the static defaults in
+-- lib/studio-voice.ts.
+
+CREATE TABLE IF NOT EXISTS voice_profiles (
+  id          SERIAL PRIMARY KEY,
+  active      BOOLEAN NOT NULL DEFAULT FALSE,
+  summary     TEXT NOT NULL DEFAULT '',
+  -- Array of {category, text} — explicit do/don't rules merged into the
+  -- system prompt as a bulleted list.
+  rules       JSONB NOT NULL DEFAULT '[]'::jsonb,
+  -- Array of {title, note} — curated few-shot samples that replace or
+  -- augment VOICE_NOTE_SAMPLES.
+  samples     JSONB NOT NULL DEFAULT '[]'::jsonb,
+  notes       TEXT NOT NULL DEFAULT '',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_by  TEXT
+);
+
+-- Exactly one active profile at any time. Partial unique index over a
+-- constant expression — Postgres refuses two rows with active=TRUE.
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_voice_profiles_active
+  ON voice_profiles((TRUE)) WHERE active = TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_voice_profiles_created_at
+  ON voice_profiles(created_at DESC);
+
+-- Raw writing samples Dan paste in. kind='positive' = sounds like him;
+-- 'anti' = drafts that felt off, optionally annotated with why.
+CREATE TABLE IF NOT EXISTS voice_samples (
+  id          SERIAL PRIMARY KEY,
+  kind        TEXT NOT NULL,
+  title       TEXT,
+  text        TEXT NOT NULL,
+  annotation  TEXT,
+  source      TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE voice_samples DROP CONSTRAINT IF EXISTS voice_samples_kind_chk;
+ALTER TABLE voice_samples ADD CONSTRAINT voice_samples_kind_chk
+  CHECK (kind IN ('positive', 'anti'));
+
+CREATE INDEX IF NOT EXISTS idx_voice_samples_kind_created
+  ON voice_samples(kind, created_at DESC);
+
+-- Structured interview answers. question_key is a stable identifier
+-- (e.g. 'words_avoided') so the UI can pre-fill previous answers; the
+-- question_text is captured at write time so reordering or editing the
+-- catalog doesn't orphan historic answers.
+CREATE TABLE IF NOT EXISTS voice_interview_responses (
+  id            SERIAL PRIMARY KEY,
+  question_key  TEXT NOT NULL,
+  question_text TEXT NOT NULL,
+  answer        TEXT NOT NULL,
+  category      TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Latest answer per question wins — the UI just upserts. Without this,
+-- repeated answers pile up and the synthesize step double-counts them.
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_voice_interview_question
+  ON voice_interview_responses(question_key);
+
+-- A/B preference judgments. Two short variants of the same micro-prompt,
+-- Dan picks the one that sounds more like him. Trains preferences that
+-- few-shot examples can't always carry.
+CREATE TABLE IF NOT EXISTS voice_ab_pairs (
+  id          SERIAL PRIMARY KEY,
+  prompt      TEXT NOT NULL,
+  variant_a   TEXT NOT NULL,
+  variant_b   TEXT NOT NULL,
+  pick        TEXT,
+  pick_reason TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  judged_at   TIMESTAMPTZ
+);
+
+ALTER TABLE voice_ab_pairs DROP CONSTRAINT IF EXISTS voice_ab_pairs_pick_chk;
+ALTER TABLE voice_ab_pairs ADD CONSTRAINT voice_ab_pairs_pick_chk
+  CHECK (pick IS NULL OR pick IN ('A', 'B', 'neither'));
+
+CREATE INDEX IF NOT EXISTS idx_voice_ab_pairs_judged
+  ON voice_ab_pairs(judged_at DESC NULLS LAST);

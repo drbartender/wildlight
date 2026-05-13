@@ -1,0 +1,136 @@
+export const runtime = 'nodejs';
+
+import { NextResponse } from 'next/server';
+import { requireAdmin } from '@/lib/session';
+import { pool } from '@/lib/db';
+import { logger } from '@/lib/logger';
+import { INTERVIEW_QUESTIONS } from '@/lib/voice-trainer';
+
+// GET /api/admin/voice-training/state
+//
+// One-shot bootstrap for the trainer UI. Returns:
+//   - the interview catalog plus any saved answers (keyed by question_key)
+//   - counts of positive/anti samples + recent N of each
+//   - recent A/B pairs (judged + un-judged)
+//   - all voice_profile rows (most recent first), with the active one marked
+//
+// Single round-trip so the UI renders in one paint after auth.
+
+interface InterviewRow {
+  question_key: string;
+  answer: string;
+  updated_at: string;
+}
+interface SampleRow {
+  id: number;
+  kind: 'positive' | 'anti';
+  title: string | null;
+  text: string;
+  annotation: string | null;
+  created_at: string;
+}
+interface AbRow {
+  id: number;
+  prompt: string;
+  variant_a: string;
+  variant_b: string;
+  pick: 'A' | 'B' | 'neither' | null;
+  pick_reason: string | null;
+  created_at: string;
+  judged_at: string | null;
+}
+interface ProfileRow {
+  id: number;
+  active: boolean;
+  summary: string;
+  rules: unknown;
+  samples: unknown;
+  notes: string;
+  created_at: string;
+  created_by: string | null;
+}
+
+export async function GET() {
+  await requireAdmin();
+  try {
+    const [answers, samples, ab, profiles] = await Promise.all([
+      pool.query<InterviewRow>(
+        `SELECT question_key, answer, updated_at::text
+         FROM voice_interview_responses`,
+      ),
+      pool.query<SampleRow>(
+        `SELECT id, kind, title, text, annotation, created_at::text
+         FROM voice_samples
+         ORDER BY created_at DESC
+         LIMIT 200`,
+      ),
+      pool.query<AbRow>(
+        `SELECT id, prompt, variant_a, variant_b, pick, pick_reason,
+                created_at::text, judged_at::text
+         FROM voice_ab_pairs
+         ORDER BY created_at DESC
+         LIMIT 50`,
+      ),
+      pool.query<ProfileRow>(
+        `SELECT id, active, summary, rules, samples, notes,
+                created_at::text, created_by
+         FROM voice_profiles
+         ORDER BY created_at DESC
+         LIMIT 20`,
+      ),
+    ]);
+
+    const answersByKey = new Map<string, { answer: string; updatedAt: string }>();
+    for (const r of answers.rows) {
+      answersByKey.set(r.question_key, {
+        answer: r.answer,
+        updatedAt: r.updated_at,
+      });
+    }
+
+    return NextResponse.json({
+      questions: INTERVIEW_QUESTIONS.map((q) => ({
+        ...q,
+        answer: answersByKey.get(q.key)?.answer ?? '',
+        answeredAt: answersByKey.get(q.key)?.updatedAt ?? null,
+      })),
+      samples: samples.rows.map((r) => ({
+        id: r.id,
+        kind: r.kind,
+        title: r.title,
+        text: r.text,
+        annotation: r.annotation,
+        createdAt: r.created_at,
+      })),
+      counts: {
+        positive: samples.rows.filter((r) => r.kind === 'positive').length,
+        anti: samples.rows.filter((r) => r.kind === 'anti').length,
+        answered: answers.rows.length,
+        abJudged: ab.rows.filter((r) => r.judged_at !== null).length,
+      },
+      ab: ab.rows.map((r) => ({
+        id: r.id,
+        prompt: r.prompt,
+        variantA: r.variant_a,
+        variantB: r.variant_b,
+        pick: r.pick,
+        pickReason: r.pick_reason,
+        createdAt: r.created_at,
+        judgedAt: r.judged_at,
+      })),
+      profiles: profiles.rows.map((r) => ({
+        id: r.id,
+        active: r.active,
+        summary: r.summary,
+        rules: Array.isArray(r.rules) ? r.rules : [],
+        samples: Array.isArray(r.samples) ? r.samples : [],
+        notes: r.notes,
+        createdAt: r.created_at,
+        createdBy: r.created_by,
+      })),
+    });
+  } catch (err) {
+    logger.error('voice-training state fetch failed', err);
+    return NextResponse.json({ error: 'load failed' }, { status: 500 });
+  }
+}
