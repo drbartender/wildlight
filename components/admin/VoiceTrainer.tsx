@@ -1170,9 +1170,16 @@ function ProfileCard({
           <span style={{ fontSize: '11px', opacity: 0.6, marginLeft: '6px' }}>
             {new Date(p.createdAt).toLocaleString()}
             {p.createdBy && ` · ${p.createdBy}`}
-            {p.updatedAt && p.updatedAt !== p.createdAt && (
-              <> · toggled {new Date(p.updatedAt).toLocaleString()}</>
-            )}
+            {p.updatedAt &&
+              // Show the toggle timestamp only if it's meaningfully after
+              // the create timestamp. Backfilled rows from the ADD COLUMN
+              // migration set updated_at = NOW() at migration time, which
+              // is strictly later than created_at but doesn't reflect an
+              // actual operator action. 5s tolerance filters out both
+              // migration-stamping and the cosmetic insert/update gap.
+              new Date(p.updatedAt).getTime() - new Date(p.createdAt).getTime() > 5000 && (
+                <> · toggled {new Date(p.updatedAt).toLocaleString()}</>
+              )}
           </span>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>

@@ -5,6 +5,7 @@ import { pool, parsePathId } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import type { VoiceRule } from '@/lib/voice-profile';
 import { VOICE_LETTER, type VoiceNoteSample } from '@/lib/studio-voice';
+import { safeString } from '@/lib/voice-export';
 
 // GET /api/admin/voice-training/profile/[id]/export
 //
@@ -25,27 +26,6 @@ interface Row {
   samples: unknown;
 }
 
-// safeString covers the most aggressive escapes the generator needs.
-// JSON.stringify handles backslash, quote, CR/LF, and control chars,
-// and the double-quoted output keeps `${` and backticks inert. The
-// post-pass escapes the line/paragraph separators (LINE SEPARATOR and
-// PARAGRAPH SEPARATOR), which JSON.stringify does NOT emit under modern
-// V8 — those code points were retroactively legalized inside JS string
-// literals in ES2019, so the runtime passes them through raw. Escaping
-// them anyway keeps the generated file portable to lower ES targets.
-// The separator characters are built via fromCharCode so this source
-// file contains no invisible bytes; split/join sidesteps the
-// new-RegExp-with-separator-char quirk where the constructor escapes
-// the pattern in `.source` and the regex then fails to match the raw
-// character at runtime.
-function safeString(s: string): string {
-  const BS = String.fromCharCode(0x5c);
-  const LS = String.fromCharCode(0x2028);
-  const PS = String.fromCharCode(0x2029);
-  return JSON.stringify(s)
-    .split(LS).join(BS + 'u2028')
-    .split(PS).join(BS + 'u2029');
-}
 
 export async function GET(
   _req: Request,
