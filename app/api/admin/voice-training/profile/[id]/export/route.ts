@@ -1,11 +1,10 @@
 export const runtime = 'nodejs';
 
-import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/session';
 import { pool, parsePathId } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import type { VoiceRule } from '@/lib/voice-profile';
-import type { VoiceNoteSample } from '@/lib/studio-voice';
+import { VOICE_LETTER, type VoiceNoteSample } from '@/lib/studio-voice';
 
 // GET /api/admin/voice-training/profile/[id]/export
 //
@@ -14,6 +13,10 @@ import type { VoiceNoteSample } from '@/lib/studio-voice';
 // profile baked into a git snapshot (the DB stays the live source of
 // truth — see lib/voice-profile.ts).
 //
+// VOICE_LETTER lives in lib/studio-voice.ts (not in voice_profiles), so
+// the export reads it fresh at request time and snapshots the current
+// committed copy alongside the profile-derived rules/samples.
+//
 // Vercel's filesystem is read-only, so we don't write the file here.
 
 interface Row {
@@ -21,13 +24,6 @@ interface Row {
   rules: unknown;
   samples: unknown;
   notes: string;
-}
-
-// JS string literal escape — single-quoted output so we only need to
-// escape backslash, single quote, and newline. Used for both rules and
-// samples below.
-function jsString(s: string): string {
-  return `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n')}'`;
 }
 
 export async function GET(
@@ -62,26 +58,37 @@ export async function GET(
         )
       : [];
 
+    // Every operator-controlled string lands in the generated TS via
+    // JSON.stringify — handles backslash, quote, CR/LF, control chars,
+    // and the U+2028/U+2029 separators that older JS targets treat as
+    // string terminators. The hand-rolled escape this replaced missed
+    // \r, backticks, and the line/paragraph separators.
+    const letterSrc = VOICE_LETTER.map((p) => `  ${JSON.stringify(p)}`).join(
+      ',\n',
+    );
+
     const rulesSrc = rules
       .map(
         (r) =>
-          `  { category: ${jsString(r.category)}, text: ${jsString(r.text)} },`,
+          `  { category: ${JSON.stringify(r.category)}, text: ${JSON.stringify(r.text)} },`,
       )
       .join('\n');
 
     const samplesSrc = samples
       .map(
         (s) =>
-          `  {\n    title: ${jsString(s.title)},\n    artist_note: ${jsString(s.artist_note)},\n  },`,
+          `  {\n    title: ${JSON.stringify(s.title)},\n    artist_note: ${JSON.stringify(s.artist_note)},\n  },`,
       )
       .join('\n');
 
     const summarySrc = row.summary
-      ? `\nexport const VOICE_SUMMARY = ${jsString(row.summary)};\n`
+      ? `\nexport const VOICE_SUMMARY = ${JSON.stringify(row.summary)};\n`
       : '';
 
     const ts = `// Generated from voice_profiles.id=${id} on ${new Date().toISOString()}.
-// Source of truth is the DB row; this file is a versioned snapshot.
+// Source of truth for rules/samples is the DB row; the artist letter is
+// read fresh from the current lib/studio-voice.ts at export time. Commit
+// this file to bake the snapshot into the repo.
 
 export interface VoiceNoteSample {
   title: string;
@@ -94,10 +101,7 @@ export interface VoiceRule {
 }
 
 export const VOICE_LETTER: readonly string[] = [
-  \`My name is Dan Raby I am the owner and Chief photographer here at Wildlight Imagery.  We work in Aurora Colorado which is an outlier of Denver Colorado in the USA. We work in many different styles of photography but we specialize in Portrait Photography,  Fine Art Photography, and  Freelance Photojournalism.\`,
-  \`as for me personally, I have been a photographer exploring my light for as long as I can remember. My father handed me a camera when I was but a child and I never put it down.  I studied photography at The Colorado Institute of Art. There I learned accepted techniques and photographic rules. I learned the right way to capture light and record my world.  Since then I have practiced and honed my craft but being a typical normal photographer isn't where my passion lies.\`,
-  \`I am always trying something different photographically.  I usually try and work beyond what I know and look for the light in unusual places. I like to consider myself a photographic rebel. Taking those well established photographic rules, that I learned in school,  and doing something else. Experimenting with new techniques constantly trying to find different ways to get the best image. Let's try this and see what happens.\`,
-  \`But I also can use what I know and stay true to the customer requirements. Working together to create the perfect shot. I look forward to seeing what we can do for you!\`,
+${letterSrc},
 ];
 ${summarySrc}
 export const VOICE_RULES: readonly VoiceRule[] = [
@@ -112,7 +116,7 @@ ${samplesSrc}
     return new Response(ts, {
       status: 200,
       headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
+        'Content-Type': 'application/typescript; charset=utf-8',
         'Content-Disposition': `attachment; filename="studio-voice.profile-${id}.ts"`,
       },
     });

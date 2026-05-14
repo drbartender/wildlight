@@ -515,6 +515,13 @@ CREATE TABLE IF NOT EXISTS voice_profiles (
   created_by  TEXT
 );
 
+-- updated_at moves when a row's `active` flag toggles via the activate
+-- route. Added after the initial table ship; existing rows backfill to
+-- NOW() at migration time which is harmless — they all read as "last
+-- touched at the moment we added the column."
+ALTER TABLE voice_profiles
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
 -- Exactly one active profile at any time. Partial unique index over a
 -- constant expression — Postgres refuses two rows with active=TRUE.
 CREATE UNIQUE INDEX IF NOT EXISTS uniq_voice_profiles_active

@@ -16,6 +16,8 @@ import { INTERVIEW_QUESTIONS } from '@/lib/voice-trainer';
 //
 // Single round-trip so the UI renders in one paint after auth.
 
+const SAMPLE_PREVIEW_CHARS = 2000;
+
 interface InterviewRow {
   question_key: string;
   answer: string;
@@ -55,8 +57,13 @@ export async function GET() {
   try {
     const [answers, samples, ab, profiles] = await Promise.all([
       pool.query<InterviewRow>(
+        // LIMIT is defensive — INTERVIEW_QUESTIONS is small and the
+        // route validates question_key on write, but a future bypass
+        // could grow the table unbounded. 500 still vastly exceeds the
+        // catalog size.
         `SELECT question_key, answer, updated_at::text
-         FROM voice_interview_responses`,
+         FROM voice_interview_responses
+         LIMIT 500`,
       ),
       pool.query<SampleRow>(
         `SELECT id, kind, title, text, annotation, created_at::text
@@ -94,14 +101,25 @@ export async function GET() {
         answer: answersByKey.get(q.key)?.answer ?? '',
         answeredAt: answersByKey.get(q.key)?.updatedAt ?? null,
       })),
-      samples: samples.rows.map((r) => ({
-        id: r.id,
-        kind: r.kind,
-        title: r.title,
-        text: r.text,
-        annotation: r.annotation,
-        createdAt: r.created_at,
-      })),
+      // Sample `text` is capped at 20k chars on write but the UI list
+      // view only needs a preview — full text is loaded into the
+      // synthesize call directly from voice_samples. Truncate to keep
+      // the state payload bounded and avoid shipping long pasted blocks
+      // on every page paint.
+      samples: samples.rows.map((r) => {
+        const truncated = r.text.length > SAMPLE_PREVIEW_CHARS;
+        return {
+          id: r.id,
+          kind: r.kind,
+          title: r.title,
+          text: truncated
+            ? `${r.text.slice(0, SAMPLE_PREVIEW_CHARS)}…`
+            : r.text,
+          textTruncated: truncated,
+          annotation: r.annotation,
+          createdAt: r.created_at,
+        };
+      }),
       counts: {
         positive: samples.rows.filter((r) => r.kind === 'positive').length,
         anti: samples.rows.filter((r) => r.kind === 'anti').length,

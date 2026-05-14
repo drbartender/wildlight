@@ -2,16 +2,20 @@ export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/session';
-import { pool, withTransaction, parsePathId } from '@/lib/db';
+import { pool, parsePathId } from '@/lib/db';
 import { logger } from '@/lib/logger';
 
 // POST /api/admin/voice-training/profile/[id]/activate
 //
-// Promote a profile to active. The unique partial index on
-// voice_profiles((TRUE)) WHERE active = TRUE means we MUST unset the
-// prior active row before setting this one — otherwise the UPDATE
-// trips the constraint. One transaction; the prior row stays as a
-// versioned snapshot.
+// Promote a profile to active. One atomic UPDATE toggles every row that
+// needs to flip — the previous active row (if any) and the target row.
+// Wrapping in a single statement lets Postgres serialize concurrent
+// activates against each other and keeps the partial unique index on
+// active=TRUE intact at every commit boundary.
+//
+// The UPDATE's WHERE clause excludes a no-op re-activation of the
+// currently active profile, so updated_at only moves when the row's
+// active state actually changed.
 
 export async function POST(
   _req: Request,
@@ -24,34 +28,48 @@ export async function POST(
     return NextResponse.json({ error: 'bad id' }, { status: 400 });
   }
   try {
-    const result = await withTransaction(async (client) => {
-      const check = await client.query<{ id: number }>(
-        'SELECT id FROM voice_profiles WHERE id = $1',
+    const r = await pool.query<{ id: number }>(
+      `UPDATE voice_profiles
+          SET active = (id = $1),
+              updated_at = NOW()
+        WHERE (active = TRUE OR id = $1)
+          AND active <> (id = $1)
+        RETURNING id`,
+      [id],
+    );
+    // Zero rows updated = either the target is already active (no-op
+    // success) or the target doesn't exist (404). Confirm with a cheap
+    // existence check rather than reading the active row a second time.
+    if (r.rowCount === 0) {
+      const exists = await pool.query(
+        'SELECT 1 FROM voice_profiles WHERE id = $1',
         [id],
       );
-      if (!check.rowCount) return null;
-      await client.query(
-        `UPDATE voice_profiles SET active = FALSE WHERE active = TRUE AND id <> $1`,
-        [id],
-      );
-      await client.query(
-        `UPDATE voice_profiles SET active = TRUE WHERE id = $1`,
-        [id],
-      );
-      return { id };
-    });
-    if (!result) {
-      return NextResponse.json({ error: 'not found' }, { status: 404 });
+      if (!exists.rowCount) {
+        return NextResponse.json({ error: 'not found' }, { status: 404 });
+      }
     }
-    return NextResponse.json({ ok: true, id: result.id });
+    return NextResponse.json({ ok: true, id });
   } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === '23505') {
+      // Two admins flipped distinct profiles at the same moment — the
+      // partial unique index serialized them and the loser landed here.
+      return NextResponse.json(
+        { error: 'another activation just landed — refresh' },
+        { status: 409 },
+      );
+    }
     logger.error('voice activate failed', err, { id });
     return NextResponse.json({ error: 'activate failed' }, { status: 500 });
   }
 }
 
 // DELETE deactivates everything — useful to reset to the static defaults
-// in lib/studio-voice.ts. id=0 is the conventional "all" target.
+// in lib/studio-voice.ts. The route uses the literal string "0" rather
+// than parsePathId() because parsePathId rejects 0 (it requires n > 0).
+// DO NOT refactor to `parsePathId(raw) === 0` — that returns null for
+// "0" input and the convention silently breaks.
 export async function DELETE(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
@@ -63,7 +81,9 @@ export async function DELETE(
   }
   try {
     await pool.query(
-      'UPDATE voice_profiles SET active = FALSE WHERE active = TRUE',
+      `UPDATE voice_profiles
+          SET active = FALSE, updated_at = NOW()
+        WHERE active = TRUE`,
     );
     return NextResponse.json({ ok: true });
   } catch (err) {

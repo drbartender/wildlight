@@ -24,7 +24,10 @@ interface Sample {
   id: number;
   kind: 'positive' | 'anti';
   title: string | null;
+  // Truncated to 2000 chars in the state payload — see SAMPLE_PREVIEW_CHARS
+  // in the state route. `textTruncated` flags when the row was clipped.
   text: string;
+  textTruncated?: boolean;
   annotation: string | null;
   createdAt: string;
 }
@@ -375,6 +378,9 @@ function InterviewItem({
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ questionKey: q.key, answer: value }),
+        // Blur fires on tab-away / navigate; keepalive ensures the PUT
+        // finishes even if the user leaves the page before the response.
+        keepalive: true,
       });
       if (!r.ok) {
         const j = (await r.json().catch(() => ({}))) as { error?: string };
@@ -1046,6 +1052,26 @@ function Profiles({
     }
   }
 
+  async function deleteProfile(id: number) {
+    if (!confirm(`Delete profile #${id}? This cannot be undone.`)) return;
+    setBusy(`delete:${id}`);
+    setErr(null);
+    try {
+      const r = await fetch(`/api/admin/voice-training/profile/${id}`, {
+        method: 'DELETE',
+      });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? `delete failed (${r.status})`);
+      }
+      onChange();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'delete failed');
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const busySynth = busy === 'synth';
 
   return (
@@ -1080,7 +1106,9 @@ function Profiles({
             key={p.id}
             p={p}
             onActivate={() => activate(p.id)}
+            onDelete={() => deleteProfile(p.id)}
             busy={busy === `activate:${p.id}`}
+            busyDelete={busy === `delete:${p.id}`}
           />
         ))
       )}
@@ -1091,11 +1119,15 @@ function Profiles({
 function ProfileCard({
   p,
   onActivate,
+  onDelete,
   busy,
+  busyDelete,
 }: {
   p: Profile;
   onActivate: () => void;
+  onDelete: () => void;
   busy: boolean;
+  busyDelete: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -1150,6 +1182,17 @@ function ProfileCard({
               disabled={busy}
             >
               {busy ? 'Activating…' : 'Activate'}
+            </button>
+          )}
+          {!p.active && (
+            <button
+              type="button"
+              className="wl-adm-btn small ghost"
+              onClick={onDelete}
+              disabled={busyDelete}
+              title="Permanently delete this profile"
+            >
+              {busyDelete ? 'Deleting…' : 'Delete'}
             </button>
           )}
         </div>
