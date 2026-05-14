@@ -2,20 +2,30 @@ export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/session';
-import { pool, parsePathId } from '@/lib/db';
+import { pool, withTransaction, parsePathId } from '@/lib/db';
 import { logger } from '@/lib/logger';
 
 // POST /api/admin/voice-training/profile/[id]/activate
 //
-// Promote a profile to active. One atomic UPDATE toggles every row that
-// needs to flip — the previous active row (if any) and the target row.
-// Wrapping in a single statement lets Postgres serialize concurrent
-// activates against each other and keeps the partial unique index on
-// active=TRUE intact at every commit boundary.
+// Promote a profile to active. Two-step inside a single transaction:
+//   1. SELECT … FOR UPDATE on the target — gates the whole flow on
+//      existence and locks the target against concurrent DELETE.
+//   2. Atomic UPDATE that flips every row whose active flag needs to
+//      change in one statement.
 //
-// The UPDATE's WHERE clause excludes a no-op re-activation of the
-// currently active profile, so updated_at only moves when the row's
-// active state actually changed.
+// The partial unique index `uniq_voice_profiles_active` is the
+// load-bearing serializer for two distinct admins activating two
+// distinct profiles concurrently: the second one's commit trips the
+// index and we surface the 23505 as a 409. The single-statement UPDATE
+// just guarantees we never leave a torn intermediate state on the path
+// of a single activate.
+//
+// The bug this re-fix closes: the previous round-one rewrite collapsed
+// the existence check into "rowCount === 0 means not found OR no-op."
+// That's wrong — for a non-existent target id while another row is
+// active, the UPDATE matches the live active row, deactivates it,
+// returns rowCount=1, and we'd return 200 OK while silently dropping
+// the active profile.
 
 export async function POST(
   _req: Request,
@@ -28,26 +38,27 @@ export async function POST(
     return NextResponse.json({ error: 'bad id' }, { status: 400 });
   }
   try {
-    const r = await pool.query<{ id: number }>(
-      `UPDATE voice_profiles
-          SET active = (id = $1),
-              updated_at = NOW()
-        WHERE (active = TRUE OR id = $1)
-          AND active <> (id = $1)
-        RETURNING id`,
-      [id],
-    );
-    // Zero rows updated = either the target is already active (no-op
-    // success) or the target doesn't exist (404). Confirm with a cheap
-    // existence check rather than reading the active row a second time.
-    if (r.rowCount === 0) {
-      const exists = await pool.query(
-        'SELECT 1 FROM voice_profiles WHERE id = $1',
+    const result = await withTransaction(async (client) => {
+      // FOR UPDATE locks the target row for the duration of the
+      // transaction — prevents a concurrent DELETE from racing the
+      // activate and leaving us with a stale UPDATE.
+      const t = await client.query(
+        'SELECT 1 FROM voice_profiles WHERE id = $1 FOR UPDATE',
         [id],
       );
-      if (!exists.rowCount) {
-        return NextResponse.json({ error: 'not found' }, { status: 404 });
-      }
+      if (!t.rowCount) return { found: false };
+      await client.query(
+        `UPDATE voice_profiles
+            SET active = (id = $1),
+                updated_at = NOW()
+          WHERE (active = TRUE OR id = $1)
+            AND active <> (id = $1)`,
+        [id],
+      );
+      return { found: true };
+    });
+    if (!result.found) {
+      return NextResponse.json({ error: 'not found' }, { status: 404 });
     }
     return NextResponse.json({ ok: true, id });
   } catch (err) {

@@ -59,6 +59,7 @@ interface Profile {
   samples: ProfileSample[];
   notes: string;
   createdAt: string;
+  updatedAt: string;
   createdBy: string | null;
 }
 
@@ -679,6 +680,11 @@ function SampleRow({
       <div style={{ whiteSpace: 'pre-wrap', fontSize: '14px', lineHeight: 1.55 }}>
         {s.text}
       </div>
+      {s.textTruncated && (
+        <div style={{ fontSize: '11px', opacity: 0.55, fontStyle: 'italic' }}>
+          Preview truncated — full text used in synthesis.
+        </div>
+      )}
       {s.annotation && (
         <div
           style={{
@@ -1164,6 +1170,9 @@ function ProfileCard({
           <span style={{ fontSize: '11px', opacity: 0.6, marginLeft: '6px' }}>
             {new Date(p.createdAt).toLocaleString()}
             {p.createdBy && ` · ${p.createdBy}`}
+            {p.updatedAt && p.updatedAt !== p.createdAt && (
+              <> · toggled {new Date(p.updatedAt).toLocaleString()}</>
+            )}
           </span>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>

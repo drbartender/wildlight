@@ -23,7 +23,28 @@ interface Row {
   summary: string;
   rules: unknown;
   samples: unknown;
-  notes: string;
+}
+
+// safeString covers the most aggressive escapes the generator needs.
+// JSON.stringify handles backslash, quote, CR/LF, and control chars,
+// and the double-quoted output keeps `${` and backticks inert. The
+// post-pass escapes the line/paragraph separators (LINE SEPARATOR and
+// PARAGRAPH SEPARATOR), which JSON.stringify does NOT emit under modern
+// V8 — those code points were retroactively legalized inside JS string
+// literals in ES2019, so the runtime passes them through raw. Escaping
+// them anyway keeps the generated file portable to lower ES targets.
+// The separator characters are built via fromCharCode so this source
+// file contains no invisible bytes; split/join sidesteps the
+// new-RegExp-with-separator-char quirk where the constructor escapes
+// the pattern in `.source` and the regex then fails to match the raw
+// character at runtime.
+function safeString(s: string): string {
+  const BS = String.fromCharCode(0x5c);
+  const LS = String.fromCharCode(0x2028);
+  const PS = String.fromCharCode(0x2029);
+  return JSON.stringify(s)
+    .split(LS).join(BS + 'u2028')
+    .split(PS).join(BS + 'u2029');
 }
 
 export async function GET(
@@ -38,7 +59,7 @@ export async function GET(
   }
   try {
     const r = await pool.query<Row>(
-      `SELECT summary, rules, samples, notes
+      `SELECT summary, rules, samples
        FROM voice_profiles WHERE id = $1`,
       [id],
     );
@@ -58,31 +79,26 @@ export async function GET(
         )
       : [];
 
-    // Every operator-controlled string lands in the generated TS via
-    // JSON.stringify — handles backslash, quote, CR/LF, control chars,
-    // and the U+2028/U+2029 separators that older JS targets treat as
-    // string terminators. The hand-rolled escape this replaced missed
-    // \r, backticks, and the line/paragraph separators.
-    const letterSrc = VOICE_LETTER.map((p) => `  ${JSON.stringify(p)}`).join(
+    const letterSrc = VOICE_LETTER.map((p) => `  ${safeString(p)}`).join(
       ',\n',
     );
 
     const rulesSrc = rules
       .map(
         (r) =>
-          `  { category: ${JSON.stringify(r.category)}, text: ${JSON.stringify(r.text)} },`,
+          `  { category: ${safeString(r.category)}, text: ${safeString(r.text)} },`,
       )
       .join('\n');
 
     const samplesSrc = samples
       .map(
         (s) =>
-          `  {\n    title: ${JSON.stringify(s.title)},\n    artist_note: ${JSON.stringify(s.artist_note)},\n  },`,
+          `  {\n    title: ${safeString(s.title)},\n    artist_note: ${safeString(s.artist_note)},\n  },`,
       )
       .join('\n');
 
     const summarySrc = row.summary
-      ? `\nexport const VOICE_SUMMARY = ${JSON.stringify(row.summary)};\n`
+      ? `\nexport const VOICE_SUMMARY = ${safeString(row.summary)};\n`
       : '';
 
     const ts = `// Generated from voice_profiles.id=${id} on ${new Date().toISOString()}.

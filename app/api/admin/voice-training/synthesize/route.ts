@@ -61,9 +61,13 @@ export async function POST() {
   try {
     const [interview, samples, ab] = await Promise.all([
       pool.query<InterviewRow>(
+        // LIMIT matches the state route — defensive bound on a table
+        // that's logically capped at the catalog size but isn't FK'd to
+        // a catalog table. 500 still vastly exceeds the question count.
         `SELECT question_text, answer, category
          FROM voice_interview_responses
-         ORDER BY category NULLS LAST, question_key`,
+         ORDER BY category NULLS LAST, question_key
+         LIMIT 500`,
       ),
       pool.query<SampleRow>(
         `SELECT kind, title, text, annotation

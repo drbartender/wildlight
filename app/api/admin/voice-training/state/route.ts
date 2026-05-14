@@ -49,6 +49,7 @@ interface ProfileRow {
   samples: unknown;
   notes: string;
   created_at: string;
+  updated_at: string;
   created_by: string | null;
 }
 
@@ -80,7 +81,7 @@ export async function GET() {
       ),
       pool.query<ProfileRow>(
         `SELECT id, active, summary, rules, samples, notes,
-                created_at::text, created_by
+                created_at::text, updated_at::text, created_by
          FROM voice_profiles
          ORDER BY created_at DESC
          LIMIT 20`,
@@ -144,6 +145,7 @@ export async function GET() {
         samples: Array.isArray(r.samples) ? r.samples : [],
         notes: r.notes,
         createdAt: r.created_at,
+        updatedAt: r.updated_at,
         createdBy: r.created_by,
       })),
     });
