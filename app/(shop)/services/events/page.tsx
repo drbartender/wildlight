@@ -81,7 +81,7 @@ export default function EventsService() {
           </p>
           <Link
             className="wl-btn primary"
-            href="/contact?reason=events&topic=events"
+            href="/contact?reason=events"
           >
             Tell Dan about your event →
           </Link>

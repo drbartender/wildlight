@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import Image from 'next/image';
+import { useRef, useState } from 'react';
 import { Lightbox } from './Lightbox';
 
 export interface WallItem {
@@ -23,29 +24,44 @@ export interface WallItem {
  */
 export function VintageWall({ items }: { items: WallItem[] }) {
   const [active, setActive] = useState<number | null>(null);
+  // Remember which frame opened the viewer so focus returns there on close.
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+
+  function open(i: number, el: HTMLButtonElement) {
+    triggerRef.current = el;
+    setActive(i);
+  }
+  function close() {
+    setActive(null);
+    const t = triggerRef.current;
+    if (t) requestAnimationFrame(() => t.focus());
+  }
 
   return (
     <>
-      <div className="wl-wall">
+      {/* inert while the viewer is open: the wall behind the scrim must not
+          be tabbable or clickable. */}
+      <div className="wl-wall" inert={active !== null ? true : undefined}>
         {items.map((it, i) => (
           <button
             type="button"
             key={it.slug}
             className="wl-wall-item"
-            onClick={() => setActive(i)}
+            onClick={(e) => open(i, e.currentTarget)}
             aria-label={`View ${it.title}${
               it.available ? ' — available as a print' : ''
             }`}
           >
-            {/* Plain img on purpose: ~100 look-only vintage examples with no
-                stored dimensions; lazy-loading keeps the wall light. A
-                thumbnail tier is a tracked follow-up. */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+            {/* next/image fills the fixed-aspect cell and serves a ~200px
+                AVIF/WebP from the 2000px web master — the wall stays light
+                without a separate thumbnail tier. */}
+            <Image
               src={it.image_web_url}
               alt={it.title}
-              loading="lazy"
-              decoding="async"
+              fill
+              sizes="(max-width: 520px) 50vw, (max-width: 1024px) 25vw, 200px"
+              loading={i < 12 ? 'eager' : 'lazy'}
+              style={{ objectFit: 'cover' }}
             />
             {it.available && <span className="wl-wall-dot" aria-hidden="true" />}
             <span className="wl-wall-cap">{it.title}</span>
@@ -56,7 +72,7 @@ export function VintageWall({ items }: { items: WallItem[] }) {
         <Lightbox
           items={items}
           index={active}
-          onClose={() => setActive(null)}
+          onClose={close}
           onIndex={setActive}
         />
       )}

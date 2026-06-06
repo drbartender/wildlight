@@ -26,18 +26,28 @@ export default async function MarketingHome() {
   // The wall is Dan's whole body of work shown as look-only "vintage"
   // examples (drafts) intermixed with the few available prints (published).
   // md5(slug) is a stable shuffle so it reads as an unsorted wall, not a
-  // sorted catalog. 'untitled%' filters the lone placeholder import.
-  const res = await pool.query<WallRow>(
-    `SELECT a.slug, a.title, a.image_web_url, a.year_shot, a.location,
-            (a.status = 'published') AS available,
-            c.title AS collection_title
-     FROM artworks a
-     LEFT JOIN collections c ON c.id = a.collection_id
-     WHERE a.status IN ('draft', 'published')
-       AND a.title NOT ILIKE 'untitled%'
-     ORDER BY md5(a.slug)`,
-  );
-  const items: WallItem[] = res.rows;
+  // sorted catalog. Every row has an image_web_url (NOT NULL) and a real
+  // title, so no quality filter is needed today; if junk drafts ever appear,
+  // a dedicated 'vintage' status is the fix (see spec follow-ups). LIMIT caps
+  // the wall well above today's ~100 so an import spree can't bloat it.
+  // Wrapped so a Neon cold-start blip renders the empty state, not a 500 on
+  // the highest-traffic page.
+  let items: WallItem[] = [];
+  try {
+    const res = await pool.query<WallRow>(
+      `SELECT a.slug, a.title, a.image_web_url, a.year_shot, a.location,
+              (a.status = 'published') AS available,
+              c.title AS collection_title
+       FROM artworks a
+       LEFT JOIN collections c ON c.id = a.collection_id
+       WHERE a.status IN ('draft', 'published')
+       ORDER BY md5(a.slug)
+       LIMIT 300`,
+    );
+    items = res.rows;
+  } catch (err) {
+    console.error('[home] vintage wall query failed:', err);
+  }
   const total = items.length;
   const forSale = items.filter((i) => i.available).length;
 

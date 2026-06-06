@@ -1,14 +1,16 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { WallItem } from './VintageWall';
 import { plateNumber } from '@/lib/plate-number';
 
 /**
  * In-place viewer for the vintage wall. Dark scrim regardless of mood —
  * best for looking at photographs. Esc + arrow keys + click-out, with a
- * body scroll-lock (same pattern as the Nav dialog).
+ * body scroll-lock and focus moved to the close button (the wall is marked
+ * inert by VintageWall while this is open; focus returns to the originating
+ * frame on close).
  */
 export function Lightbox({
   items,
@@ -22,6 +24,7 @@ export function Lightbox({
   onIndex: (i: number) => void;
 }) {
   const item = items[index];
+  const closeRef = useRef<HTMLButtonElement>(null);
 
   const go = useCallback(
     (dir: number) => {
@@ -45,6 +48,22 @@ export function Lightbox({
     };
   }, [go, onClose]);
 
+  // Move focus into the dialog when it opens.
+  useEffect(() => {
+    closeRef.current?.focus();
+  }, []);
+
+  // Preload the neighbours so arrowing through the wall is instant.
+  useEffect(() => {
+    [1, -1].forEach((dir) => {
+      const peek = items[(index + dir + items.length) % items.length];
+      if (peek) {
+        const img = new window.Image();
+        img.src = peek.image_web_url;
+      }
+    });
+  }, [index, items]);
+
   if (!item) return null;
 
   const sub = [item.collection_title, item.location, item.year_shot]
@@ -62,6 +81,7 @@ export function Lightbox({
     >
       <div className="wl-lightbox-stage" onClick={(e) => e.stopPropagation()}>
         <button
+          ref={closeRef}
           type="button"
           className="wl-lightbox-close"
           onClick={onClose}
@@ -79,6 +99,8 @@ export function Lightbox({
             ‹
           </button>
         )}
+        {/* Full uncropped frame — the lightbox wants the 2000px web master,
+            so a plain img (not next/image) is correct here. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           className="wl-lightbox-img"

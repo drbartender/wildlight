@@ -3239,7 +3239,7 @@ html[data-mood='ink'] .wl-surface::after {
   border-color: var(--s-orange);
 }
 
-/* The wall — CSS multi-column masonry; native image aspect preserved. */
+/* The wall — uniform 3:2 contact-sheet grid (no stored aspect ratios). */
 .wl-wall {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(186px, 1fr));

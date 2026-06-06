@@ -24,9 +24,9 @@ has true hi-def masters for; and is fine showing his lower-res archive as
 ## Data (no schema change)
 - `artworks.status` already gates everything; `/shop/artwork/[slug]` 404s
   anything not `published`.
-- **Wall source:** `status IN ('draft','published')`, `title NOT ILIKE
-  'untitled%'`, `ORDER BY md5(slug)` (stable shuffle = "unsorted wall").
-  ~100 frames today.
+- **Wall source:** `status IN ('draft','published')`, `ORDER BY md5(slug)`
+  (stable shuffle = "unsorted wall"), `LIMIT 300`. ~100 frames today. Query is
+  wrapped in try/catch so a Neon cold-start renders the empty state, not a 500.
 - **`available` = `status='published'`** (8 today). These get a dot on the wall
   and a "See print options →" link in the lightbox. Non-available frames zoom
   only — they never link to a 404.
@@ -35,9 +35,11 @@ has true hi-def masters for; and is fine showing his lower-res archive as
   status is a possible later refinement if junk drafts ever appear.
 
 ## Components
-- `VintageWall` (client) — CSS multi-column masonry (`column-count` 2→6
-  responsive), plain lazy `<img>` (no stored dims; vintage = low-res anyway),
-  hover caption, available-dot.
+- `VintageWall` (client) — uniform 3:2 contact-sheet grid (`auto-fill`,
+  responsive ~2→7 cols), `next/image` `fill` + `sizes` so each ~200px cell
+  pulls a small AVIF/WebP off the 2000px web master (no thumbnail tier
+  needed), hover caption, available-dot. Marks itself `inert` while the
+  lightbox is open.
 - `Lightbox` (client) — dark scrim viewer, prev/next + arrow keys + esc, scroll
   lock (mirrors Nav's dialog), "See print options →" when available.
 - Home `/` rewritten to: slim hero → wall → slim closing (shop + events CTA +
@@ -49,7 +51,11 @@ has true hi-def masters for; and is fine showing his lower-res archive as
 - Nav: Gallery · Shop · Events · Portraits · Journal · Studio.
 
 ## Out of scope (follow-ups)
-- Thumbnail image tier (wall currently loads ~2000px web images, lazy-loaded).
-- Backfill `image_width`/`image_height`.
+- Backfill `image_width`/`image_height` (the wall uses `next/image` `fill`,
+  so it no longer needs stored dims; backfill would still help the artwork
+  detail page).
+- Trim the client-serialized `items` payload (Lightbox-only fields ride along
+  to every wall tile — ~30 KB today, matters only at much larger scale).
+- A real `'vintage'` status instead of reusing `draft` for wall membership.
 - `/portfolio` (by-collection editorial index) left as-is.
 - Curating which drafts are truly "wall-worthy" / promoting masters to the shop.
