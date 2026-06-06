@@ -14,10 +14,21 @@ interface LinkSpec {
 }
 
 const LINKS: LinkSpec[] = [
+  { href: '/', label: 'Gallery', match: (p) => p === '/' },
   {
-    href: '/portfolio',
-    label: 'Portfolio',
-    match: (p) => p.startsWith('/portfolio'),
+    href: '/shop',
+    label: 'Shop',
+    match: (p) => p.startsWith('/shop'),
+  },
+  {
+    href: '/services/events',
+    label: 'Events',
+    match: (p) => p.startsWith('/services/events'),
+  },
+  {
+    href: '/services/portraits',
+    label: 'Portraits',
+    match: (p) => p.startsWith('/services/portraits'),
   },
   {
     href: '/journal',
@@ -25,11 +36,6 @@ const LINKS: LinkSpec[] = [
     match: (p) => p.startsWith('/journal'),
   },
   { href: '/about', label: 'Studio', match: (p) => p.startsWith('/about') },
-  {
-    href: '/shop',
-    label: 'Shop',
-    match: (p) => p.startsWith('/shop'),
-  },
 ];
 
 function NavLink({

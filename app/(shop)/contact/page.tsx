@@ -4,9 +4,18 @@ import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { plateNumber } from '@/lib/plate-number';
 
-type Reason = 'commission' | 'corporate-gift' | 'license' | 'order' | 'hello';
+type Reason =
+  | 'events'
+  | 'portrait'
+  | 'commission'
+  | 'corporate-gift'
+  | 'license'
+  | 'order'
+  | 'hello';
 
 const REASON_OPTIONS: { value: Reason; label: string }[] = [
+  { value: 'events', label: 'Event photography' },
+  { value: 'portrait', label: 'Portrait session' },
   { value: 'commission', label: 'Commission a piece' },
   { value: 'corporate-gift', label: 'Corporate gift or bulk order' },
   { value: 'license', label: 'License an image' },
@@ -110,8 +119,8 @@ function ContactForm() {
         Say <em>hello</em>.
       </h1>
       <p className="lede">
-        Commissions, corporate gifts, licensing, a question about a plate, or
-        just a note. Dan answers every one, usually within a day.
+        Events, portrait sessions, commissions, licensing, or just a note. Dan
+        answers every one, usually within a day.
       </p>
 
       <div className="wl-contact-grid">

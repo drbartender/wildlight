@@ -9,8 +9,8 @@ export function Footer() {
         <div>
           <Wordmark size={24} />
           <p className="tag">
-            A small, considered selection of fine-art photography by Dan Raby.
-            Added sparingly. Printed to order.
+            Twenty years of looking — the photographs of Dan Raby. Select
+            pieces printed to order; events &amp; portraits by arrangement.
           </p>
           <div className="capture">
             <EmailCaptureStrip
@@ -40,6 +40,9 @@ export function Footer() {
           </Link>
           <Link className="link" href="/journal">
             Journal
+          </Link>
+          <Link className="link" href="/services/events">
+            Events
           </Link>
           <Link className="link" href="/services/portraits">
             Portraits

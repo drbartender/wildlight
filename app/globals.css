@@ -3198,3 +3198,257 @@ html[data-mood='ink'] .wl-surface::after {
   .wlsr-refs { grid-template-columns: 1fr; }
   .wlsr-ref { padding: 18px 20px; }
 }
+
+/* ─── VINTAGE WALL (home) ───────────────────────────────────────────
+ * Dan's body of work as a dense, unsorted "wall of photos" — the feel of
+ * the old wildlightimagery.com gallery. Look-only vintage examples mixed
+ * with the few available prints (marked; they link to the shop from the
+ * lightbox). Distinct on purpose from the sorted /shop catalog.
+ */
+.wl-wallhome-hero {
+  padding: 40px 56px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.wl-wallhome-hero .wl-eyebrow { display: inline-flex; }
+.wl-wallhome-hero h1 {
+  font-family: var(--f-display);
+  font-size: clamp(40px, 6vw, 84px);
+  line-height: 0.98;
+  letter-spacing: -0.01em;
+  margin: 0;
+  max-width: 18ch;
+}
+.wl-wallhome-hero h1 em { font-style: italic; color: var(--ink-2); }
+.wl-wallhome-hero .meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  font: 500 10.5px var(--f-mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.wl-wallhome-hero .meta a {
+  color: inherit;
+  border-bottom: 1px solid var(--rule-strong);
+}
+.wl-wallhome-hero .meta a:hover {
+  color: var(--s-orange);
+  border-color: var(--s-orange);
+}
+
+/* The wall — CSS multi-column masonry; native image aspect preserved. */
+.wl-wall {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(186px, 1fr));
+  gap: 8px;
+  padding: 0 8px 8px;
+}
+@media (max-width: 520px) {
+  .wl-wall {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 6px;
+    padding: 0 6px 6px;
+  }
+}
+
+.wl-wall-item {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--rule);
+  background: var(--paper-3);
+  cursor: pointer;
+  position: relative;
+  line-height: 0;
+  overflow: hidden;
+  /* Uniform 3:2 cells, like the old wildlightimagery.com NextGEN thumbs
+     (240x160). Reserves layout space so lazy images cause no shift; the
+     full uncropped frame shows in the lightbox. */
+  aspect-ratio: 3 / 2;
+  transition: box-shadow 200ms, transform 200ms;
+}
+.wl-wall-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  filter: saturate(0.98);
+}
+.wl-wall-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px -14px rgba(0, 0, 0, 0.5);
+  z-index: 1;
+}
+.wl-wall-item:focus-visible {
+  outline: 2px solid var(--s-blue);
+  outline-offset: 2px;
+}
+/* available-as-a-print marker */
+.wl-wall-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--s-red);
+  box-shadow: 0 0 0 3px var(--paper-2);
+}
+/* title revealed on hover/focus */
+.wl-wall-cap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 18px 8px 6px;
+  font: 500 9.5px var(--f-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #f2ede1;
+  line-height: 1.3;
+  background: linear-gradient(to top, rgba(8, 7, 6, 0.72), rgba(8, 7, 6, 0));
+  opacity: 0;
+  transition: opacity 180ms;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wl-wall-item:hover .wl-wall-cap,
+.wl-wall-item:focus-visible .wl-wall-cap { opacity: 1; }
+
+/* closing strip below the wall */
+.wl-wallhome-foot { border-top: 1px solid var(--rule); margin-top: 8px; }
+.wl-wallhome-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 40px 56px;
+  border-bottom: 1px solid var(--rule);
+}
+.wl-wallhome-cta .t {
+  font-family: var(--f-display);
+  font-size: clamp(28px, 3.5vw, 44px);
+  line-height: 1.05;
+  margin: 0;
+  max-width: 22ch;
+}
+.wl-wallhome-cta .t em { font-style: italic; color: var(--ink-2); }
+.wl-wallhome-cta .actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+/* ─── LIGHTBOX ──────────────────────────────────────────────────────
+ * In-place viewer for the wall. Dark scrim regardless of mood — best for
+ * looking at photographs. Mirrors the Nav dialog (scroll-lock + esc),
+ * plus arrow-key paging.
+ */
+.wl-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  background: rgba(8, 7, 6, 0.94);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  padding: 24px;
+}
+.wl-lightbox-stage {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  position: relative;
+}
+.wl-lightbox-img {
+  max-width: min(1100px, 92vw);
+  max-height: 82vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border: 1px solid rgba(242, 237, 225, 0.14);
+  box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.8);
+}
+.wl-lightbox-close {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: none;
+  border: 0;
+  color: #f2ede1;
+  font: 500 11px var(--f-mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+  padding: 8px 12px;
+  opacity: 0.8;
+}
+.wl-lightbox-close:hover { opacity: 1; color: var(--s-red); }
+.wl-lightbox-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: 0;
+  color: #f2ede1;
+  font-family: var(--f-display);
+  font-size: 44px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 12px 16px;
+  opacity: 0.55;
+  transition: opacity 160ms;
+}
+.wl-lightbox-arrow:hover { opacity: 1; }
+.wl-lightbox-arrow.prev { left: 0; }
+.wl-lightbox-arrow.next { right: 0; }
+.wl-lightbox-cap {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 18px;
+  padding: 18px 8px 4px;
+  color: rgba(242, 237, 225, 0.7);
+}
+.wl-lightbox-cap .title {
+  font-family: var(--f-display);
+  font-style: italic;
+  font-size: 22px;
+  color: #f2ede1;
+}
+.wl-lightbox-cap .sub {
+  font: 500 10.5px var(--f-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.wl-lightbox-cap .count {
+  margin-left: auto;
+  font: 500 10.5px var(--f-mono);
+  letter-spacing: 0.14em;
+}
+.wl-lightbox-shop {
+  font: 500 11px var(--f-mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #f2ede1;
+  border: 1px solid rgba(242, 237, 225, 0.4);
+  padding: 8px 14px;
+  text-decoration: none;
+  transition: background 160ms, color 160ms;
+}
+.wl-lightbox-shop:hover { background: #f2ede1; color: #16130c; }
+
+@media (max-width: 640px) {
+  .wl-wallhome-hero { padding: 28px 20px 20px; }
+  .wl-wallhome-cta { padding: 32px 20px; }
+  .wl-lightbox { padding: 12px; }
+  .wl-lightbox-arrow { font-size: 30px; padding: 8px 10px; }
+  .wl-lightbox-cap .title { font-size: 18px; }
+}
