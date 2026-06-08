@@ -250,6 +250,16 @@ describe('refreshVariantResolution', () => {
     await refreshVariantResolution(client as any, 42);
     expect(client.query).toHaveBeenCalled();
   });
+
+  it('fails open (writes NULL) on an unparseable size label', async () => {
+    const { client, updates } = stubClient(
+      { print_width: 6016, print_height: 4016 },
+      [{ id: 9, size: 'A3' }],
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await refreshVariantResolution(client as any, 42);
+    expect(updates).toContainEqual({ id: 9, ok: null });
+  });
 });
 ```
 
@@ -262,7 +272,7 @@ Expected: FAIL — module not found.
 
 ```ts
 import type { PoolClient } from 'pg';
-import { evaluateSizeResolution } from './print-resolution';
+import { evaluateSizeResolution, shortEdgeInches } from './print-resolution';
 import { logger } from './logger';
 
 export interface RefreshResult {
@@ -301,6 +311,16 @@ export async function refreshVariantResolution(
     if (w == null || h == null) {
       ok = null; // unmeasured → fail-open via `min_resolution_ok IS NOT FALSE`
       res.unmeasured++;
+    } else if (shortEdgeInches(v.size) == null) {
+      // Unparseable size label (e.g. "A3", "8.5x11") → fail-open, never
+      // silently dark-list with a "0px" reason. Leave NULL for a human.
+      ok = null;
+      res.unmeasured++;
+      logger.warn('variant-resolution: unparseable size label', {
+        artworkId,
+        variantId: v.id,
+        size: v.size,
+      });
     } else {
       ok = evaluateSizeResolution(w, h, v.size).ok;
       if (ok) res.ok++;
@@ -484,23 +504,31 @@ import { logger } from '@/lib/logger';
 ```ts
       // A changed master must re-measure dims (the PATCH only validates the
       // key shape) and re-evaluate every size, else the gate uses stale dims.
-      if (d.image_print_url) {
-        try {
-          const { width, height } = await measureMasterDims(d.image_print_url);
-          await client.query(
-            `UPDATE artworks SET print_width = $1, print_height = $2 WHERE id = $3`,
-            [width, height, id],
-          );
-        } catch (err) {
-          logger.warn('artwork PATCH: could not measure new master; dims set NULL', {
-            id,
-            key: d.image_print_url,
-            err,
-          });
+      // `image_print_url: null` means the master was CLEARED — null the dims.
+      if (d.image_print_url !== undefined) {
+        if (d.image_print_url === null) {
           await client.query(
             `UPDATE artworks SET print_width = NULL, print_height = NULL WHERE id = $1`,
             [id],
           );
+        } else {
+          try {
+            const { width, height } = await measureMasterDims(d.image_print_url);
+            await client.query(
+              `UPDATE artworks SET print_width = $1, print_height = $2 WHERE id = $3`,
+              [width, height, id],
+            );
+          } catch (err) {
+            logger.warn('artwork PATCH: could not measure new master; dims set NULL', {
+              id,
+              key: d.image_print_url,
+              err,
+            });
+            await client.query(
+              `UPDATE artworks SET print_width = NULL, print_height = NULL WHERE id = $1`,
+              [id],
+            );
+          }
         }
         await refreshVariantResolution(client, id);
       }
@@ -511,45 +539,55 @@ import { logger } from '@/lib/logger';
 ```ts
       if (d.applyTemplate) {
         const variants = applyTemplate(d.applyTemplate as TemplateKey);
-        // Preserve any prior override / manual-active choices so re-applying a
-        // template (e.g. to fix a price) does not silently reset them.
-        const prior = await client.query<{
+        const keyOf = (t: string, s: string, f: string | null) => `${t}|${s}|${f ?? ''}`;
+        const wanted = new Set(variants.map((v) => keyOf(v.type, v.size, v.finish)));
+
+        // UPSERT — never DELETE. Deleting would null out order_items.variant_id
+        // (ON DELETE SET NULL) for sold sizes and drop the Printful linkage
+        // (printful_sync_variant_id) and the variant id. Instead: deactivate
+        // rows no longer in the template, then update-or-insert each template
+        // row. Existing rows keep their id, resolution_override, and
+        // printful_sync_variant_id; overrides therefore survive automatically.
+        const existing = await client.query<{
+          id: number;
           type: string;
           size: string;
           finish: string | null;
-          active: boolean;
-          resolution_override: boolean;
         }>(
-          `SELECT type, size, finish, active, resolution_override
-           FROM artwork_variants WHERE artwork_id = $1`,
+          `SELECT id, type, size, finish FROM artwork_variants WHERE artwork_id = $1`,
           [id],
         );
-        const keyOf = (t: string, s: string, f: string | null) => `${t}|${s}|${f ?? ''}`;
-        const carry = new Map(
-          prior.rows.map((r) => [
-            keyOf(r.type, r.size, r.finish),
-            { active: r.active, override: r.resolution_override },
-          ]),
-        );
-        await client.query('DELETE FROM artwork_variants WHERE artwork_id = $1', [id]);
+        for (const row of existing.rows) {
+          if (!wanted.has(keyOf(row.type, row.size, row.finish))) {
+            await client.query(
+              'UPDATE artwork_variants SET active = FALSE WHERE id = $1',
+              [row.id],
+            );
+          }
+        }
         for (const v of variants) {
-          const prev = carry.get(keyOf(v.type, v.size, v.finish));
-          await client.query(
-            `INSERT INTO artwork_variants
-               (artwork_id, type, size, finish, price_cents, cost_cents, active, resolution_override)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-            [
-              id, v.type, v.size, v.finish, v.price_cents, v.cost_cents,
-              prev?.active ?? true,
-              prev?.override ?? false,
-            ],
+          // finish may be NULL — IS NOT DISTINCT FROM matches NULL=NULL.
+          const upd = await client.query(
+            `UPDATE artwork_variants
+             SET price_cents = $1, cost_cents = $2, active = TRUE
+             WHERE artwork_id = $3 AND type = $4 AND size = $5
+               AND finish IS NOT DISTINCT FROM $6`,
+            [v.price_cents, v.cost_cents, id, v.type, v.size, v.finish],
           );
+          if (!upd.rowCount) {
+            await client.query(
+              `INSERT INTO artwork_variants
+                 (artwork_id, type, size, finish, price_cents, cost_cents, active)
+               VALUES ($1, $2, $3, $4, $5, $6, TRUE)`,
+              [id, v.type, v.size, v.finish, v.price_cents, v.cost_cents],
+            );
+          }
         }
         await refreshVariantResolution(client, id);
       }
 ```
 
-> Note: this switches from the previous "UPDATE … SET active=FALSE then INSERT" (which orphaned old rows) to DELETE + re-INSERT. `order_items.variant_id` is `ON DELETE SET NULL` and orders snapshot their line items, so historical orders are unaffected; the DELETE only removes catalog rows. This is safe and keeps one row per `(type,size,finish)`.
+> Note: this preserves the prior "UPDATE … SET active=FALSE" intent for dropped sizes (no DELETE), so variant ids, `printful_sync_variant_id`, `resolution_override`, and `order_items.variant_id` references all survive a template re-apply. Reactivating a previously-dropped size (e.g. switching `fine_art` → `full`) reuses its existing row and its prior override.
 
 - [ ] **Step 5: Typecheck**
 
@@ -597,7 +635,7 @@ export async function PATCH(
   ctx: { params: Promise<{ id: string; variantId: string }> },
 ) {
   await requireSameOrigin();
-  await requireAdmin();
+  const admin = await requireAdmin(); // AdminTokenPayload — has .id (the "who")
   const { id: rawId, variantId: rawV } = await ctx.params;
   const artworkId = parsePathId(rawId);
   const variantId = parsePathId(rawV);
@@ -632,9 +670,10 @@ export async function PATCH(
     return NextResponse.json({ error: 'variant not found' }, { status: 404 });
   }
   logger.info('variant override/active changed', {
+    by: admin.id,
     artworkId,
     variantId,
-    ...d,
+    change: d,
     result: r.rows[0],
   });
   return NextResponse.json({ variant: r.rows[0] });
@@ -798,21 +837,24 @@ git commit -m "feat(resolution): admin list reads buyable + resolution badge agg
 **Files:**
 - Modify: `app/admin/artworks/[id]/page.tsx`, `app/admin/artworks/page.tsx`
 
-- [ ] **Step 1: Surface the new variant fields in the detail GET type.** In `app/admin/artworks/[id]/page.tsx`, find the `Variant` type used for `data.variants` and add the fields the GET now returns (the GET at `app/api/admin/artworks/[id]/route.ts:30-33` is `SELECT *`, so `min_resolution_ok`, `resolution_override`, `buyable` are already returned). Extend the local type:
+- [ ] **Step 1: Surface the new variant fields on the shared `VRow` type.** `data.variants` is typed `VRow[]`, and `VRow` is the **exported interface in `components/admin/VariantTable.tsx:5-14`** (there is no local `Variant` type — verified). The GET at `app/api/admin/artworks/[id]/route.ts:31` is `SELECT * FROM artwork_variants`, so the new columns are already returned. Add the three fields to `VRow` (it already has `id, type, size, finish, price_cents, cost_cents, active, printful_sync_variant_id`):
 
 ```ts
-interface Variant {
+export interface VRow {
   id: number;
   type: string;
   size: string;
   finish: string | null;
   price_cents: number;
+  cost_cents: number;
   active: boolean;
+  printful_sync_variant_id: number | null;
   min_resolution_ok: boolean | null;
   resolution_override: boolean;
   buyable: boolean;
 }
 ```
+The shared `VariantTable` consumes `VRow` but ignores the extra fields — no change needed there.
 
 - [ ] **Step 2: Replace the `activeVariants` count (line 151) with a buyable count:**
 
@@ -887,7 +929,7 @@ async function toggleOverride(variantId: number, next: boolean) {
 }
 ```
 
-> If the page's existing error state isn't named `setSaveError`, use whatever the page already uses (grep the file for the pattern used by `save(...)`); reuse it rather than adding a new toast.
+> `setSaveError` (the error-state setter, `app/admin/artworks/[id]/page.tsx:77`) and `load()` (the refetch) both already exist on this page — reuse them as written above; do not add a new toast.
 
 - [ ] **Step 5: Reminder copy for the Printful step.** When `v.resolution_override` is true but `v.buyable` is true and the variant has no `printful_sync_variant_id`, the order would hit `needs_review`. Add a one-line note under an overridden row: `"Run sync:printful to make this size orderable."` (The GET already returns `printful_sync_variant_id` via `SELECT *`; add it to the `Variant` type and gate the note on it being null.)
 
@@ -903,6 +945,13 @@ function ResBadge({ a }: { a: { total_variant_count: number; variant_count: numb
 }
 ```
 Render `<ResBadge a={row} />` in each list row and extend the row type with the four fields.
+
+  **Critical — migrate the three `variant_count` call sites.** Task 8 changed `variant_count` to mean the *buyable* count. Three places on this page used it to mean "has any variants at all" and will now misfire (treating an all-blocked artwork as "needs a template" and re-applying one):
+  - `emptyVariants` memo (`app/admin/artworks/page.tsx:182-183`): change `r.variant_count === 0` → `r.total_variant_count === 0`.
+  - `batchApplyFull` targets (`:271-273`): change `r.variant_count === 0` → `r.total_variant_count === 0`.
+  - the count cell (`:465`): show `r.total_variant_count || '—'` (the operator wants "how many sizes exist", not how many are buyable — the badge conveys buyable state).
+
+  Add `total_variant_count: number; has_unmeasured: boolean | null; all_sizes_ok: boolean | null;` to the page's row type alongside the existing `variant_count`.
 
 - [ ] **Step 7: Typecheck**
 
@@ -930,8 +979,9 @@ git commit -m "feat(resolution): admin size-gate panel, override toggle, list ba
 
 ```ts
 import 'dotenv/config';
+import { writeFileSync, mkdirSync } from 'node:fs';
 import { pool, withTransaction } from '../lib/db';
-import { evaluateSizeResolution } from '../lib/print-resolution';
+import { evaluateSizeResolution, maxSupportedSize } from '../lib/print-resolution';
 import { refreshVariantResolution } from '../lib/variant-resolution';
 
 const APPLY = process.argv.includes('--apply');
@@ -982,7 +1032,33 @@ async function main() {
   console.log(vanishing.length ? vanishing.join('\n') : '  (none)');
 
   if (!APPLY) {
-    console.log('\nDry run. Re-run with --apply to write min_resolution_ok.');
+    // Reviewable markdown report (same spirit as the 2026-06-06 audit table).
+    const md: string[] = [
+      '# Resolution recompute — dry run',
+      '',
+      `Total: ${rows.length} variants across ${byArtwork.size} artworks. ` +
+        `Sizes that will block: ${willBlock}. Artworks vanishing from shop: ${vanishing.length}.`,
+      '',
+      '| id | status | master | max buyable size | blocked sizes |',
+      '|----|--------|--------|------------------|---------------|',
+    ];
+    for (const [artworkId, group] of byArtwork) {
+      const a = group[0];
+      const measured = a.print_width != null && a.print_height != null;
+      const dims = measured ? `${a.print_width}×${a.print_height}` : 'unmeasured';
+      const maxSize = measured
+        ? maxSupportedSize(a.print_width!, a.print_height!, group.map((g) => g.size)) ?? 'NONE'
+        : '—';
+      const blocked = measured
+        ? group.filter((g) => !evaluateSizeResolution(a.print_width!, a.print_height!, g.size).ok)
+            .map((g) => g.size).join(' ')
+        : '';
+      md.push(`| ${artworkId} | ${a.status} | ${dims} | ${maxSize} | ${blocked} |`);
+    }
+    mkdirSync('.review', { recursive: true });
+    writeFileSync('.review/resolution-dry-run.md', md.join('\n') + '\n');
+    console.log('\nDry run. Report written to .review/resolution-dry-run.md');
+    console.log('Re-run with --apply to write min_resolution_ok.');
     await pool.end();
     return;
   }
@@ -1000,10 +1076,14 @@ main().catch((err) => {
 });
 ```
 
-- [ ] **Step 2: Hook recompute into the dims backfill** — in `scripts/backfill-print-dims.ts`, after the `UPDATE artworks SET print_width...` succeeds for a row, recompute that artwork. Add the import `import { withTransaction } from '../lib/db';` and `import { refreshVariantResolution } from '../lib/variant-resolution';`, then after the existing per-row `UPDATE` add:
+- [ ] **Step 2: Hook recompute into the dims backfill** — in `scripts/backfill-print-dims.ts`, after the `UPDATE artworks SET print_width...` succeeds for a row, recompute that artwork. Add the import `import { withTransaction } from '../lib/db';` and `import { refreshVariantResolution } from '../lib/variant-resolution';`, then after the existing per-row `UPDATE` add (wrapped so one artwork's recompute failure logs but doesn't abort the whole backfill — the standalone `recompute:resolution` script is the safety net):
 
 ```ts
-      await withTransaction((tx) => refreshVariantResolution(tx, row.id));
+      try {
+        await withTransaction((tx) => refreshVariantResolution(tx, row.id));
+      } catch (err) {
+        console.error(`recompute ${String(row.id).padStart(4)}  ${err instanceof Error ? err.message : err}`);
+      }
 ```
 
 - [ ] **Step 3: Add the npm script** — in `package.json` scripts:
@@ -1033,9 +1113,11 @@ git commit -m "feat(resolution): recompute script (dry-run/apply) + backfill rec
 
 ## Task 11: Rollout (manual, ordered)
 
-No code — execute against the deployed app in this order. Each step is reversible (revert = nothing has blocked until 11.4 applies).
+No code — execute against the deployed app in this order. Each step is reversible (revert = nothing has blocked until the apply step).
 
-- [ ] **Step 1: Ship Tasks 1–9.** Migration runs at build (`tsx lib/migrate.ts && next build`); columns land, `buyable ≡ active`, shop unchanged. Verify the shop visually matches production.
+- [ ] **Step 0: Parallel review checkpoint** (before shipping). With all code tasks committed, run the specialized reviewers in parallel over the diff (matches the batch-then-review workflow): `database-review` on `lib/schema.sql` (the generated column + index) and the recompute queries; `security-review` on the new variant PATCH endpoint (Task 6) and the checkout change (Task 7 Step 4); `code-review` on the `[id]` route changes (Task 5) and the admin UI (Task 9). Resolve findings before deploying.
+
+- [ ] **Step 1: Ship Tasks 1–10.** The deploy includes the migration, all read-site switches, the override endpoint, the admin UI, AND the recompute script + backfill hook (Task 10) — everything except the deliberate `--apply`. Migration runs at build (`tsx lib/migrate.ts && next build`); columns land, `buyable ≡ active`, shop unchanged. Verify the shop visually matches production. (Only Step 4's `--apply` actually engages enforcement.)
 
 - [ ] **Step 2: Measure the 27 unmeasured masters.**
 
@@ -1062,3 +1144,18 @@ Expected: `min_resolution_ok` written for every variant; enforcement now live. V
 - **Names are consistent:** `evaluateSizeResolution`, `maxSupportedSize`, `MIN_DPI`, `refreshVariantResolution`, `measureMasterDims`, `buyable`, `min_resolution_ok`, `resolution_override` used identically across tasks.
 - **Observability:** `logger.info` in the recompute and the variant PATCH (no `admin_audit_log` table exists — not invented).
 - **Reversibility:** revert = change `buyable` filters back to `active`; data preserved; `min_resolution_ok` can be reset to NULL to fully disengage.
+
+## Plan-review corrections (fidelity / decomposition / feasibility + Gemini, 2026-06-08)
+
+Folded in from the review pass:
+- **Fail-open on unparseable size labels** (Task 2): the recompute treats a non-`WxH` label as unmeasured (`NULL` + `logger.warn`), never a silent `FALSE` dark-list. Test added.
+- **Template re-apply is UPSERT, not DELETE** (Task 5 Step 4): preserves variant ids, `printful_sync_variant_id`, `resolution_override`, and `order_items.variant_id` references. (Original DELETE would have nulled sold-order links via `ON DELETE SET NULL` and dropped Printful linkage.)
+- **Admin-list `variant_count` flip** (Task 9 Step 6): the three "needs a template" call sites on `app/admin/artworks/page.tsx` (lines 182, 273, 465) move to `total_variant_count` so all-blocked artworks aren't mistaken for un-templated ones.
+- **Correct shared type** (Task 9 Step 1): extend `VRow` in `components/admin/VariantTable.tsx` — there is no local `Variant` type.
+- **Master-cleared path** (Task 5 Step 3): `image_print_url: null` nulls dims + recomputes.
+- **Audit "who"** (Task 6): `logger.info` includes `by: admin.id`.
+- **Dry-run report** (Task 10): writes `.review/resolution-dry-run.md` (per-artwork max-buyable-size + blocked sizes), not just console.
+- **Backfill resilience** (Task 10 Step 2): per-row recompute wrapped in try/catch.
+- **Rollout** (Task 11): deploy ships Tasks 1–10 (only `--apply` is gated); added a Step 0 parallel-review checkpoint (database/security/code-review).
+- **Confirmed safe (no change):** `active` is `NOT NULL` (schema:51), so the generated `buyable` never evaluates to NULL; `setSaveError`/`load()` exist on the detail page.
+- **Accepted simplification:** the admin-list badge shows `⚠ N of M` rather than the spec mock's `⚠ max 16×20` — the exact per-size truth (incl. max supported) lives on the detail panel; the list badge only needs to flag attention, so no `max`-size SQL rollup is built.
