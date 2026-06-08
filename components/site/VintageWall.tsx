@@ -59,7 +59,7 @@ export function VintageWall({ items }: { items: WallItem[] }) {
               src={it.image_web_url}
               alt={it.title}
               fill
-              sizes="(max-width: 520px) 50vw, (max-width: 1024px) 25vw, 200px"
+              sizes="(max-width: 520px) 50vw, (max-width: 1024px) 33vw, 240px"
               loading={i < 12 ? 'eager' : 'lazy'}
               style={{ objectFit: 'cover' }}
             />

@@ -3242,15 +3242,15 @@ html[data-mood='ink'] .wl-surface::after {
 /* The wall — uniform 3:2 contact-sheet grid (no stored aspect ratios). */
 .wl-wall {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(186px, 1fr));
-  gap: 8px;
-  padding: 0 8px 8px;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  gap: 14px;
+  padding: 4px 16px 16px;
 }
 @media (max-width: 520px) {
   .wl-wall {
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 6px;
-    padding: 0 6px 6px;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 10px;
+    padding: 0 12px 12px;
   }
 }
 
