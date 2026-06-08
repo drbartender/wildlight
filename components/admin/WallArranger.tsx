@@ -22,7 +22,10 @@ export function WallArranger({ initial }: { initial: WallTile[] }) {
   const [tiles, setTiles] = useState<WallTile[]>(initial);
   const [dragId, setDragId] = useState<number | null>(null);
   const [state, setState] = useState<SaveState>('idle');
-  // The last-saved order, as a comparison key. Updated on a successful save.
+  // The last-persisted order. Both advance on a successful save so Reset
+  // snaps back to what's actually saved (not the mount-time order) and the
+  // dirty check compares against the saved state.
+  const savedTiles = useRef<WallTile[]>(initial);
   const savedKey = useRef(initial.map((t) => t.id).join(','));
 
   const currentKey = tiles.map((t) => t.id).join(',');
@@ -50,6 +53,7 @@ export function WallArranger({ initial }: { initial: WallTile[] }) {
         body: JSON.stringify({ ids: tiles.map((t) => t.id) }),
       });
       if (!r.ok) throw new Error(String(r.status));
+      savedTiles.current = tiles;
       savedKey.current = tiles.map((t) => t.id).join(',');
       setState('saved');
     } catch {
@@ -58,7 +62,7 @@ export function WallArranger({ initial }: { initial: WallTile[] }) {
   }
 
   function reset() {
-    setTiles(initial);
+    setTiles(savedTiles.current);
     setState('idle');
   }
 
@@ -109,7 +113,8 @@ export function WallArranger({ initial }: { initial: WallTile[] }) {
             draggable
             onDragStart={() => {
               setDragId(t.id);
-              if (state === 'saved') setState('idle');
+              // Clear any lingering saved/error banner once they start moving.
+              if (state !== 'idle') setState('idle');
             }}
             onDragEnter={() => moveOver(t.id)}
             onDragOver={(e) => e.preventDefault()}
