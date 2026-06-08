@@ -25,11 +25,14 @@ interface WallRow {
 export default async function MarketingHome() {
   // The wall is Dan's whole body of work shown as look-only "vintage"
   // examples (drafts) intermixed with the few available prints (published).
-  // md5(slug) is a stable shuffle so it reads as an unsorted wall, not a
-  // sorted catalog. Every row has an image_web_url (NOT NULL) and a real
-  // title, so no quality filter is needed today; if junk drafts ever appear,
-  // a dedicated 'vintage' status is the fix (see spec follow-ups). LIMIT caps
-  // the wall well above today's ~100 so an import spree can't bloat it.
+  // Ordered by wall_order (set by Dan in /admin/wall — separate from the
+  // shop's display_order). Arranged rows lead, in order; un-arranged rows
+  // (wall_order=0) shuffle to the END via md5(slug), so a fresh wall still
+  // reads as intentional and newly-imported work doesn't jump to the top.
+  // Every row has an image_web_url (NOT NULL) and a real title, so no
+  // quality filter is needed today; if junk drafts ever appear, a dedicated
+  // 'vintage' status is the fix (see spec follow-ups). LIMIT caps the wall
+  // well above today's ~100 so an import spree can't bloat it.
   // Wrapped so a Neon cold-start blip renders the empty state, not a 500 on
   // the highest-traffic page.
   let items: WallItem[] = [];
@@ -41,7 +44,7 @@ export default async function MarketingHome() {
        FROM artworks a
        LEFT JOIN collections c ON c.id = a.collection_id
        WHERE a.status IN ('draft', 'published')
-       ORDER BY md5(a.slug)
+       ORDER BY (a.wall_order = 0), a.wall_order, md5(a.slug)
        LIMIT 300`,
     );
     items = res.rows;

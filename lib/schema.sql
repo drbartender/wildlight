@@ -491,6 +491,15 @@ ALTER TABLE artworks
   ADD COLUMN IF NOT EXISTS print_width  INT,
   ADD COLUMN IF NOT EXISTS print_height INT;
 
+-- Wall order — the homepage "vintage wall" sequence, INDEPENDENT of
+-- display_order (which orders the shop + portfolio). Set by the
+-- /admin/wall drag-to-arrange tool. 0 = unarranged; the wall query falls
+-- back to a stable md5(slug) shuffle so an un-arranged wall still looks
+-- intentional.
+ALTER TABLE artworks
+  ADD COLUMN IF NOT EXISTS wall_order INT NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_artworks_wall_order ON artworks(wall_order);
+
 -- ─── Voice-training app ────────────────────────────────────────────
 -- Trains the generator (lib/studio.ts) on Dan's voice. Inputs accumulate
 -- across interview answers, pasted writing samples, A/B preferences,

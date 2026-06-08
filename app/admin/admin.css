@@ -1499,6 +1499,138 @@
   cursor: pointer;
 }
 
+/* ─────── ARRANGE WALL (drag-to-order homepage) ─────── */
+
+.wl-adm-wall {
+  padding: 24px;
+}
+.wl-adm-wall-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.wl-adm-wall-head h1 {
+  font-size: 26px;
+  margin: 0 0 4px;
+}
+.wl-adm-wall-head p {
+  font-size: 13px;
+  color: var(--adm-muted);
+  max-width: 64ch;
+  line-height: 1.5;
+}
+.wl-adm-wall-head .actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.wl-adm-wall-head .actions button {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 9px 16px;
+  border-radius: var(--adm-radius-md);
+  cursor: pointer;
+  border: 1px solid var(--adm-rule);
+  background: var(--adm-card);
+  color: var(--adm-ink);
+}
+.wl-adm-wall-head .actions button.primary {
+  background: var(--adm-ink);
+  color: var(--adm-paper);
+  border-color: var(--adm-ink);
+}
+.wl-adm-wall-head .actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.wl-adm-wall-err {
+  color: var(--adm-red);
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+.wl-adm-wall-hint {
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--adm-muted);
+  margin-bottom: 14px;
+}
+.wl-adm-wall-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+.wl-adm-wall-tile {
+  position: relative;
+  aspect-ratio: 3 / 2;
+  border: 1px solid var(--adm-rule);
+  border-radius: var(--adm-radius-sm);
+  overflow: hidden;
+  background: var(--adm-paper-alt);
+  cursor: grab;
+  user-select: none;
+}
+.wl-adm-wall-tile:active {
+  cursor: grabbing;
+}
+.wl-adm-wall-tile.dragging {
+  opacity: 0.4;
+  outline: 2px dashed var(--adm-ink);
+  outline-offset: -2px;
+}
+.wl-adm-wall-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  pointer-events: none;
+}
+.wl-adm-wall-tile .pos {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+}
+.wl-adm-wall-tile .dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--adm-green);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+}
+.wl-adm-wall-tile .cap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 14px 6px 5px;
+  font-size: 10px;
+  line-height: 1.2;
+  color: #fff;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 150ms;
+}
+.wl-adm-wall-tile:hover .cap {
+  opacity: 1;
+}
+
 /* ─────── SETTINGS / INTEGRATIONS ─────── */
 
 .wl-adm-integration-grid {
