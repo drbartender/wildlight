@@ -409,17 +409,29 @@ blocked has no `printful_sync_variant_id`. Overriding it makes it
 must say so — overriding a blocked size is a two-step act (override → sync)
 before it can be sold.
 
-**Zero-buyable published artwork (the *Gulls* case):** when every size
-blocks, the shop artwork page falls through to the existing
-`variants.length === 0` branch in `OrderCard` — whose copy today reads
-"Not yet for sale / editions coming," which is misleading. Fix the copy
-to a neutral "Prints currently unavailable for this piece." The shop grid
-min-price subquery (now `buyable`) yields no price for it, so it reads as
-not-for-sale there too. **Product decision (confirm):** an all-blocked
-*published* artwork stays listed (image visible, no buy options) rather
-than being auto-hidden — Dan resolves it from the dry-run (re-upload /
-override / unpublish) at rollout, so this is a transient state, not a
-steady one.
+**Zero-buyable published artwork (the *Gulls* case) — hidden from the
+shop entirely.** Decision: if no size is buyable, the piece is not in the
+shop. "If the hi-res isn't there, we don't have it." This is a
+**visibility gate**, not a status change — the artwork stays `published`
+(curation, slug, metadata intact) and **reappears automatically** the
+moment a size becomes buyable (a better master re-uploaded, or an
+override + sync). Concretely:
+
+- Shop grid (`shop/page.tsx`) and collection grid
+  (`collections/[slug]/page.tsx`): add
+  `AND EXISTS (SELECT 1 FROM artwork_variants v WHERE v.artwork_id = a.id
+  AND v.buyable)` to the published-artwork listing, so an all-blocked
+  piece never renders a card.
+- Artwork detail (`artwork/[slug]/page.tsx`): if the piece has zero
+  buyable variants, `notFound()` — a direct/bookmarked URL 404s rather
+  than rendering an empty product. (This also retires the misleading
+  `OrderCard` "editions coming" fall-through for the shop path.)
+- Admin is unaffected — the blocked piece still shows in the admin list
+  (with the `⚠ blocked` badge) so Dan can fix it.
+
+The rollout **dry-run must list every artwork that will drop to zero
+buyable** (i.e. vanish from the shop) as its headline output, since that
+is the most consequential effect of applying.
 
 **Admin-list badge data source:** the list endpoint adds an aggregate —
 `bool_and(min_resolution_ok IS NOT FALSE)` for the clean/blocked state and
