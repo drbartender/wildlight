@@ -100,6 +100,11 @@ The existing `idx_variants_artwork_active` stays (admin still reads
 unchanged in meaning. Re-uploading a worse master flips some
 `min_resolution_ok` to `FALSE`; a previously-set `resolution_override`
 persists (override means "always offer," independent of the file).
+**Persistence has one seam:** re-applying a template *replaces* the
+variant rows, so the recompute-chokepoint at that branch must carry
+`resolution_override` + `active` forward onto the matching
+`(type, size, finish)` rows — otherwise overrides silently reset. See the
+recompute-chokepoints table.
 
 ## The per-size rule
 
@@ -177,17 +182,22 @@ column. No-op-safe to call repeatedly.
 
 ## Recompute chokepoints
 
-`refreshVariantResolution(artworkId)` runs at exactly the four points
-where the inputs change. Override and per-size active toggles do **not**
-trigger it (they write their own column; `buyable` re-derives
-automatically).
+`refreshVariantResolution(client, artworkId)` runs at every point where
+its inputs (the master's dims, or the variant set) change. Override and
+per-size `active` toggles do **not** trigger it — they write their own
+column and `buyable` re-derives automatically.
 
-| Trigger | Where |
-|---|---|
-| Master uploaded (dims just written) | `app/api/admin/artworks/bulk-upload/finalize/route.ts`; `app/api/admin/artworks/upload/route.ts` |
-| Template (re)applied (new variant rows) | `app/api/admin/artworks/[id]/route.ts` (`applyTemplate` branch) |
-| Dims backfilled | `scripts/backfill-print-dims.ts` (after each row's dims write) |
-| Floor changed | one-off `scripts/recompute-variant-resolution.ts` (run after editing `MIN_DPI`) |
+| Trigger | Where | Note |
+|---|---|---|
+| Master uploaded (dims written) | `app/api/admin/artworks/bulk-upload/finalize/route.ts` (update + create modes) | The dims write at lines 242–251 is a bare `pool.query` today; wrap it + the recompute in `withTransaction`, and have `refreshVariantResolution` read the dims through that **same client** (else it reads stale dims). |
+| Print master re-pointed | `app/api/admin/artworks/[id]/route.ts` PATCH when `image_print_url` changes | This route can set `image_print_url` (Zod field, line 65) **without** re-measuring — today it would leave `print_width`/`print_height` stale. The PATCH must re-measure dims from the new key (sharp) then recompute, **or** master changes are funnelled exclusively through `finalize`. Decide in the plan; do not leave a path that changes the master without re-measuring. |
+| Template (re)applied | `app/api/admin/artworks/[id]/route.ts` (`applyTemplate` branch, lines 123–137) | This branch sets old rows `active = FALSE` and **inserts new rows** with `resolution_override = FALSE`/`active = TRUE` defaults — so it would silently wipe any override. The branch must **carry forward** `resolution_override` and per-size `active` onto matching `(type, size, finish)` rows before recompute. |
+| Dims backfilled | `scripts/backfill-print-dims.ts` (after each row's dims write) | |
+| Floor changed | one-off `scripts/recompute-variant-resolution.ts` (run after editing `MIN_DPI`) | |
+
+`app/api/admin/artworks/upload/route.ts` is **not** a trigger — it inserts
+only a draft `artworks` row, never variants, so a recompute there is a
+no-op.
 
 ## Enforcement points (read sites switched `active` → `buyable`)
 
@@ -205,9 +215,17 @@ All four customer-reachable surfaces plus Printful sync:
   (no point provisioning a size we won't sell; an overridden size *is*
   buyable, so it still syncs).
 
-`app/api/admin/artworks/route.ts` (admin list min/max price + variant
-count) reads `buyable` for the customer-facing price range, and gains a
-resolution badge from the new data (see below).
+`app/api/admin/artworks/route.ts` (admin list): the `variant_count`,
+`min_price_cents`, AND `max_price_cents` subqueries (lines 44–48) all
+currently filter `v.active`. Switch **all three** to `buyable` together —
+switching only the price range leaves a broken "8 variants, no price"
+range on an all-blocked artwork (the *Gulls* case, which is exactly what
+this feature surfaces). The list also gains a resolution badge from a new
+aggregate subquery (see Admin surfaces). `app/admin/artworks/[id]/page.tsx:151`
+computes an `activeVariants` count for display — relabel/derive it from
+`buyable` so the detail header doesn't contradict the shop.
+(`scripts/find-variants.mjs` also filters `active`, but it's an untracked
+debug script — out of scope.)
 
 Defense in depth: the shop never renders a blocked size, *and* checkout
 re-validates against `buyable`, *and* only buyable variants ever reach
@@ -345,5 +363,99 @@ numbers before anything is applied.)
   remain buyable. Acceptable: the backfill at step 3 closes it, and the
   state matches today's (everything buyable) until we deliberately apply.
 - **Read-site drift.** Mitigated by funneling every surface through the
-  single `buyable` column; the switch list above is exhaustive (verified
-  by `grep v.active` / `AND active`).
+  single `buyable` column; the customer-facing switch list above is
+  exhaustive (verified by `grep v.active` / `AND active` —
+  `shop/page.tsx:37`, `artwork/[slug]/page.tsx:98,106`,
+  `collections/[slug]/page.tsx:40`, `checkout/route.ts:56`,
+  `printful-sync.ts:41`; admin reads handled separately above).
+
+## Spec-review resolutions (grounding / gaps / risk, 2026-06-08)
+
+Findings from the DRB spec-review trio, folded in. The chokepoint table,
+the data-model persistence note, and the admin-list enforcement note above
+were corrected directly; the rest are resolved here.
+
+**Lib hardening (`lib/print-resolution.ts`, `lib/variant-resolution.ts`):**
+- `MIN_DPI` and `GOOD_DPI` are currently un-`export`ed `const`s
+  (`print-resolution.ts:9-10`). Add `export` so the evaluator, the
+  recompute, and `classifyPrintResolution` share one source for the floor.
+- **Size-label parsing is strict.** Parse short edge with
+  `/^(\d+)x(\d+)$/` → `min(w, h)`. A label that doesn't match (a future
+  `"8.5x11"`, `"A3"`, or finish-suffixed label) is **not** silently graded
+  `FALSE` (which would dark-list a size with a nonsense "0px" reason) —
+  it logs a warning and the variant's `min_resolution_ok` is left `NULL`
+  (fail-open) for a human to look at.
+- `evaluateSizeResolution` guards `NULL`/missing dims explicitly: returns
+  an "unmeasured" result (drives `min_resolution_ok = NULL`), it does not
+  assume `width: number`.
+- `refreshVariantResolution(client, artworkId)` reads the artwork's
+  `print_width`/`print_height` through the **passed `client`**, so a dims
+  write earlier in the same transaction is visible (no stale-dims read).
+
+**Variant override/active endpoint:** `PATCH
+/api/admin/artworks/[id]/variants/[variantId]`. `requireAdmin()` +
+`requireSameOrigin()` + Zod, matching every other admin mutation. The
+IDOR guard is part of the write: `UPDATE … WHERE id = $variantId AND
+artwork_id = $artworkId` (scoped, not SELECT-then-UPDATE). Body toggles
+`resolution_override` and/or `active`. The admin panel must offer both
+**set and unset** ("Override" ⇄ "Remove override"); `buyable` re-derives
+with no recompute.
+
+**Printful sync timing (important workflow seam):** a variant that was
+blocked has no `printful_sync_variant_id`. Overriding it makes it
+`buyable`, but a checkout will still drop to `needs_review` (the existing
+"sync variant missing" branch in the Stripe webhook) until
+`npm run sync:printful <id>` stamps the id. The override flow in the admin
+must say so — overriding a blocked size is a two-step act (override → sync)
+before it can be sold.
+
+**Zero-buyable published artwork (the *Gulls* case):** when every size
+blocks, the shop artwork page falls through to the existing
+`variants.length === 0` branch in `OrderCard` — whose copy today reads
+"Not yet for sale / editions coming," which is misleading. Fix the copy
+to a neutral "Prints currently unavailable for this piece." The shop grid
+min-price subquery (now `buyable`) yields no price for it, so it reads as
+not-for-sale there too. **Product decision (confirm):** an all-blocked
+*published* artwork stays listed (image visible, no buy options) rather
+than being auto-hidden — Dan resolves it from the dry-run (re-upload /
+override / unpublish) at rollout, so this is a transient state, not a
+steady one.
+
+**Admin-list badge data source:** the list endpoint adds an aggregate —
+`bool_and(min_resolution_ok IS NOT FALSE)` for the clean/blocked state and
+a `max`-supported-size rollup — so the badge (`24×36 ✓` / `⚠ max 16×20` /
+`⚠ blocked` / `— unmeasured`) has data without an N+1.
+
+**Migration idempotency:** the new columns, the generated `buyable`
+column, and the index go in `lib/schema.sql`'s idempotent block (no new
+migration-file pattern) as `ADD COLUMN IF NOT EXISTS`. Postgres rejects
+redefining a generated column, so the add is guarded by `IF NOT EXISTS`
+and never re-expressed in place; a real expression change is a deliberate
+drop-and-readd. `idx_variants_artwork_active` stays (admin still toggles
+and reads `active` directly).
+
+**Observability (`lib/logger.ts` + `admin_audit_log` if present):** the
+recompute logs how many variants flipped `TRUE`/`FALSE`/unchanged per
+artwork; the override/active PATCH writes an audit entry (who, which
+variant, old→new); the dry-run writes a reviewable report (MD/CSV table,
+same shape as the 2026-06-06 audit) so "why did this size disappear" is
+answerable later.
+
+**In-flight payment at the apply instant (accepted):** the checkout
+snapshot (`checkout_intents`) is the contract; the Stripe webhook
+fulfills from it and does **not** re-check `buyable`. A customer who paid
+in the seconds before step 5 gets their print fulfilled at the honored
+price. This is the correct outcome (we took their money) and needs no
+re-validation in the webhook — stated so the engineer doesn't add one.
+
+**Checkout error nuance:** today `checkout/route.ts:65-67` rejects the
+whole cart with a generic "some items unavailable" when any variant fails
+the `active`/`published` filter. To give the friendlier "that size isn't
+available for this piece," the lookup drops the `buyable` filter from the
+SELECT and branches in code (buyable vs unpublished vs missing) — noted as
+non-trivial, not a one-liner.
+
+**Backfill resumability:** `scripts/backfill-print-dims.ts` already
+commits per row and selects only `WHERE print_width IS NULL`, so a partial
+run resumes cleanly; the recompute script reads dims from the **DB
+column, not R2**, so the apply step can't crash on an R2 timeout.
