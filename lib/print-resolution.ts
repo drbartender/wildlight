@@ -6,8 +6,8 @@ const MAX_SHORT_EDGE_INCHES = 24;
 // 240 DPI is the floor for a clean fine-art print at 24×36 (Printful's
 // own guidance is 150 minimum, 300 ideal). Below 150 the result is
 // visibly soft — flag those as too_low so they can't go out unchecked.
-const GOOD_DPI = 240;
-const MIN_DPI = 150;
+export const GOOD_DPI = 240;
+export const MIN_DPI = 150;
 
 export type PrintResolutionLevel = 'good' | 'low' | 'too_low';
 
@@ -59,4 +59,77 @@ export function classifyPrintResolution(
     maxGoodEdgeInches,
     message,
   };
+}
+
+// Sizes are catalog labels like "24x36"; the print is matched short-edge to
+// short-edge, so the file's short edge governs. A label that is not WxH is a
+// data error — callers treat that as "unmeasured", never a silent block.
+const SIZE_RX = /^(\d+)x(\d+)$/;
+
+export interface SizeResolution {
+  size: string;
+  shortInches: number;
+  requiredShortPx: number;
+  actualShortPx: number;
+  effectiveDpi: number;
+  ok: boolean;
+  message: string;
+}
+
+export function shortEdgeInches(size: string): number | null {
+  const m = SIZE_RX.exec(size.trim());
+  if (!m) return null;
+  return Math.min(Number(m[1]), Number(m[2]));
+}
+
+export function evaluateSizeResolution(
+  width: number,
+  height: number,
+  size: string,
+  floorDpi = MIN_DPI,
+): SizeResolution {
+  const shortInches = shortEdgeInches(size) ?? 0;
+  const actualShortPx = width > 0 && height > 0 ? Math.min(width, height) : 0;
+  const requiredShortPx = shortInches * floorDpi;
+  const effectiveDpi =
+    shortInches > 0 ? Math.round(actualShortPx / shortInches) : 0;
+  const ok = shortInches > 0 && actualShortPx >= requiredShortPx;
+  const message = ok
+    ? `${effectiveDpi} DPI at ${size} — clears the ${floorDpi}-DPI floor.`
+    : `${size} needs ${requiredShortPx}px short edge at ${floorDpi} DPI; file has ${actualShortPx}px (${effectiveDpi} DPI).`;
+  return {
+    size,
+    shortInches,
+    requiredShortPx,
+    actualShortPx,
+    effectiveDpi,
+    ok,
+    message,
+  };
+}
+
+function sizeAreaInches(size: string): number | null {
+  const m = SIZE_RX.exec(size.trim());
+  if (!m) return null;
+  return Number(m[1]) * Number(m[2]);
+}
+
+/**
+ * Largest *physical* size in `sizes` that still clears the floor, else null.
+ * Ranked by print area so that two sizes sharing a short edge (e.g. 24×30 and
+ * 24×36, both 24" short) resolve to the bigger print (24×36).
+ */
+export function maxSupportedSize(
+  width: number,
+  height: number,
+  sizes: string[],
+  floorDpi = MIN_DPI,
+): string | null {
+  const cleared = sizes
+    .map((s) => ({ s, area: sizeAreaInches(s) ?? 0 }))
+    .filter(
+      (x) => x.area > 0 && evaluateSizeResolution(width, height, x.s, floorDpi).ok,
+    )
+    .sort((a, b) => b.area - a.area);
+  return cleared.length ? cleared[0].s : null;
 }
