@@ -1,7 +1,8 @@
 import 'dotenv/config';
 import sharp from 'sharp';
-import { pool } from '../lib/db';
+import { pool, withTransaction } from '../lib/db';
 import { getPrivateBuffer } from '../lib/r2';
+import { refreshVariantResolution } from '../lib/variant-resolution';
 
 interface Row {
   id: number;
@@ -40,6 +41,13 @@ async function main() {
         `UPDATE artworks SET print_width = $1, print_height = $2 WHERE id = $3`,
         [w, h, row.id],
       );
+      try {
+        await withTransaction((tx) => refreshVariantResolution(tx, row.id));
+      } catch (err) {
+        console.error(
+          `recompute ${String(row.id).padStart(4)}  ${err instanceof Error ? err.message : err}`,
+        );
+      }
       console.log(`ok  ${String(row.id).padStart(4)}  ${w}×${h}`);
     } catch (err) {
       console.error(
