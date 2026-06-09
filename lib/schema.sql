@@ -500,6 +500,26 @@ ALTER TABLE artworks
   ADD COLUMN IF NOT EXISTS wall_order INT NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_artworks_wall_order ON artworks(wall_order);
 
+-- ─── Resolution gating ─────────────────────────────────────────────
+-- min_resolution_ok: does the master clear the 150-DPI floor at THIS size?
+--   Written only by lib/variant-resolution.ts. NULL = not yet measured.
+-- resolution_override: admin force-offers a size despite low resolution.
+-- buyable (generated): the single gate every shop/checkout/sync query reads.
+--   NULL min_resolution_ok is fail-open (IS NOT FALSE), so adding these
+--   columns is a no-op until a recompute writes real TRUE/FALSE values.
+ALTER TABLE artwork_variants
+  ADD COLUMN IF NOT EXISTS min_resolution_ok   BOOLEAN,
+  ADD COLUMN IF NOT EXISTS resolution_override BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE artwork_variants
+  ADD COLUMN IF NOT EXISTS buyable BOOLEAN
+    GENERATED ALWAYS AS (
+      active AND (min_resolution_ok IS NOT FALSE OR resolution_override)
+    ) STORED;
+
+CREATE INDEX IF NOT EXISTS idx_variants_artwork_buyable
+  ON artwork_variants(artwork_id) WHERE buyable;
+
 -- ─── Voice-training app ────────────────────────────────────────────
 -- Trains the generator (lib/studio.ts) on Dan's voice. Inputs accumulate
 -- across interview answers, pasted writing samples, A/B preferences,
