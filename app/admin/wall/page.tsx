@@ -12,8 +12,13 @@ export default async function AdminWallPage() {
   let rows: WallTile[] = [];
   try {
     const res = await pool.query<WallTile>(
+      // `available` mirrors the public wall: a green dot means genuinely
+      // buyable (published AND has a buyable variant), so Dan's arranger
+      // shows the same "for sale" state visitors see.
       `SELECT a.id, a.slug, a.title, a.image_web_url,
-              (a.status = 'published') AS available
+              (a.status = 'published'
+                 AND EXISTS (SELECT 1 FROM artwork_variants v
+                               WHERE v.artwork_id = a.id AND v.buyable)) AS available
          FROM artworks a
         WHERE a.status IN ('draft', 'published')
         ORDER BY (a.wall_order = 0), a.wall_order, md5(a.slug)
