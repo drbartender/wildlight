@@ -89,6 +89,24 @@ export async function PATCH(
   }
   const d = parsed.data;
 
+  // Measure a changed master OUTSIDE the transaction — getPrivateBuffer (R2)
+  // + sharp decode is a multi-second network read; doing it inside
+  // withTransaction would hold a Neon pool connection idle for its duration.
+  // A null/failed measure leaves dims NULL (fail-open / unmeasured).
+  let newDims: { width: number; height: number } | null = null;
+  if (d.image_print_url) {
+    try {
+      newDims = await measureMasterDims(d.image_print_url);
+    } catch (err) {
+      logger.warn('artwork PATCH: could not measure new master; dims set NULL', {
+        id,
+        key: d.image_print_url,
+        err,
+      });
+      newDims = null;
+    }
+  }
+
   try {
     await withTransaction(async (client) => {
       // status='published' goes through the shared publish gate so the
@@ -123,34 +141,14 @@ export async function PATCH(
           throw new NotFoundError();
         }
       }
-      // A changed master must re-measure dims (the PATCH only validates the
-      // key shape) and re-evaluate every size, else the gate uses stale dims.
-      // `image_print_url: null` means the master was CLEARED — null the dims.
+      // A changed master re-evaluates every size against the dims measured
+      // above (null when cleared or unmeasurable). `image_print_url: undefined`
+      // = not touched; null = cleared; a string = new key (measured already).
       if (d.image_print_url !== undefined) {
-        if (d.image_print_url === null) {
-          await client.query(
-            `UPDATE artworks SET print_width = NULL, print_height = NULL WHERE id = $1`,
-            [id],
-          );
-        } else {
-          try {
-            const { width, height } = await measureMasterDims(d.image_print_url);
-            await client.query(
-              `UPDATE artworks SET print_width = $1, print_height = $2 WHERE id = $3`,
-              [width, height, id],
-            );
-          } catch (err) {
-            logger.warn('artwork PATCH: could not measure new master; dims set NULL', {
-              id,
-              key: d.image_print_url,
-              err,
-            });
-            await client.query(
-              `UPDATE artworks SET print_width = NULL, print_height = NULL WHERE id = $1`,
-              [id],
-            );
-          }
-        }
+        await client.query(
+          `UPDATE artworks SET print_width = $1, print_height = $2 WHERE id = $3`,
+          [newDims?.width ?? null, newDims?.height ?? null, id],
+        );
         await refreshVariantResolution(client, id);
       }
 

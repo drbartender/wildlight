@@ -37,17 +37,16 @@ async function main() {
       const rotated = (meta.orientation ?? 1) >= 5 && (meta.orientation ?? 1) <= 8;
       const w = rotated ? meta.height : meta.width;
       const h = rotated ? meta.width : meta.height;
-      await pool.query(
-        `UPDATE artworks SET print_width = $1, print_height = $2 WHERE id = $3`,
-        [w, h, row.id],
-      );
-      try {
-        await withTransaction((tx) => refreshVariantResolution(tx, row.id));
-      } catch (err) {
-        console.error(
-          `recompute ${String(row.id).padStart(4)}  ${err instanceof Error ? err.message : err}`,
+      // Dims write + resolution recompute in one transaction so they stay
+      // consistent — a failed recompute rolls back the dims too, leaving the
+      // row's print_width NULL so the next run retries it.
+      await withTransaction(async (tx) => {
+        await tx.query(
+          `UPDATE artworks SET print_width = $1, print_height = $2 WHERE id = $3`,
+          [w, h, row.id],
         );
-      }
+        await refreshVariantResolution(tx, row.id);
+      });
       console.log(`ok  ${String(row.id).padStart(4)}  ${w}×${h}`);
     } catch (err) {
       console.error(

@@ -33,6 +33,22 @@ export async function PATCH(
   }
   const d = parsed.data;
 
+  // An override forces a size buyable. Refuse it on an artwork with no print
+  // master — there would be nothing to fulfill. (The admin panel only offers
+  // override on measured masters; this guards the raw API.)
+  if (d.resolution_override === true) {
+    const m = await pool.query<{ image_print_url: string | null }>(
+      'SELECT image_print_url FROM artworks WHERE id = $1',
+      [artworkId],
+    );
+    if (!m.rows[0]?.image_print_url) {
+      return NextResponse.json(
+        { error: 'cannot override: artwork has no print master' },
+        { status: 409 },
+      );
+    }
+  }
+
   const cols: string[] = [];
   const vals: unknown[] = [];
   if (d.resolution_override !== undefined) {
