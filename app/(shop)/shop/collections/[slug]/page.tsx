@@ -37,9 +37,11 @@ export default async function CollectionDetail({
   const arts = await pool.query<PlateCardData>(
     `SELECT a.slug, a.title, a.image_web_url, a.year_shot, a.location,
             (SELECT MIN(price_cents) FROM artwork_variants v
-                WHERE v.artwork_id = a.id AND v.active = TRUE) AS min_price_cents
+                WHERE v.artwork_id = a.id AND v.buyable) AS min_price_cents
      FROM artworks a
      WHERE a.collection_id = $1 AND a.status = 'published'
+       AND EXISTS (SELECT 1 FROM artwork_variants v
+                     WHERE v.artwork_id = a.id AND v.buyable)
      ORDER BY a.display_order, a.id`,
     [c.id],
   );

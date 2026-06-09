@@ -34,10 +34,12 @@ export default async function HomePage() {
               a.location,
               c.title AS collection_title,
               (SELECT MIN(price_cents) FROM artwork_variants v
-                 WHERE v.artwork_id = a.id AND v.active = TRUE) AS min_price_cents
+                 WHERE v.artwork_id = a.id AND v.buyable) AS min_price_cents
        FROM artworks a
        LEFT JOIN collections c ON c.id = a.collection_id
        WHERE a.status = 'published'
+         AND EXISTS (SELECT 1 FROM artwork_variants v
+                       WHERE v.artwork_id = a.id AND v.buyable)
        ORDER BY a.display_order, a.id
        LIMIT 12`,
     ),

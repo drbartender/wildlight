@@ -95,7 +95,7 @@ export default async function ArtworkPage({
   const [variantsRes, relatedRes] = await Promise.all([
     pool.query<VariantOption>(
       `SELECT id, type, size, finish, price_cents FROM artwork_variants
-       WHERE artwork_id = $1 AND active = TRUE
+       WHERE artwork_id = $1 AND buyable
        ORDER BY type, price_cents`,
       [art.id],
     ),
@@ -103,7 +103,7 @@ export default async function ArtworkPage({
       ? pool.query<PlateCardData>(
           `SELECT a.slug, a.title, a.image_web_url, a.year_shot, a.location,
                   (SELECT MIN(price_cents) FROM artwork_variants v
-                     WHERE v.artwork_id = a.id AND v.active = TRUE) AS min_price_cents
+                     WHERE v.artwork_id = a.id AND v.buyable) AS min_price_cents
            FROM artworks a
            JOIN collections c ON c.id = a.collection_id
            WHERE c.slug = $1 AND a.status = 'published' AND a.slug <> $2
@@ -114,6 +114,10 @@ export default async function ArtworkPage({
       : Promise.resolve<RelatedQueryResult>({ rows: [] }),
   ]);
   const variants = variantsRes.rows;
+  // An all-blocked published piece is not for sale — keep it out of the shop
+  // entirely (matches the grid's EXISTS filter). It reappears automatically
+  // once a size becomes buyable.
+  if (variants.length === 0) notFound();
   const related = relatedRes;
 
   const plate = plateNumber(art.slug);

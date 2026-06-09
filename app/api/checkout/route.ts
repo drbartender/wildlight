@@ -42,18 +42,20 @@ export async function POST(req: Request) {
   const { lines } = parsed.data;
   const ids = lines.map((l) => l.variantId);
 
-  let rows: VariantRow[];
+  let rows: Array<VariantRow & { published: boolean; buyable: boolean }>;
   try {
-    const result = await pool.query<VariantRow>(
+    const result = await pool.query<VariantRow & { published: boolean; buyable: boolean }>(
       `SELECT v.id, v.price_cents, v.cost_cents, v.printful_sync_variant_id,
               v.type, v.size, v.finish, v.artwork_id,
               a.title AS artwork_title, a.slug AS artwork_slug,
               a.image_web_url, a.image_print_url,
-              c.title AS collection_title
+              c.title AS collection_title,
+              (a.status = 'published') AS published,
+              v.buyable AS buyable
        FROM artwork_variants v
        JOIN artworks a ON a.id = v.artwork_id
        LEFT JOIN collections c ON c.id = a.collection_id
-       WHERE v.id = ANY($1::int[]) AND v.active AND a.status = 'published'`,
+       WHERE v.id = ANY($1::int[])`,
       [ids],
     );
     rows = result.rows;
@@ -62,8 +64,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'checkout_init_failed' }, { status: 502 });
   }
 
-  if (rows.length !== ids.length) {
-    return NextResponse.json({ error: 'some items unavailable' }, { status: 400 });
+  const sellable = rows.filter((r) => r.published && r.buyable);
+  if (sellable.length !== ids.length) {
+    const blocked = rows.find((r) => r.published && !r.buyable);
+    return NextResponse.json(
+      {
+        error: blocked
+          ? `"${blocked.artwork_title}" isn't available in ${blocked.size} right now.`
+          : 'some items unavailable',
+      },
+      { status: 400 },
+    );
   }
 
   const byId = new Map<number, VariantRow>(rows.map((r) => [r.id, r]));

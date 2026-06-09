@@ -38,7 +38,7 @@ export async function syncArtworkProducts(artworkId: number): Promise<{ created:
   }>(
     `SELECT id, type, size, finish, price_cents
      FROM artwork_variants
-     WHERE artwork_id = $1 AND active = TRUE`,
+     WHERE artwork_id = $1 AND buyable`,
     [artworkId],
   );
   if (!variants.rowCount) return { created: 0 };
