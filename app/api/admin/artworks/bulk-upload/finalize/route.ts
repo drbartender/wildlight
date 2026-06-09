@@ -4,7 +4,8 @@ export const maxDuration = 300;
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { fileTypeFromBuffer } from 'file-type';
-import { pool } from '@/lib/db';
+import { pool, withTransaction } from '@/lib/db';
+import { refreshVariantResolution } from '@/lib/variant-resolution';
 import { requireAdmin } from '@/lib/session';
 import {
   getPrivateBuffer,
@@ -239,16 +240,21 @@ export async function POST(req: Request) {
   try {
     webUrl = await uploadPublic(webKey, derived.buf, derived.contentType);
     await copyAndDeletePrivate(input.stagedKey, printKey);
-    await pool.query(
-      `UPDATE artworks
-       SET image_web_url   = $1,
-           image_print_url = $2,
-           print_width     = $3,
-           print_height    = $4,
-           updated_at      = NOW()
-       WHERE id = $5`,
-      [webUrl, printKey, derived.masterWidth, derived.masterHeight, artworkId],
-    );
+    await withTransaction(async (tx) => {
+      await tx.query(
+        `UPDATE artworks
+         SET image_web_url   = $1,
+             image_print_url = $2,
+             print_width     = $3,
+             print_height    = $4,
+             updated_at      = NOW()
+         WHERE id = $5`,
+        [webUrl, printKey, derived.masterWidth, derived.masterHeight, artworkId],
+      );
+      // Variants exist only after a template is applied; refresh is a no-op
+      // until then, and re-runs correctly once they do.
+      await refreshVariantResolution(tx, artworkId);
+    });
   } catch (err) {
     logger.error('finalize: canonical write or DB update failed', err, {
       mode: input.mode,
