@@ -85,7 +85,7 @@ export async function GET(req: Request) {
     await sendStudioReminderEmail({
       to: adminEmail,
       siteUrl:
-        process.env.NEXT_PUBLIC_APP_URL || 'https://wildlightimagery.shop',
+        process.env.NEXT_PUBLIC_APP_URL || 'https://wildlightimagery.com',
       stats,
       angles,
     });

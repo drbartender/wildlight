@@ -218,7 +218,7 @@ function ContactForm() {
           <div className="block">
             <h3>Direct</h3>
             <p>
-              dan@wildlightimagery.shop
+              dan@wildlightimagery.com
               <br />
               720.363.9430
             </p>

@@ -16,7 +16,7 @@ export default function Privacy() {
       </p>
       <p>
         For privacy questions, email{' '}
-        <a href="mailto:contact@wildlightimagery.shop">contact@wildlightimagery.shop</a>.
+        <a href="mailto:dan@wildlightimagery.com">dan@wildlightimagery.com</a>.
       </p>
     </section>
   );

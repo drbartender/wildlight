@@ -61,7 +61,7 @@ export const metadata: Metadata = {
   title: 'Wildlight Imagery — Fine art by Dan Raby',
   description:
     'A curated selection of fine art photography by Dan Raby. Archival prints, canvases, and framed pieces made to order.',
-  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://wildlightimagery.shop'),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://wildlightimagery.com'),
 };
 
 // Runs synchronously before paint so a returning visitor's ink-mood preference

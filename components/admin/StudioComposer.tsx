@@ -72,7 +72,7 @@ function labelsFor(kind: StudioKind): ComposerLabels {
       subjectLabel: 'Subject (preview blurb)',
       subjectPlaceholder: 'One sentence shown in the index',
       primaryTarget: 'Journal',
-      primaryHint: 'wildlightimagery.shop/journal',
+      primaryHint: 'wildlightimagery.com/journal',
       crossTarget: 'Cross-post to subscribers',
       crossHint: 'sends a broadcast at publish',
       publishLabel: 'Publish →',

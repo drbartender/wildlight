@@ -90,7 +90,7 @@ export default function EventsService() {
           <div className="block">
             <h4>Direct</h4>
             <p>
-              dan@wildlightimagery.shop
+              dan@wildlightimagery.com
               <br />
               720.363.9430
             </p>

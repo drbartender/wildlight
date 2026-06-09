@@ -24,6 +24,7 @@ const ALLOWED_ORIGINS = [
   'https://admin.wildlightimagery.shop',
   'https://wildlightimagery.com',
   'https://www.wildlightimagery.com',
+  'https://admin.wildlightimagery.com',
   'https://wildlight-*.vercel.app',
   'http://localhost:3000',
 ];
