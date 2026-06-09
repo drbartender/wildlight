@@ -22,10 +22,15 @@ export async function refreshVariantResolution(
   const a = await client.query<{
     print_width: number | null;
     print_height: number | null;
-  }>(`SELECT print_width, print_height FROM artworks WHERE id = $1`, [artworkId]);
+    image_print_url: string | null;
+  }>(
+    `SELECT print_width, print_height, image_print_url FROM artworks WHERE id = $1`,
+    [artworkId],
+  );
   const dims = a.rows[0];
   const w = dims?.print_width ?? null;
   const h = dims?.print_height ?? null;
+  const hasMaster = !!dims?.image_print_url;
 
   const variants = await client.query<{ id: number; size: string }>(
     `SELECT id, size FROM artwork_variants WHERE artwork_id = $1`,
@@ -34,6 +39,18 @@ export async function refreshVariantResolution(
 
   const res: RefreshResult = { updated: 0, ok: 0, blocked: 0, unmeasured: 0 };
   for (const v of variants.rows) {
+    // No master at all → not sellable, and any prior override is void (there
+    // is nothing to fulfill). Fail-CLOSED — distinct from the unmeasured
+    // (has-master, dims-NULL) case below, which is fail-open.
+    if (!hasMaster) {
+      await client.query(
+        `UPDATE artwork_variants SET min_resolution_ok = $1, resolution_override = $2 WHERE id = $3`,
+        [false, false, v.id],
+      );
+      res.updated++;
+      res.blocked++;
+      continue;
+    }
     let ok: boolean | null;
     if (w == null || h == null) {
       ok = null; // unmeasured → fail-open via `min_resolution_ok IS NOT FALSE`
