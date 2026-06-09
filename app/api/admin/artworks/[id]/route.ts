@@ -94,6 +94,7 @@ export async function PATCH(
   // withTransaction would hold a Neon pool connection idle for its duration.
   // A null/failed measure leaves dims NULL (fail-open / unmeasured).
   let newDims: { width: number; height: number } | null = null;
+  let measureFailed = false;
   if (d.image_print_url) {
     try {
       newDims = await measureMasterDims(d.image_print_url);
@@ -104,6 +105,7 @@ export async function PATCH(
         err,
       });
       newDims = null;
+      measureFailed = true;
     }
   }
 
@@ -219,7 +221,15 @@ export async function PATCH(
     throw err;
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json(
+    measureFailed
+      ? {
+          ok: true,
+          warning:
+            'master could not be measured — sizes are unverified',
+        }
+      : { ok: true },
+  );
 }
 
 export async function DELETE(

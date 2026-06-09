@@ -48,9 +48,11 @@ export async function GET(req: Request) {
               WHERE v.artwork_id = a.id AND v.buyable) AS max_price_cents,
             (SELECT COUNT(*)::int FROM artwork_variants v
               WHERE v.artwork_id = a.id) AS total_variant_count,
-            (SELECT bool_or(v.min_resolution_ok IS NULL) FROM artwork_variants v
+            (SELECT bool_or(v.min_resolution_ok IS NULL AND NOT v.resolution_override)
+               FROM artwork_variants v
               WHERE v.artwork_id = a.id) AS has_unmeasured,
-            (SELECT bool_and(v.min_resolution_ok IS NOT FALSE) FROM artwork_variants v
+            (SELECT bool_and(v.min_resolution_ok IS NOT FALSE OR v.resolution_override)
+               FROM artwork_variants v
               WHERE v.artwork_id = a.id) AS all_sizes_ok
      FROM artworks a
      LEFT JOIN collections c ON c.id = a.collection_id

@@ -40,10 +40,18 @@ function ResBadge({
 }) {
   if (a.total_variant_count === 0) return null;
   const s = { marginLeft: 6, fontSize: 10 };
-  if (a.has_unmeasured)
-    return <span style={{ ...s, color: 'var(--adm-muted)' }}>— unmeasured</span>;
+  // Known-blocked states take priority over "unmeasured" — a piece with a
+  // measured-FALSE size should not read as merely unmeasured.
   if (a.variant_count === 0)
     return <span style={{ ...s, color: 'var(--adm-red)' }}>⚠ blocked</span>;
+  if (a.variant_count < a.total_variant_count)
+    return (
+      <span style={{ ...s, color: 'var(--adm-red)' }}>
+        ⚠ {a.variant_count}/{a.total_variant_count}
+      </span>
+    );
+  if (a.has_unmeasured)
+    return <span style={{ ...s, color: 'var(--adm-muted)' }}>— unmeasured</span>;
   if (a.all_sizes_ok)
     return <span style={{ ...s, color: 'var(--adm-muted)' }}>✓ all sizes</span>;
   return (

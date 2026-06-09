@@ -107,6 +107,8 @@ export default async function ArtworkPage({
            FROM artworks a
            JOIN collections c ON c.id = a.collection_id
            WHERE c.slug = $1 AND a.status = 'published' AND a.slug <> $2
+             AND EXISTS (SELECT 1 FROM artwork_variants v
+                          WHERE v.artwork_id = a.id AND v.buyable)
            ORDER BY a.display_order, a.id
            LIMIT 4`,
           [art.collection_slug, art.slug],
@@ -114,10 +116,12 @@ export default async function ArtworkPage({
       : Promise.resolve<RelatedQueryResult>({ rows: [] }),
   ]);
   const variants = variantsRes.rows;
-  // An all-blocked published piece is not for sale — keep it out of the shop
-  // entirely (matches the grid's EXISTS filter). It reappears automatically
-  // once a size becomes buyable.
-  if (variants.length === 0) notFound();
+  // A published piece with zero buyable variants still renders — OrderCard's
+  // empty-variants branch shows the "not yet for sale — editions coming"
+  // state. The shop grid hides it via its EXISTS filter, but anyone landing
+  // here via a direct link or related rail sees graceful degradation, not a
+  // dead-end 404. notFound() is reserved for genuinely-not-published rows
+  // (handled by the CTE above).
   const related = relatedRes;
 
   const plate = plateNumber(art.slug);

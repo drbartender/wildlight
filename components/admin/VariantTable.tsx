@@ -23,6 +23,23 @@ const TYPE_LABEL: Record<string, string> = {
   metal: 'Metal',
 };
 
+function StatusBadge({ v }: { v: VRow }) {
+  const s = { fontSize: 10 };
+  if (!v.active) {
+    return <span style={{ ...s, color: 'var(--adm-muted)' }}>— inactive</span>;
+  }
+  if (!v.buyable) {
+    return <span style={{ ...s, color: 'var(--adm-red)' }}>⚠ low-res</span>;
+  }
+  if (v.resolution_override) {
+    return <span style={{ ...s, color: 'var(--adm-amber, var(--adm-muted))' }}>↯ override</span>;
+  }
+  if (v.min_resolution_ok === null) {
+    return <span style={{ ...s, color: 'var(--adm-muted)' }}>— unmeasured</span>;
+  }
+  return <span style={{ ...s, color: 'var(--adm-green)' }}>✓ sellable</span>;
+}
+
 export function VariantTable({ variants }: { variants: VRow[] }) {
   if (!variants.length) return null;
   return (
@@ -36,6 +53,7 @@ export function VariantTable({ variants }: { variants: VRow[] }) {
           <th>Price</th>
           <th>Printful ID</th>
           <th style={{ textAlign: 'center' }}>Active</th>
+          <th>Status</th>
         </tr>
       </thead>
       <tbody>
@@ -58,6 +76,9 @@ export function VariantTable({ variants }: { variants: VRow[] }) {
               }}
             >
               {v.active ? '✓' : '—'}
+            </td>
+            <td>
+              <StatusBadge v={v} />
             </td>
           </tr>
         ))}

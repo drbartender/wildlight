@@ -7,6 +7,7 @@ export interface RefreshResult {
   ok: number;
   blocked: number;
   unmeasured: number;
+  hasMaster: boolean;
 }
 
 /**
@@ -32,22 +33,35 @@ export async function refreshVariantResolution(
   const h = dims?.print_height ?? null;
   const hasMaster = !!dims?.image_print_url;
 
+  // ORDER BY id so concurrent recomputes on the same artwork acquire row
+  // locks in a stable order — avoids deadlocks under parallel runs.
   const variants = await client.query<{ id: number; size: string }>(
-    `SELECT id, size FROM artwork_variants WHERE artwork_id = $1`,
+    `SELECT id, size FROM artwork_variants WHERE artwork_id = $1 ORDER BY id`,
     [artworkId],
   );
 
-  const res: RefreshResult = { updated: 0, ok: 0, blocked: 0, unmeasured: 0 };
+  const res: RefreshResult = {
+    updated: 0,
+    ok: 0,
+    blocked: 0,
+    unmeasured: 0,
+    hasMaster,
+  };
   for (const v of variants.rows) {
     // No master at all → not sellable, and any prior override is void (there
     // is nothing to fulfill). Fail-CLOSED — distinct from the unmeasured
     // (has-master, dims-NULL) case below, which is fail-open.
     if (!hasMaster) {
-      await client.query(
-        `UPDATE artwork_variants SET min_resolution_ok = $1, resolution_override = $2 WHERE id = $3`,
+      // Row-idempotent: only WRITE if either column actually changes.
+      const r = await client.query(
+        `UPDATE artwork_variants
+            SET min_resolution_ok = $1, resolution_override = $2
+          WHERE id = $3
+            AND (min_resolution_ok IS DISTINCT FROM $1
+                 OR resolution_override IS DISTINCT FROM $2)`,
         [false, false, v.id],
       );
-      res.updated++;
+      if (r.rowCount) res.updated++;
       res.blocked++;
       continue;
     }
@@ -70,11 +84,31 @@ export async function refreshVariantResolution(
       if (ok) res.ok++;
       else res.blocked++;
     }
-    await client.query(
-      `UPDATE artwork_variants SET min_resolution_ok = $1 WHERE id = $2`,
-      [ok, v.id],
-    );
-    res.updated++;
+    // When we're writing min_resolution_ok = FALSE (measured-and-too-low for
+    // this master), clear any pre-existing resolution_override too. A master
+    // swap to a smaller file must force the admin to consciously re-approve
+    // against the new dims — otherwise a stale override keeps a low-res
+    // variant buyable.
+    if (ok === false) {
+      const r = await client.query(
+        `UPDATE artwork_variants
+            SET min_resolution_ok = $1, resolution_override = FALSE
+          WHERE id = $2
+            AND (min_resolution_ok IS DISTINCT FROM $1
+                 OR resolution_override IS DISTINCT FROM FALSE)`,
+        [false, v.id],
+      );
+      if (r.rowCount) res.updated++;
+    } else {
+      const r = await client.query(
+        `UPDATE artwork_variants
+            SET min_resolution_ok = $1
+          WHERE id = $2
+            AND min_resolution_ok IS DISTINCT FROM $1`,
+        [ok, v.id],
+      );
+      if (r.rowCount) res.updated++;
+    }
   }
   logger.info('variant-resolution refresh', { artworkId, ...res });
   return res;
