@@ -11,6 +11,9 @@ export interface VRow {
   cost_cents: number;
   active: boolean;
   printful_sync_variant_id: number | null;
+  min_resolution_ok: boolean | null;
+  resolution_override: boolean;
+  buyable: boolean;
 }
 
 const TYPE_LABEL: Record<string, string> = {

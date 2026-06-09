@@ -20,9 +20,37 @@ interface Row {
   collection_id: number | null;
   collection_title: string | null;
   variant_count: number;
+  total_variant_count: number;
+  has_unmeasured: boolean | null;
+  all_sizes_ok: boolean | null;
   min_price_cents: number | null;
   max_price_cents: number | null;
   updated_at: string;
+}
+
+function ResBadge({
+  a,
+}: {
+  a: {
+    total_variant_count: number;
+    variant_count: number;
+    has_unmeasured: boolean | null;
+    all_sizes_ok: boolean | null;
+  };
+}) {
+  if (a.total_variant_count === 0) return null;
+  const s = { marginLeft: 6, fontSize: 10 };
+  if (a.has_unmeasured)
+    return <span style={{ ...s, color: 'var(--adm-muted)' }}>— unmeasured</span>;
+  if (a.variant_count === 0)
+    return <span style={{ ...s, color: 'var(--adm-red)' }}>⚠ blocked</span>;
+  if (a.all_sizes_ok)
+    return <span style={{ ...s, color: 'var(--adm-muted)' }}>✓ all sizes</span>;
+  return (
+    <span style={{ ...s, color: 'var(--adm-red)' }}>
+      ⚠ {a.variant_count}/{a.total_variant_count}
+    </span>
+  );
 }
 
 interface CollectionOpt {
@@ -180,7 +208,7 @@ export default function AdminArtworksPage() {
   }>({ done: 0, total: 0, failed: 0 });
 
   const emptyVariants = useMemo(
-    () => rows.filter((r) => r.variant_count === 0),
+    () => rows.filter((r) => r.total_variant_count === 0),
     [rows],
   );
 
@@ -270,7 +298,7 @@ export default function AdminArtworksPage() {
 
   async function batchApplyFull() {
     if (batchRunning) return;
-    const targets = rows.filter((r) => r.variant_count === 0);
+    const targets = rows.filter((r) => r.total_variant_count === 0);
     setBatchRunning('variants');
     setBatchProgress({ done: 0, total: targets.length, failed: 0 });
     let done = 0;
@@ -461,8 +489,9 @@ export default function AdminArtworksPage() {
                     </td>
                     <td>
                       <AdminPill status={r.status} />
+                      <ResBadge a={r} />
                     </td>
-                    <td className="right mono muted">{r.variant_count || '—'}</td>
+                    <td className="right mono muted">{r.total_variant_count || '—'}</td>
                     <td className="right mono">
                       {fmtPrice(r.min_price_cents, r.max_price_cents)}
                     </td>

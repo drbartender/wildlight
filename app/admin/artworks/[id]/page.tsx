@@ -7,7 +7,11 @@ import { VariantTable, type VRow } from '@/components/admin/VariantTable';
 import { AdminPill } from '@/components/admin/AdminPill';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
 import { AdminField } from '@/components/admin/AdminField';
-import { classifyPrintResolution } from '@/lib/print-resolution';
+import {
+  classifyPrintResolution,
+  evaluateSizeResolution,
+  MIN_DPI,
+} from '@/lib/print-resolution';
 
 interface Artwork {
   id: number;
@@ -94,6 +98,30 @@ export default function ArtworkEditPage({
     setSaving(false);
   }
 
+  const [savingVariant, setSavingVariant] = useState<number | null>(null);
+
+  async function toggleOverride(variantId: number, next: boolean) {
+    if (next && !confirm('Offer this size despite low resolution? It will print soft.')) {
+      return;
+    }
+    setSavingVariant(variantId);
+    try {
+      const res = await fetch(`/api/admin/artworks/${id}/variants/${variantId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resolution_override: next }),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        setSaveError(j.error || 'Could not update size.');
+        return;
+      }
+      await load();
+    } finally {
+      setSavingVariant(null);
+    }
+  }
+
   const [drafting, setDrafting] = useState(false);
   const [draftError, setDraftError] = useState<string | null>(null);
   const [draftConfidence, setDraftConfidence] = useState<'high' | 'low' | null>(null);
@@ -148,7 +176,7 @@ export default function ArtworkEditPage({
   }
 
   const a = data.artwork;
-  const activeVariants = data.variants.filter((v) => v.active).length;
+  const buyableVariants = data.variants.filter((v) => v.buyable).length;
   const printResolution =
     a.print_width && a.print_height
       ? classifyPrintResolution(a.print_width, a.print_height)
@@ -446,7 +474,7 @@ export default function ArtworkEditPage({
                     color: 'var(--adm-muted)',
                   }}
                 >
-                  {activeVariants} active · retail = cost × 2.1, rounded to $5
+                  {buyableVariants} buyable · retail = cost × 2.1, rounded to $5
                 </span>
               </div>
               <div className="wl-adm-card" style={{ overflow: 'hidden' }}>
@@ -474,6 +502,72 @@ export default function ArtworkEditPage({
                   </div>
                 )}
               </div>
+              {a.print_width && a.print_height && data.variants.length > 0 && (
+                <div className="wl-adm-card" style={{ marginTop: 12, padding: 16 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+                    Print sizes · master {a.print_width}×{a.print_height} · floor {MIN_DPI} DPI
+                  </div>
+                  {data.variants.map((v) => {
+                    const ev = evaluateSizeResolution(
+                      a.print_width as number,
+                      a.print_height as number,
+                      v.size,
+                    );
+                    const state = v.buyable
+                      ? v.resolution_override
+                        ? 'override'
+                        : 'ok'
+                      : 'blocked';
+                    return (
+                      <div
+                        key={v.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          fontSize: 12,
+                          padding: '4px 0',
+                          color:
+                            state === 'blocked' ? 'var(--adm-red)' : 'var(--adm-muted)',
+                        }}
+                      >
+                        <span style={{ width: 120 }}>
+                          {v.type} · {v.size}
+                        </span>
+                        <span style={{ width: 64 }}>{ev.effectiveDpi} DPI</span>
+                        <span style={{ flex: 1 }}>
+                          {state === 'override'
+                            ? 'offered (override)'
+                            : v.buyable
+                              ? 'offered'
+                              : ev.message}
+                        </span>
+                        {state === 'override' && v.printful_sync_variant_id == null && (
+                          <span style={{ color: 'var(--adm-muted)', fontSize: 11 }}>
+                            run sync:printful to make orderable
+                          </span>
+                        )}
+                        {!ev.ok && (
+                          <button
+                            type="button"
+                            className="wl-adm-btn small"
+                            disabled={savingVariant === v.id}
+                            onClick={() => toggleOverride(v.id, !v.resolution_override)}
+                          >
+                            {v.resolution_override ? 'Remove override' : 'Override'}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {data.variants.every((v) => !v.buyable) && (
+                    <div style={{ fontSize: 12, color: 'var(--adm-red)', marginTop: 8 }}>
+                      ⚠ No size meets the {MIN_DPI}-DPI floor — this piece is hidden from
+                      the shop until you re-upload a larger master or override a size.
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {saving && (
