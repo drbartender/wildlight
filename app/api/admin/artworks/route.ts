@@ -41,11 +41,17 @@ export async function GET(req: Request) {
             a.collection_id,
             c.title AS collection_title, c.slug AS collection_slug,
             (SELECT COUNT(*)::int FROM artwork_variants v
-              WHERE v.artwork_id = a.id AND v.active) AS variant_count,
+              WHERE v.artwork_id = a.id AND v.buyable) AS variant_count,
             (SELECT MIN(price_cents) FROM artwork_variants v
-              WHERE v.artwork_id = a.id AND v.active) AS min_price_cents,
+              WHERE v.artwork_id = a.id AND v.buyable) AS min_price_cents,
             (SELECT MAX(price_cents) FROM artwork_variants v
-              WHERE v.artwork_id = a.id AND v.active) AS max_price_cents
+              WHERE v.artwork_id = a.id AND v.buyable) AS max_price_cents,
+            (SELECT COUNT(*)::int FROM artwork_variants v
+              WHERE v.artwork_id = a.id) AS total_variant_count,
+            (SELECT bool_or(v.min_resolution_ok IS NULL) FROM artwork_variants v
+              WHERE v.artwork_id = a.id) AS has_unmeasured,
+            (SELECT bool_and(v.min_resolution_ok IS NOT FALSE) FROM artwork_variants v
+              WHERE v.artwork_id = a.id) AS all_sizes_ok
      FROM artworks a
      LEFT JOIN collections c ON c.id = a.collection_id
      ${where}
