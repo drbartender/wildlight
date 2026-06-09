@@ -7,6 +7,9 @@ import { requireSameOrigin } from '@/lib/origin-check';
 import { applyTemplate, type TemplateKey } from '@/lib/variant-templates';
 import { publishArtworks } from '@/lib/publish-artworks';
 import { ConflictError, NotFoundError } from '@/lib/errors';
+import { refreshVariantResolution } from '@/lib/variant-resolution';
+import { measureMasterDims } from '@/lib/measure-master';
+import { logger } from '@/lib/logger';
 
 function isFkViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23503';
@@ -120,20 +123,84 @@ export async function PATCH(
           throw new NotFoundError();
         }
       }
+      // A changed master must re-measure dims (the PATCH only validates the
+      // key shape) and re-evaluate every size, else the gate uses stale dims.
+      // `image_print_url: null` means the master was CLEARED — null the dims.
+      if (d.image_print_url !== undefined) {
+        if (d.image_print_url === null) {
+          await client.query(
+            `UPDATE artworks SET print_width = NULL, print_height = NULL WHERE id = $1`,
+            [id],
+          );
+        } else {
+          try {
+            const { width, height } = await measureMasterDims(d.image_print_url);
+            await client.query(
+              `UPDATE artworks SET print_width = $1, print_height = $2 WHERE id = $3`,
+              [width, height, id],
+            );
+          } catch (err) {
+            logger.warn('artwork PATCH: could not measure new master; dims set NULL', {
+              id,
+              key: d.image_print_url,
+              err,
+            });
+            await client.query(
+              `UPDATE artworks SET print_width = NULL, print_height = NULL WHERE id = $1`,
+              [id],
+            );
+          }
+        }
+        await refreshVariantResolution(client, id);
+      }
+
       if (d.applyTemplate) {
         const variants = applyTemplate(d.applyTemplate as TemplateKey);
-        await client.query(
-          'UPDATE artwork_variants SET active = FALSE WHERE artwork_id = $1',
+        const keyOf = (t: string, s: string, f: string | null) => `${t}|${s}|${f ?? ''}`;
+        const wanted = new Set(variants.map((v) => keyOf(v.type, v.size, v.finish)));
+
+        // UPSERT — never DELETE. Deleting would null out order_items.variant_id
+        // (ON DELETE SET NULL) for sold sizes and drop the Printful linkage
+        // (printful_sync_variant_id) and the variant id. Instead: deactivate
+        // rows no longer in the template, then update-or-insert each template
+        // row. Existing rows keep their id, resolution_override, and
+        // printful_sync_variant_id; overrides therefore survive automatically.
+        const existing = await client.query<{
+          id: number;
+          type: string;
+          size: string;
+          finish: string | null;
+        }>(
+          `SELECT id, type, size, finish FROM artwork_variants WHERE artwork_id = $1`,
           [id],
         );
-        for (const v of variants) {
-          await client.query(
-            `INSERT INTO artwork_variants
-               (artwork_id, type, size, finish, price_cents, cost_cents, active)
-             VALUES ($1, $2, $3, $4, $5, $6, TRUE)`,
-            [id, v.type, v.size, v.finish, v.price_cents, v.cost_cents],
-          );
+        for (const row of existing.rows) {
+          if (!wanted.has(keyOf(row.type, row.size, row.finish))) {
+            await client.query(
+              'UPDATE artwork_variants SET active = FALSE WHERE id = $1',
+              [row.id],
+            );
+          }
         }
+        for (const v of variants) {
+          // finish may be NULL — IS NOT DISTINCT FROM matches NULL=NULL.
+          const upd = await client.query(
+            `UPDATE artwork_variants
+             SET price_cents = $1, cost_cents = $2, active = TRUE
+             WHERE artwork_id = $3 AND type = $4 AND size = $5
+               AND finish IS NOT DISTINCT FROM $6`,
+            [v.price_cents, v.cost_cents, id, v.type, v.size, v.finish],
+          );
+          if (!upd.rowCount) {
+            await client.query(
+              `INSERT INTO artwork_variants
+                 (artwork_id, type, size, finish, price_cents, cost_cents, active)
+               VALUES ($1, $2, $3, $4, $5, $6, TRUE)`,
+              [id, v.type, v.size, v.finish, v.price_cents, v.cost_cents],
+            );
+          }
+        }
+        await refreshVariantResolution(client, id);
       }
     });
   } catch (err) {
