@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 // When ADMIN_HOST is set (production), serve the admin section from a
-// dedicated subdomain — e.g. `admin.wildlightimagery.shop`. The shop stays on
+// dedicated subdomain — e.g. `admin.wildlightimagery.com`. The shop stays on
 // the apex/www host. Local dev and Vercel previews leave ADMIN_HOST unset and
 // keep the admin reachable at the path-based `/admin/*` URL.
 const ADMIN_HOST = process.env.ADMIN_HOST?.toLowerCase();
@@ -41,7 +41,7 @@ export function middleware(req: NextRequest) {
     }
 
     // Everything else on the admin host gets transparently rewritten under
-    // /admin/<path>, so `admin.wildlightimagery.shop/orders` serves the
+    // /admin/<path>, so `admin.wildlightimagery.com/orders` serves the
     // existing `/admin/orders` route.
     const rewritten = url.clone();
     rewritten.pathname = `/admin${path === '/' ? '' : path}`;
