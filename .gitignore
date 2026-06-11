@@ -27,6 +27,14 @@ scraped/
 # local scratch work — design handoffs, raw letters, experiments
 temp/
 
+# local UI-review screenshots + MCP/review scratch output. Root-anchored so
+# public/ and assets/ images are unaffected.
+/*.png
+/*.jpeg
+/*.jpg
+/.playwright-mcp/
+/.review/
+
 # editor / OS
 .DS_Store
 .claude/
