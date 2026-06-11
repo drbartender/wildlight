@@ -5,22 +5,13 @@ import 'dotenv/config';
 import sharp from 'sharp';
 import { pool } from '../lib/db';
 import { getPrivateBuffer } from '../lib/r2';
+import { BIGGEST_LONG_EDGE, grade } from './_print-quality.mjs';
 
 interface Row {
   id: number;
   title: string;
   status: string;
   image_print_url: string;
-}
-
-const BIGGEST_LONG_EDGE = 36; // 24x36 is the largest paper/canvas/framed size
-
-function grade(dpi: number): string {
-  if (dpi >= 300) return 'EXCELLENT';
-  if (dpi >= 240) return 'great';
-  if (dpi >= 180) return 'good';
-  if (dpi >= 150) return 'ok';
-  return 'SOFT';
 }
 
 async function main() {

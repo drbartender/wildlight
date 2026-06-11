@@ -3,8 +3,11 @@
  * and UPDATE artworks.title/location/artist_note for each id. Skips year_shot
  * (EXIF-only — never AI-guessed).
  *
- * Idempotent: rerun safe. Wrapped in a transaction per row so a single bad
- * row can't poison the whole batch.
+ * Idempotent: rerun safe. Each row's UPDATE is a single auto-committed
+ * statement guarded by its own try/catch, so one bad row fails in isolation
+ * without poisoning the rest of the batch (no explicit BEGIN/COMMIT needed for
+ * a single-statement write — add withTransaction from lib/db if a future edit
+ * makes the per-row work multi-statement).
  */
 import { config } from 'dotenv';
 config({ path: '.env.local' });
@@ -16,7 +19,10 @@ const drafts = JSON.parse(readFileSync(DRAFTS_PATH, 'utf8'));
 
 console.log(`Loaded ${drafts.length} drafts from ${DRAFTS_PATH}`);
 
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: true },
+});
 
 let ok = 0;
 let skipped = 0;

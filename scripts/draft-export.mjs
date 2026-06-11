@@ -7,6 +7,7 @@
  * Reads .env.local for DATABASE_URL. Writes:
  *   /tmp/wlthumbs/<id>.jpg
  *   /tmp/wl-manifest.json
+ * Run: node scripts/draft-export.mjs
  */
 import { config } from 'dotenv';
 config({ path: '.env.local' });
@@ -22,18 +23,12 @@ const THUMB_PX = 384;
 
 mkdirSync(THUMB_DIR, { recursive: true });
 
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: true },
+});
 
-const { rows } = await pool.query(`
-  SELECT a.id, a.slug, a.title, a.image_web_url, a.year_shot, a.location,
-         a.artist_note, c.slug AS collection_slug, c.title AS collection_title
-  FROM artworks a
-  LEFT JOIN collections c ON c.id = a.collection_id
-  ORDER BY c.display_order NULLS LAST, a.display_order, a.id
-`);
-
-console.log(`Fetched ${rows.length} artworks. Downloading + resizing…`);
-
+let rows = [];
 let done = 0;
 let failed = 0;
 const manifest = [];
@@ -100,13 +95,30 @@ img.save(r"${thumbPath}", 'JPEG', quality=82, optimize=True)
   }
 }
 
-for (let i = 0; i < rows.length; i += CONCURRENCY) {
-  await Promise.all(rows.slice(i, i + CONCURRENCY).map(processOne));
+try {
+  rows = (
+    await pool.query(`
+      SELECT a.id, a.slug, a.title, a.image_web_url, a.year_shot, a.location,
+             a.artist_note, c.slug AS collection_slug, c.title AS collection_title
+      FROM artworks a
+      LEFT JOIN collections c ON c.id = a.collection_id
+      ORDER BY c.display_order NULLS LAST, a.display_order, a.id
+    `)
+  ).rows;
+
+  console.log(`Fetched ${rows.length} artworks. Downloading + resizing…`);
+
+  for (let i = 0; i < rows.length; i += CONCURRENCY) {
+    await Promise.all(rows.slice(i, i + CONCURRENCY).map(processOne));
+  }
+
+  writeFileSync(MANIFEST, JSON.stringify(manifest, null, 2));
+  console.log(`\nDone. ${done} thumbnails ready, ${failed} failed.`);
+  console.log(`Manifest: ${MANIFEST}`);
+  console.log(`Thumbs:   ${THUMB_DIR}`);
+} catch (err) {
+  console.error(err instanceof Error ? err.message : err);
+  process.exitCode = 1;
+} finally {
+  await pool.end();
 }
-
-writeFileSync(MANIFEST, JSON.stringify(manifest, null, 2));
-
-await pool.end();
-console.log(`\nDone. ${done} thumbnails ready, ${failed} failed.`);
-console.log(`Manifest: ${MANIFEST}`);
-console.log(`Thumbs:   ${THUMB_DIR}`);

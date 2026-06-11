@@ -1,15 +1,15 @@
 // One-shot inventory snapshot. Uses managed-host SSL verification
 // (rejectUnauthorized: true), matching lib/db.ts conventions.
-import { readFileSync } from 'node:fs';
+// Run: node scripts/inventory-snapshot.mjs
+import { config } from 'dotenv';
+config({ path: '.env.local' });
 import pg from 'pg';
 
-const envText = readFileSync('.env.local', 'utf8');
-const match = envText.match(/^DATABASE_URL="([^"]+)"/m);
-if (!match) {
+const url = process.env.DATABASE_URL;
+if (!url) {
   console.error('DATABASE_URL not found in .env.local');
   process.exit(1);
 }
-const url = match[1];
 
 const client = new pg.Client({
   connectionString: url,
