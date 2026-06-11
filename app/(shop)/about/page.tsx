@@ -3,7 +3,7 @@ import Image from 'next/image';
 import type { Metadata } from 'next';
 import { EmailCaptureStrip } from '@/components/site/EmailCaptureStrip';
 
-export const metadata: Metadata = { title: 'Studio — Wildlight Imagery' };
+export const metadata: Metadata = { title: 'About — Wildlight Imagery' };
 
 // Dan's letter — verbatim from the studio. Paragraphs split on blank lines only;
 // no edits to words, punctuation, or capitalization. Keep it that way.
