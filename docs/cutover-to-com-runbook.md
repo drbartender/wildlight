@@ -63,8 +63,12 @@ works regardless of the marketing domain.
 - App-URL fallbacks (`sitemap`, `robots`, `layout` metadata, studio-reminder
   cron) default to `.com` when the env var is unset.
 - `scripts/r2-cors-setup.ts` now allows `admin.wildlightimagery.com`.
-- Order-email senders **left on `.shop`** on purpose (Resend is verified there;
-  migrate later — Phase 5).
+- Resend sender defaults moved to `.com`: `RESEND_FROM_EMAIL` →
+  `contact@wildlightimagery.com` (transactional), `RESEND_BROADCAST_FROM` →
+  `dan@wildlightimagery.com` (the newsletter "letter from Dan"). **Inert until
+  `wildlightimagery.com` is verified as a Resend sending domain** (Phase 5) and
+  the matching Vercel env vars are set — until then prod must keep the `.shop`
+  env-var values so mail still sends.
 
 > These are inert until you set the Vercel env vars and push, so nothing
 > changes on the live `.shop` site before you're ready.
@@ -112,7 +116,7 @@ works regardless of the marketing domain.
 | `STRIPE_WEBHOOK_SECRET` | *test endpoint `whsec_…`* | swap in Phase 4 |
 | `STRIPE_TEST_MODE_UNTIL` | **blank** | must be empty so a live key actually goes live |
 | `R2_PUBLIC_BASE_URL` | `https://images.wildlightimagery.shop` | **unchanged** |
-| `RESEND_FROM_EMAIL` / `RESEND_BROADCAST_FROM` | leave on `.shop` | migrate in Phase 5 |
+| `RESEND_FROM_EMAIL` / `RESEND_BROADCAST_FROM` | keep `.shop` for now | code defaults are `.com` (`contact@` / `dan@`) but only send once Resend verifies `.com` — Phase 5 |
 
 > How "live" is decided: the app reads `testMode` from the key prefix. While
 > `STRIPE_SECRET_KEY` starts with `sk_test_`, Printful only **drafts** orders
@@ -158,10 +162,13 @@ Then **go live**:
 
 - [ ] Decommission the old WordPress hosting (or just let it lapse — DNS no
       longer points there).
-- [ ] Optional: verify `wildlightimagery.com` as a Resend sending domain and
-      switch `RESEND_FROM_EMAIL`/`RESEND_BROADCAST_FROM` to `@wildlightimagery.com`.
-      Resend adds records on a `send.` subdomain — does **not** conflict with
-      Proton's apex records.
+- [ ] Verify `wildlightimagery.com` as a Resend sending domain, then set the
+      Vercel env vars `RESEND_FROM_EMAIL=contact@wildlightimagery.com` and
+      `RESEND_BROADCAST_FROM=dan@wildlightimagery.com` (the code already defaults
+      to these). Resend adds records on a `send.` subdomain — does **not**
+      conflict with Proton's apex records. Until this is done, leave the Vercel
+      vars on their verified `.shop` values so transactional + newsletter mail
+      keeps sending.
 
 ---
 

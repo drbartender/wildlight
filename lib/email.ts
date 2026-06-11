@@ -1,8 +1,8 @@
 import { Resend } from 'resend';
 import { safeHttpUrl } from './url';
 
-const FROM = process.env.RESEND_FROM_EMAIL || 'orders@wildlightimagery.shop';
-const BROADCAST_FROM = process.env.RESEND_BROADCAST_FROM || 'news@wildlightimagery.shop';
+const FROM = process.env.RESEND_FROM_EMAIL || 'contact@wildlightimagery.com';
+const BROADCAST_FROM = process.env.RESEND_BROADCAST_FROM || 'dan@wildlightimagery.com';
 
 let _resend: Resend | null = null;
 function resend(): Resend {
