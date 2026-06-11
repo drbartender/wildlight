@@ -224,7 +224,7 @@ function ContactForm() {
             </p>
           </div>
           <div className="block">
-            <h3>Studio</h3>
+            <h3>Location</h3>
             <p>
               Aurora, Colorado
               <br />

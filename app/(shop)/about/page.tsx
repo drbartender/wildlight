@@ -30,7 +30,7 @@ export default function AboutPage() {
             />
           </div>
           <div className="caption">
-            <span>Dan Raby, at the studio</span>
+            <span>Dan Raby</span>
             <span>Aurora, CO</span>
           </div>
         </div>

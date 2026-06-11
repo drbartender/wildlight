@@ -33,7 +33,7 @@ export default async function CollectionsIndex() {
           </span>
           <h1>Collections.</h1>
           <p>
-            Small bodies of work, curated from twenty years of looking. Each
+            Small bodies of work — unique and defining photography. Each
             collection is a chapter in a longer letter about light.
           </p>
         </div>

@@ -9,7 +9,7 @@ export const revalidate = 60;
 export const metadata: Metadata = {
   title: 'Wildlight Imagery — Dan Raby, Aurora, Colorado',
   description:
-    'Twenty years of looking. The photographs of Dan Raby — a wall of fine-art, landscape, macro, and night work. Select pieces available as archival prints.',
+    'Unique and defining photography. The photographs of Dan Raby — a wall of fine-art, landscape, macro, and night work. Select pieces available as archival prints.',
 };
 
 interface WallRow {
@@ -66,7 +66,7 @@ export default async function MarketingHome() {
       <section className="wl-wallhome-hero">
         <span className="wl-eyebrow">Wildlight Imagery · Aurora, Colorado</span>
         <h1>
-          Twenty years of <em>looking.</em>
+          Unique and defining <em>photography.</em>
         </h1>
         <div className="meta">
           <span>{String(total).padStart(3, '0')} frames on the wall</span>

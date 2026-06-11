@@ -8,7 +8,7 @@ export const revalidate = 60;
 export const metadata: Metadata = {
   title: 'The portfolio — Wildlight Imagery',
   description:
-    'Twenty years of looking, gathered into collections — each a chapter in a longer letter about how I see.',
+    'Unique and defining photography, gathered into collections — each a chapter in a longer letter about how I see.',
 };
 
 interface CollectionRow {
@@ -68,8 +68,8 @@ export default async function PortfolioIndex() {
             The portfolio<em>.</em>
           </h1>
           <p>
-            Twenty years of looking, gathered into collections — each a chapter
-            in a longer letter about how I see.
+            Unique and defining photography, gathered into collections — each a
+            chapter in a longer letter about how I see.
           </p>
         </div>
         <div className="wl-masthead-side">

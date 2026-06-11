@@ -4,21 +4,21 @@ import type { Metadata } from 'next';
 export const metadata: Metadata = {
   title: 'Portrait photography — Wildlight Imagery',
   description:
-    'Headshots, families, and editorial commissions by Dan Raby. Studio + on-location, in Denver and Aurora.',
+    'Headshots, seniors, families, and editorial commissions by Dan Raby. On location in Denver and Aurora.',
 };
 
 const offerings = [
   {
     no: 'I',
-    title: 'Studio Sessions',
+    title: 'Portrait Sessions',
     body:
-      "Headshots, family portraits, and product work shot in a controlled studio environment in Aurora. We talk through what you have in mind, then I do my best to find the version of you that the camera doesn't usually catch.",
+      "Headshots, family portraits, and product work — in your home, at the office, or wherever the light is doing something interesting. We talk through what you have in mind, then I do my best to find the version of you that the camera doesn't usually catch.",
   },
   {
     no: 'II',
-    title: 'On-Location Sessions',
+    title: 'Seniors & Graduation',
     body:
-      'Outdoors, in your home, at the office, or anywhere the light is doing something interesting. Denver and the Front Range; further afield by arrangement. Working together to create the perfect shot.',
+      "Senior portraits and graduation sessions to mark the milestone — on campus, outdoors, or somewhere that feels like you. You'll come away with images worth sending to everyone who asks.",
   },
   {
     no: 'III',
@@ -38,8 +38,8 @@ export default function PortraitsService() {
           <br /> by <em>Dan Raby.</em>
         </h1>
         <p className="lede">
-          Headshots, families, and editorial commissions. Studio +
-          on-location, in Denver and Aurora — and wherever else the work
+          Headshots, seniors, families, and editorial commissions. On
+          location in Denver and Aurora — and wherever else the work
           calls for.
         </p>
       </section>
@@ -90,7 +90,7 @@ export default function PortraitsService() {
             </p>
           </div>
           <div className="block">
-            <h4>Studio</h4>
+            <h4>Location</h4>
             <p>
               Aurora, Colorado
               <br />
