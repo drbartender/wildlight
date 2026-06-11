@@ -375,28 +375,33 @@ html[data-mood='ink'] .wl-surface::after {
 /* Mobile nav */
 @media (max-width: 760px) {
   .wl-nav {
-    gap: 12px;
-    padding: 14px 20px;
+    gap: 10px;
+    padding: 14px 16px;
   }
   .wl-nav .nav-right .nav-link {
     display: none;
   }
   .wl-nav .nav-right {
-    gap: 10px;
+    gap: 8px;
   }
   .wl-nav .cart-link {
     font-size: 10px;
     letter-spacing: 0.16em;
   }
   .wl-nav .wl-mark svg {
-    width: 46px;
-    height: 46px;
+    width: 44px;
+    height: 44px;
   }
   .wl-nav .wl-mark-text .w1 {
     font-size: 30px;
   }
   .wl-nav .wl-mark-text .w2 {
     font-size: 11px;
+    /* Tighter than the desktop 0.28em + no wrap: the enlarged subtitle is the
+       widest part of the brand block, and wrapping it to two lines is the exact
+       legibility regression this sizing was meant to fix. */
+    letter-spacing: 0.16em;
+    white-space: nowrap;
   }
   .wl-nav-burger {
     display: inline-flex;
@@ -499,6 +504,25 @@ html[data-mood='ink'] .wl-surface::after {
     letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--ink-3);
+  }
+}
+
+/* Very narrow phones (iPhone SE 1st-gen, Galaxy Fold cover): the nowrap subtitle
+   is the widest element, so dial the brand block back a notch to avoid the
+   header overflowing the viewport. */
+@media (max-width: 360px) {
+  .wl-nav {
+    padding: 14px 12px;
+  }
+  .wl-nav .wl-mark svg {
+    width: 40px;
+    height: 40px;
+  }
+  .wl-nav .wl-mark-text .w1 {
+    font-size: 27px;
+  }
+  .wl-nav .wl-mark-text .w2 {
+    letter-spacing: 0.12em;
   }
 }
 
