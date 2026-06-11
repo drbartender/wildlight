@@ -2,7 +2,7 @@ import { chromium } from 'playwright-core';
 import path from 'node:path';
 import fs from 'node:fs';
 
-const OUT_DIR = path.resolve('.review-checkout');
+const OUT_DIR = path.resolve('.review', 'checkout');
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
 const EXEC_CANDIDATES = [
