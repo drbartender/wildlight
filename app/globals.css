@@ -222,6 +222,8 @@ html[data-mood='ink'] .wl-surface::after {
   gap: 12px;
 }
 .wl-mark svg {
+  width: var(--wl-mark-size, 30px);
+  height: var(--wl-mark-size, 30px);
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.08));
   flex-shrink: 0;
 }
@@ -233,7 +235,7 @@ html[data-mood='ink'] .wl-surface::after {
 .wl-mark-text .w1 {
   font-family: var(--f-display);
   font-style: italic;
-  font-size: 22px;
+  font-size: var(--wl-text-size, 22px);
   color: var(--ink);
   letter-spacing: -0.01em;
 }
@@ -386,11 +388,15 @@ html[data-mood='ink'] .wl-surface::after {
     font-size: 10px;
     letter-spacing: 0.16em;
   }
-  .wl-mark-text .w1 {
-    font-size: 20px;
+  .wl-nav .wl-mark svg {
+    width: 46px;
+    height: 46px;
   }
-  .wl-mark-text .w2 {
-    font-size: 9px;
+  .wl-nav .wl-mark-text .w1 {
+    font-size: 30px;
+  }
+  .wl-nav .wl-mark-text .w2 {
+    font-size: 11px;
   }
   .wl-nav-burger {
     display: inline-flex;
