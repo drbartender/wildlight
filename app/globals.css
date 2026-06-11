@@ -3250,7 +3250,6 @@ html[data-mood='ink'] .wl-surface::after {
   margin: 0;
   max-width: 18ch;
 }
-.wl-wallhome-hero h1 em { font-style: italic; color: var(--ink-2); }
 .wl-wallhome-hero .meta {
   display: flex;
   flex-wrap: wrap;

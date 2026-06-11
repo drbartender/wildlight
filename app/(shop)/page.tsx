@@ -66,7 +66,7 @@ export default async function MarketingHome() {
       <section className="wl-wallhome-hero">
         <span className="wl-eyebrow">Wildlight Imagery · Aurora, Colorado</span>
         <h1>
-          Unique and defining <em>photography.</em>
+          Unique and defining photography.
         </h1>
         <div className="meta">
           <span>{String(total).padStart(3, '0')} frames on the wall</span>
