@@ -500,6 +500,29 @@ ALTER TABLE artworks
   ADD COLUMN IF NOT EXISTS wall_order INT NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_artworks_wall_order ON artworks(wall_order);
 
+-- Wall membership — INDEPENDENT of shop status. The homepage wall is driven
+-- purely by on_wall, decoupling "shown on the wall" from "for sale in the
+-- shop" (status='published'). Added 2026-06-11.
+ALTER TABLE artworks
+  ADD COLUMN IF NOT EXISTS on_wall BOOLEAN;
+
+-- One-time backfill preserves today's behavior: everything currently on the
+-- wall (draft OR published) starts on_wall=true; retired pieces start false.
+-- Idempotent — only seeds rows never set (NULL). Admin toggles write true/false
+-- and are never reverted by a re-run, because no row is NULL after first apply.
+UPDATE artworks
+SET on_wall = (status <> 'retired')
+WHERE on_wall IS NULL;
+
+-- New rows land on the wall by default; enforce non-null now all rows are
+-- seeded. SET NOT NULL takes ACCESS EXCLUSIVE + a scan, but artworks is ~100
+-- rows so the lock is sub-ms. (For a large table, use ADD CONSTRAINT ... CHECK
+-- (on_wall IS NOT NULL) NOT VALID then VALIDATE CONSTRAINT instead.)
+ALTER TABLE artworks ALTER COLUMN on_wall SET DEFAULT true;
+ALTER TABLE artworks ALTER COLUMN on_wall SET NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_artworks_on_wall ON artworks(on_wall) WHERE on_wall;
+
 -- ─── Resolution gating ─────────────────────────────────────────────
 -- min_resolution_ok: does the master clear the 150-DPI floor at THIS size?
 --   Written only by lib/variant-resolution.ts. NULL = not yet measured.
