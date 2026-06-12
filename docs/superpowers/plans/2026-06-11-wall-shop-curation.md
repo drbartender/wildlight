@@ -530,7 +530,10 @@ import {
 } from '@/lib/wall-arrange';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
-type RemoveState = 'idle' | 'confirming' | 'removing' | 'error';
+// No 'error' state: a partial-failure delete keeps the failed tiles staged
+// (pending stays non-empty) and surfaces reasons via removeErrs, so the bar
+// returns to its "Remove N" affordance for retry — identical render to idle.
+type RemoveState = 'idle' | 'confirming' | 'removing';
 interface RemoveErr {
   id: number;
   title: string;
@@ -553,6 +556,37 @@ async function patchArtwork(
   } catch {
     return { ok: false, status: 0, error: 'network error' };
   }
+}
+
+// Module scope so it isn't re-created every render (avoids
+// react/no-unstable-nested-components). Uses only its props — no closure over
+// component state.
+function Switch({
+  on,
+  label,
+  onClick,
+  kind,
+}: {
+  on: boolean;
+  label: string;
+  onClick: () => void;
+  kind: 'wall' | 'shop';
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      className={`wl-adm-wall-switch ${kind} ${on ? 'on' : ''}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+    >
+      {kind === 'wall' ? 'Wall' : 'Shop'}
+    </button>
+  );
 }
 
 /**
@@ -725,38 +759,10 @@ export function WallArranger({
     }
     setPending(new Set(errs.map((e) => e.id)));
     setRemoveErrs(errs);
-    setRemoveState(errs.length ? 'error' : 'idle');
+    setRemoveState('idle');
   }
 
   // ── Render ───────────────────────────────────────────────────────────
-  function Switch({
-    on,
-    label,
-    onClick,
-    kind,
-  }: {
-    on: boolean;
-    label: string;
-    onClick: () => void;
-    kind: 'wall' | 'shop';
-  }) {
-    return (
-      <button
-        type="button"
-        role="switch"
-        aria-checked={on}
-        aria-label={label}
-        className={`wl-adm-wall-switch ${kind} ${on ? 'on' : ''}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          onClick();
-        }}
-      >
-        {kind === 'wall' ? 'Wall' : 'Shop'}
-      </button>
-    );
-  }
-
   return (
     <div className="wl-adm-wall">
       <header className="wl-adm-wall-head">
@@ -967,7 +973,7 @@ Expected: no errors (the Task 5 page error is now resolved).
 
 - [ ] **Step 4: Lint**
 
-Run: `npm run lint` (if defined) — confirm no `@next/next/no-img-element` failures (the eslint-disable lines cover the admin thumbnails).
+Run: `npm run lint` (if defined). Confirm no `@next/next/no-img-element` failures (the eslint-disable lines cover the admin thumbnails) and no `react/no-unstable-nested-components` (the `Switch` is now module-scoped). Note: Next 16 deprecates `next lint`, so this may emit a deprecation notice or no-op — a deprecation warning is not a failure.
 
 - [ ] **Step 5: Commit**
 
@@ -1045,8 +1051,8 @@ Add after the existing `.wl-adm-wall-tile:hover .cap { ... }` rule:
   color: var(--adm-paper);
 }
 .wl-adm-wall-switch.shop.on {
-  background: var(--adm-green, #2e7d4f);
-  border-color: var(--adm-green, #2e7d4f);
+  background: var(--adm-green);
+  border-color: var(--adm-green);
 }
 
 .wl-adm-wall-x,
@@ -1132,14 +1138,9 @@ Add after the existing `.wl-adm-wall-tile:hover .cap { ... }` rule:
 }
 ```
 
-> `--adm-green` may not be a defined token; the `color-mix`/fallback `#2e7d4f` covers it. If a green token exists in `admin.css` (search `--adm-green` / the `.dot` rule's color), use that instead for consistency.
+> `--adm-green` is already defined in `admin.css` (~line 20) and is the color the for-sale `.dot` uses. Use it directly — **no fallback** — so the Shop switch's "on" green matches the for-sale dot exactly. (A `#2e7d4f` fallback would paint a clashing green; reviewer-confirmed.)
 
-- [ ] **Step 2: Confirm the green token**
-
-Run: `git grep -n "adm-green\|\.wl-adm-wall-tile .dot" -- app/admin/admin.css`
-If the `.dot` uses a specific color variable, replace the `#2e7d4f` fallback with it.
-
-- [ ] **Step 3: Commit**
+- [ ] **Step 2: Commit**
 
 ```bash
 git add app/admin/admin.css
@@ -1149,6 +1150,9 @@ git commit -m "style(wall): switches, off-wall tray, staged/undo, confirm bar"
 ---
 
 ## Task 8: Update the spec status
+
+> **Run this LAST — only after Task 9 verification is green.** Don't assert
+> "Implemented" before typecheck, tests, and the manual checklist pass.
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-06-11-wall-shop-curation-design.md` (the `**Status:**` line)
@@ -1181,7 +1185,7 @@ Expected: all pass, including the new `wall-arrange` suite.
 - [ ] **Step 3: Build (runs migration + Next build)**
 
 Run: `npm run build`
-Expected: `schema applied` (the `on_wall` migration), then a successful Next build. If `DATABASE_URL` is unset locally, the migrate step will fail to connect — run the build in an environment with the dev/staging DB, or rely on the deploy build.
+Expected: `schema applied` (the `on_wall` migration), then a successful Next build. If `DATABASE_URL` is unset locally, `tsx lib/migrate.ts` fails and aborts the whole build — either run in an environment with the dev/staging DB, or use `npm run build:skip-migrate` to verify the Next build alone (the migration still applies on the real deploy build).
 
 - [ ] **Step 4: Manual e2e (dev server)**
 
@@ -1203,6 +1207,19 @@ git commit -m "fix(wall): address manual-verification findings"   # only if need
 ```
 
 Report results (typecheck/tests/build output + which manual scenarios passed) and **do not** fast-forward to `main` or push — Dallas handles the merge/push. Flag any commit on this branch authored by a parallel session before integrating.
+
+---
+
+## Execution-review cadence
+
+Per Dallas's batch-then-review preference, run the specialized Wildlight review
+agents **once at the end** (after Task 9), not between tasks. Dispatch in
+parallel against the branch diff:
+
+- `database-review` — the `on_wall` migration (idempotency, `SET NOT NULL`, the partial index) + the two changed queries.
+- `security-review` — the admin mutation surface: `on_wall` added to the PATCH, the staged DELETE batch (confirm `requireAdmin` + `requireSameOrigin` still gate every path; no new authz hole).
+- `code-review` + `consistency-check` — the wall/shop decoupling across `lib/wall-arrange.ts`, the homepage query, the admin query, and the component (no drift between the four wall/shop states).
+- `ui-ux-review` — the rewritten `/admin/wall` tool (switches, tray, staged delete, focus/aria-live) at desktop/tablet/mobile. Requires `npm run dev` running.
 
 ---
 
