@@ -68,6 +68,12 @@ Order: add nullable → backfill `WHERE on_wall IS NULL` → set default → set
 not-null. Every step is a no-op on re-run, so it is safe under the
 "`schema.sql` runs on every build" model.
 
+`ALTER COLUMN … SET NOT NULL` takes an `ACCESS EXCLUSIVE` lock and a full table
+scan, but `artworks` is ~100 rows, so the lock is held sub-millisecond — a
+non-issue here. *If* this table ever grows large, switch to the non-blocking
+pattern (`ADD CONSTRAINT … CHECK (on_wall IS NOT NULL) NOT VALID` then
+`VALIDATE CONSTRAINT`); it would be unjustified complexity at the current size.
+
 ## Query changes (public)
 
 `app/(shop)/page.tsx` — homepage wall. Change the filter only:
@@ -91,7 +97,14 @@ highest-traffic page; ordering/LIMIT are unchanged.
 - **Wall toggle** → `PATCH /api/admin/artworks/[id]` with `{ on_wall: boolean }`.
   Add `on_wall: z.boolean().optional()` to the `Patch` Zod schema; the route's
   generic column builder (`for (const [k, v] of Object.entries(d))`) then
-  persists it with no further change.
+  persists it. **Plus:** when the payload includes `on_wall`, the route resets
+  `wall_order = 0` in the same `UPDATE`. Without this, a piece toggled off the
+  wall keeps its old `wall_order`, and toggling it back on would resurface it
+  *mid-wall* on the public homepage (which sorts by `wall_order`) even though
+  the admin UI shows it appended at the end — a UI/DB divergence. Zeroing makes
+  an off-then-on piece read as un-arranged (sorts to the end via `md5(slug)`)
+  until the admin explicitly saves a new order. This is a small server-side
+  special case in the route, not a free-form `wall_order` field on the schema.
 - **Shop toggle** → `PATCH /api/admin/artworks/[id]` with
   `{ status: 'published' | 'retired' }` (already supported). Publishing routes
   through the existing `publishArtworks` gate (returns 409 "print master
@@ -104,16 +117,40 @@ highest-traffic page; ordering/LIMIT are unchanged.
 
 ## The wall tool (`/admin/wall`)
 
-`app/admin/wall/page.tsx` loads two sets and passes both to `WallArranger`:
+`app/admin/wall/page.tsx` loads the curation set in **one** query and partitions
+it in memory, then passes both lists to `WallArranger`:
 
-- **On the wall** — `on_wall = true`, ordered as today
-  (`(wall_order=0), wall_order, md5(slug)`), `LIMIT 300`.
-- **Off the wall** — `on_wall = false`, newest-first (`updated_at DESC`),
-  `LIMIT 300`.
+```sql
+SELECT a.id, a.slug, a.title, a.image_web_url, a.status, a.on_wall, a.wall_order,
+       (a.image_print_url IS NOT NULL AND a.image_print_url <> '') AS "canSell",
+       (a.status = 'published'
+          AND EXISTS (SELECT 1 FROM artwork_variants v
+                        WHERE v.artwork_id = a.id AND v.buyable)) AS available
+  FROM artworks a
+ WHERE (a.on_wall OR a.status <> 'retired')
+   AND a.image_web_url <> ''
+ LIMIT 600
+```
 
-Each tile row needs, beyond today's `{id, slug, title, image_web_url,
-available}`: `status` and `canSell` (has a print master — the same condition
-`publishArtworks` gates on). `canSell` decides whether the Shop switch appears.
+- **One query, not two.** Two parallel `pool.query` calls run on separate
+  connections with no shared snapshot; a concurrent `on_wall` toggle between
+  them could make a piece appear in *both* lists (React key collision) or
+  *neither*. A single query is atomic and simpler.
+- **Partition in JS:** `grid = rows.filter(r => r.on_wall)` sorted by
+  `(wall_order=0), wall_order, md5(slug)`; `tray = rows.filter(r => !r.on_wall)`
+  sorted by `updated_at DESC`. (Sort keys can be done in SQL or JS; the md5
+  shuffle is cheap to replicate client-side or add as a select column.)
+- **`WHERE on_wall OR status <> 'retired'`** keeps fully-dead pieces
+  (retired *and* off-wall) out of the tray, so retiring a piece from the shop
+  doesn't clutter the curation surface; it still surfaces a retired-but-`on_wall`
+  piece on the grid (the "on wall, not for sale" cell). `image_web_url <> ''`
+  drops mid-upload reserved rows, mirroring the homepage guard.
+
+`canSell = image_print_url IS NOT NULL AND <> ''` decides whether the Shop
+switch appears. Note this is intentionally *stricter* than the real
+`publishArtworks` gate (which checks only `IS NOT NULL`): a transient reserved
+row has `image_print_url = ''`, and we don't want to offer a Shop switch on it.
+For every real piece the two conditions agree.
 
 ### Layout
 
@@ -183,9 +220,11 @@ Rules that keep the order-dirty signal honest:
   reorder.
 - A tile **entering the grid** (Wall→on from the tray) is appended to **both**
   live and saved, so merely re-adding doesn't mark the order dirty; only a
-  subsequent drag does. Its `wall_order` stays 0 until the next Save, which is
-  fine — the homepage sorts `wall_order=0` to the end, matching its on-screen
-  position.
+  subsequent drag does. The Wall toggle's server-side `wall_order = 0` reset
+  (see API section) guarantees its DB `wall_order` is actually 0, so the
+  homepage sorts it to the end via `md5(slug)` — matching its on-screen
+  position. (Without that reset a re-added piece would jump mid-wall on the
+  public page; that's the BLOCKER the reset closes.)
 
 To keep these transforms unit-testable, factor the pure
 set/section/snapshot operations into `lib/wall-arrange.ts`
@@ -212,6 +251,12 @@ component call them.
   ("Show {title} on the wall").
 - Delete ✕ is a labeled button ("Remove {title}"); Undo and the batch
   confirm are keyboard-operable and focus-managed.
+- **Focus on section move.** Toggling Wall (or "Put on wall") unmounts the tile
+  from one section and remounts it in the other, which drops keyboard focus to
+  `<body>`. The component must move focus deliberately — focus the control's
+  equivalent in the destination (or a visually-hidden `aria-live` status that
+  announces "Moved to the tray / Put on the wall") — so a keyboard/SR user
+  isn't dumped to the top of the page after every toggle.
 - DnD keyboard a11y remains the pre-existing follow-up (unchanged here).
 
 ## Testing & verification
@@ -242,12 +287,31 @@ component call them.
 
 - `lib/schema.sql` — `on_wall` column, backfill, index.
 - `app/(shop)/page.tsx` — homepage wall `WHERE` clause.
-- `app/admin/wall/page.tsx` — load grid + tray; add `status`/`canSell`.
-- `app/api/admin/artworks/[id]/route.ts` — `on_wall` in the `Patch` schema.
+- `app/admin/wall/page.tsx` — single partition query (grid + tray) selecting
+  `status`, `on_wall`, `wall_order`, `canSell`, `available`.
+- `app/api/admin/artworks/[id]/route.ts` — `on_wall` in the `Patch` schema +
+  reset `wall_order = 0` when `on_wall` is in the payload.
 - `components/admin/WallArranger.tsx` — grid + tray + switches + staged delete +
   Add-photos link.
 - `lib/wall-arrange.ts` — new, pure transforms (+ `tests/lib/wall-arrange.test.ts`).
 - `app/globals.css` (admin `.wl-adm-wall*` styles) — switches, tray, staged/Undo,
   confirm bar.
+
+## Review pass (2026-06-11, Gemini, read-only)
+
+Hardened after an independent spec review:
+
+- **Adopted** — server-side `wall_order = 0` reset on `on_wall` toggle (fixes a
+  re-add resurfacing mid-wall); single partition query for the admin page
+  (fixes a two-query toggle race, keeps dead pieces out of the tray); explicit
+  `status`/`on_wall`/`canSell` columns; focus management on grid↔tray moves.
+- **Considered, not adopted** — rewriting `SET NOT NULL` as a `NOT VALID` CHECK
+  to avoid an `ACCESS EXCLUSIVE` lock: justified only on large tables;
+  `artworks` is ~100 rows, so it'd be needless complexity. Recorded the pattern
+  for if the table ever grows.
+- **Confirmed clean** — no new endpoints; `requireAdmin` + `requireSameOrigin`
+  already guard every mutating path (toggle/publish/retire/delete/reorder); no
+  key-name injection risk in the generic PATCH builder (columns come from a
+  fixed Zod schema, not user keys).
 ```
 
