@@ -47,11 +47,13 @@ function Switch({
   label,
   onClick,
   kind,
+  disabled,
 }: {
   on: boolean;
   label: string;
   onClick: () => void;
   kind: 'wall' | 'shop';
+  disabled?: boolean;
 }) {
   return (
     <button
@@ -59,6 +61,7 @@ function Switch({
       role="switch"
       aria-checked={on}
       aria-label={label}
+      disabled={disabled}
       className={`wl-adm-wall-switch ${kind} ${on ? 'on' : ''}`}
       onClick={(e) => {
         e.stopPropagation();
@@ -75,8 +78,14 @@ function Switch({
  *   1. Reorder  — drag, then explicit Save order (writes wall_order).
  *   2. Toggles  — Wall / Shop switches, optimistic + reversible (one PATCH each).
  *   3. Delete   — staged batch behind one confirm (destructive, grid only).
- * Order-dirtiness is tracked against savedGrid; tiles leaving/entering the grid
- * update savedGrid too so a toggle never looks like a reorder.
+ *
+ * The three are SERIALIZED via `inFlight`: while any single mutation (a toggle
+ * PATCH, an order save, or a delete batch) is in flight, every interactive
+ * control is disabled. That keeps the optimistic-rollback snapshots honest — no
+ * concurrent edit can land during the await window and get stomped when a
+ * failed PATCH reverts its captured snapshot. Order-dirtiness is tracked
+ * against savedGrid; tiles leaving/entering the grid update savedGrid too so a
+ * toggle never looks like a reorder.
  */
 export function WallArranger({
   initialGrid,
@@ -96,13 +105,12 @@ export function WallArranger({
   const [removeState, setRemoveState] = useState<RemoveState>('idle');
   const [removeErrs, setRemoveErrs] = useState<RemoveErr[]>([]);
   const [toggleErr, setToggleErr] = useState<string | null>(null);
-
-  const liveRef = useRef<HTMLDivElement>(null);
-  const announce = (msg: string) => {
-    if (liveRef.current) liveRef.current.textContent = msg;
-  };
+  // True while one optimistic mutation is round-tripping. Disables every
+  // control so the three interaction models can't interleave.
+  const [busy, setBusy] = useState(false);
 
   const dirty = orderKey(grid) !== orderKey(savedGrid.current);
+  const inFlight = busy || orderState === 'saving' || removeState === 'removing';
 
   // ── Reorder ──────────────────────────────────────────────────────────
   function moveOver(overId: number) {
@@ -119,6 +127,7 @@ export function WallArranger({
   }
 
   async function saveOrder() {
+    if (inFlight) return;
     setOrderState('saving');
     try {
       const r = await fetch('/api/admin/wall', {
@@ -139,8 +148,10 @@ export function WallArranger({
     setOrderState('idle');
   }
 
-  // ── Wall toggle (optimistic) ─────────────────────────────────────────
+  // ── Wall toggle (optimistic, serialized via inFlight) ────────────────
   async function wallOff(id: number) {
+    if (inFlight) return;
+    setBusy(true);
     const prev = { grid, tray, saved: savedGrid.current };
     const next = toTray({ grid, tray, savedGrid: savedGrid.current }, id);
     setGrid(next.grid);
@@ -155,9 +166,12 @@ export function WallArranger({
       savedGrid.current = prev.saved;
       setToggleErr("Couldn't take that off the wall — please try again.");
     }
+    setBusy(false);
   }
 
   async function wallOn(id: number) {
+    if (inFlight) return;
+    setBusy(true);
     const prev = { grid, tray, saved: savedGrid.current };
     const next = toGrid({ grid, tray, savedGrid: savedGrid.current }, id);
     setGrid(next.grid);
@@ -172,10 +186,13 @@ export function WallArranger({
       savedGrid.current = prev.saved;
       setToggleErr("Couldn't put that on the wall — please try again.");
     }
+    setBusy(false);
   }
 
-  // ── Shop toggle (optimistic) ─────────────────────────────────────────
+  // ── Shop toggle (optimistic, serialized via inFlight) ────────────────
   async function toggleShop(id: number, on: boolean) {
+    if (inFlight) return;
+    setBusy(true);
     const prevGrid = grid;
     const prevTray = tray;
     setGrid((g) => applyShop(g, id, on));
@@ -191,14 +208,17 @@ export function WallArranger({
           : "Couldn't change the shop status — please try again.",
       );
     }
+    setBusy(false);
   }
 
   // ── Staged delete ────────────────────────────────────────────────────
   function stage(id: number) {
+    if (inFlight) return;
     setPending((p) => new Set(p).add(id));
     if (removeState !== 'idle') setRemoveState('idle');
   }
   function unstage(id: number) {
+    if (inFlight) return;
     setPending((p) => {
       const n = new Set(p);
       n.delete(id);
@@ -208,6 +228,7 @@ export function WallArranger({
 
   async function commitRemoval() {
     setRemoveState('removing');
+    setRemoveErrs([]);
     const ids = [...pending];
     const settled = await Promise.allSettled(
       ids.map((id) =>
@@ -233,6 +254,9 @@ export function WallArranger({
         errs.push({ id, title, reason });
       }
     });
+    // Safe to read the closure `grid`/`savedGrid` here: stage/unstage/toggle are
+    // all disabled while removeState==='removing', so nothing mutated them
+    // during the await.
     if (ok.size) {
       const r = removeFromGrid(grid, savedGrid.current, ok);
       setGrid(r.grid);
@@ -241,6 +265,11 @@ export function WallArranger({
     setPending(new Set(errs.map((e) => e.id)));
     setRemoveErrs(errs);
     setRemoveState('idle');
+  }
+
+  const liveRef = useRef<HTMLDivElement>(null);
+  function announce(msg: string) {
+    if (liveRef.current) liveRef.current.textContent = msg;
   }
 
   // ── Render ───────────────────────────────────────────────────────────
@@ -260,7 +289,7 @@ export function WallArranger({
             Add photos
           </a>
           {dirty && (
-            <button type="button" onClick={resetOrder}>
+            <button type="button" onClick={resetOrder} disabled={inFlight}>
               Reset
             </button>
           )}
@@ -268,7 +297,7 @@ export function WallArranger({
             type="button"
             className="primary"
             onClick={saveOrder}
-            disabled={!dirty || orderState === 'saving'}
+            disabled={!dirty || inFlight}
           >
             {orderState === 'saving'
               ? 'Saving…'
@@ -295,9 +324,9 @@ export function WallArranger({
             <div
               key={t.id}
               className={`wl-adm-wall-tile ${dragId === t.id ? 'dragging' : ''} ${staged ? 'staged' : ''}`}
-              draggable={!staged}
+              draggable={!staged && !inFlight}
               onDragStart={() => {
-                if (staged) return;
+                if (staged || inFlight) return;
                 setDragId(t.id);
                 if (orderState !== 'idle') setOrderState('idle');
               }}
@@ -315,6 +344,7 @@ export function WallArranger({
                 <Switch
                   kind="wall"
                   on
+                  disabled={inFlight}
                   label={`Take ${t.title} off the wall`}
                   onClick={() => wallOff(t.id)}
                 />
@@ -322,6 +352,7 @@ export function WallArranger({
                   <Switch
                     kind="shop"
                     on={t.status === 'published'}
+                    disabled={inFlight}
                     label={`${t.status === 'published' ? 'Remove' : 'Put'} ${t.title} ${t.status === 'published' ? 'from' : 'in'} the shop`}
                     onClick={() => toggleShop(t.id, t.status !== 'published')}
                   />
@@ -332,6 +363,7 @@ export function WallArranger({
                   <button
                     type="button"
                     className="wl-adm-wall-undo"
+                    disabled={inFlight}
                     onClick={(e) => {
                       e.stopPropagation();
                       unstage(t.id);
@@ -344,6 +376,7 @@ export function WallArranger({
                     type="button"
                     className="wl-adm-wall-x"
                     aria-label={`Remove ${t.title}`}
+                    disabled={inFlight}
                     onClick={(e) => {
                       e.stopPropagation();
                       stage(t.id);
@@ -414,6 +447,7 @@ export function WallArranger({
                     type="button"
                     className="wl-adm-wall-add small"
                     onClick={() => wallOn(t.id)}
+                    disabled={inFlight}
                     aria-label={`Put ${t.title} on the wall`}
                   >
                     Put on wall
@@ -422,6 +456,7 @@ export function WallArranger({
                     <Switch
                       kind="shop"
                       on={t.status === 'published'}
+                      disabled={inFlight}
                       label={`${t.status === 'published' ? 'Remove' : 'Put'} ${t.title} ${t.status === 'published' ? 'from' : 'in'} the shop`}
                       onClick={() => toggleShop(t.id, t.status !== 'published')}
                     />
