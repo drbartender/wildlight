@@ -3,7 +3,6 @@
 import { useRef, useState } from 'react';
 import {
   orderKey,
-  removeFromGrid,
   toTray,
   toGrid,
   applyShop,
@@ -11,15 +10,6 @@ import {
 } from '@/lib/wall-arrange';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
-// No 'error' state: a partial-failure delete keeps the failed tiles staged
-// (pending stays non-empty) and surfaces reasons via removeErrs, so the bar
-// returns to its "Remove N" affordance for retry — identical render to idle.
-type RemoveState = 'idle' | 'confirming' | 'removing';
-interface RemoveErr {
-  id: number;
-  title: string;
-  reason: string;
-}
 
 async function patchArtwork(
   id: number,
@@ -77,15 +67,14 @@ function Switch({
  * Wall & shop curation. Three independent interaction models on one screen:
  *   1. Reorder  — drag, then explicit Save order (writes wall_order).
  *   2. Toggles  — Wall / Shop switches, optimistic + reversible (one PATCH each).
- *   3. Delete   — staged batch behind one confirm (destructive, grid only).
+ *   3. Delete   — per-tile ✕, behind a confirm. Permanent; grid-only; not
+ *                 offered on for-sale pieces (manage those in the catalog).
  *
- * The three are SERIALIZED via `inFlight`: while any single mutation (a toggle
- * PATCH, an order save, or a delete batch) is in flight, every interactive
- * control is disabled. That keeps the optimistic-rollback snapshots honest — no
- * concurrent edit can land during the await window and get stomped when a
- * failed PATCH reverts its captured snapshot. Order-dirtiness is tracked
- * against savedGrid; tiles leaving/entering the grid update savedGrid too so a
- * toggle never looks like a reorder.
+ * The three are SERIALIZED via `inFlight`: while any single mutation is round-
+ * tripping, every interactive control is disabled, so an optimistic rollback
+ * can't be stomped by a concurrent edit. Order-dirtiness is tracked against
+ * savedGrid; tiles leaving/entering the grid update savedGrid too so a toggle
+ * or delete never looks like a reorder.
  */
 export function WallArranger({
   initialGrid,
@@ -100,17 +89,18 @@ export function WallArranger({
 
   const [dragId, setDragId] = useState<number | null>(null);
   const [orderState, setOrderState] = useState<SaveState>('idle');
-
-  const [pending, setPending] = useState<Set<number>>(new Set());
-  const [removeState, setRemoveState] = useState<RemoveState>('idle');
-  const [removeErrs, setRemoveErrs] = useState<RemoveErr[]>([]);
-  const [toggleErr, setToggleErr] = useState<string | null>(null);
-  // True while one optimistic mutation is round-tripping. Disables every
-  // control so the three interaction models can't interleave.
+  const [actionErr, setActionErr] = useState<string | null>(null);
+  // True while one optimistic mutation (toggle or delete) is round-tripping.
+  // Disables every control so the interaction models can't interleave.
   const [busy, setBusy] = useState(false);
 
   const dirty = orderKey(grid) !== orderKey(savedGrid.current);
-  const inFlight = busy || orderState === 'saving' || removeState === 'removing';
+  const inFlight = busy || orderState === 'saving';
+
+  const liveRef = useRef<HTMLDivElement>(null);
+  const announce = (msg: string) => {
+    if (liveRef.current) liveRef.current.textContent = msg;
+  };
 
   // ── Reorder ──────────────────────────────────────────────────────────
   function moveOver(overId: number) {
@@ -157,14 +147,14 @@ export function WallArranger({
     setGrid(next.grid);
     setTray(next.tray);
     savedGrid.current = next.savedGrid;
-    setToggleErr(null);
+    setActionErr(null);
     announce('Moved to the off-the-wall tray');
     const res = await patchArtwork(id, { on_wall: false });
     if (!res.ok) {
       setGrid(prev.grid);
       setTray(prev.tray);
       savedGrid.current = prev.saved;
-      setToggleErr("Couldn't take that off the wall — please try again.");
+      setActionErr("Couldn't take that off the wall — please try again.");
     }
     setBusy(false);
   }
@@ -177,14 +167,14 @@ export function WallArranger({
     setGrid(next.grid);
     setTray(next.tray);
     savedGrid.current = next.savedGrid;
-    setToggleErr(null);
+    setActionErr(null);
     announce('Put on the wall');
     const res = await patchArtwork(id, { on_wall: true });
     if (!res.ok) {
       setGrid(prev.grid);
       setTray(prev.tray);
       savedGrid.current = prev.saved;
-      setToggleErr("Couldn't put that on the wall — please try again.");
+      setActionErr("Couldn't put that on the wall — please try again.");
     }
     setBusy(false);
   }
@@ -197,12 +187,12 @@ export function WallArranger({
     const prevTray = tray;
     setGrid((g) => applyShop(g, id, on));
     setTray((t) => applyShop(t, id, on));
-    setToggleErr(null);
+    setActionErr(null);
     const res = await patchArtwork(id, { status: on ? 'published' : 'retired' });
     if (!res.ok) {
       setGrid(prevGrid);
       setTray(prevTray);
-      setToggleErr(
+      setActionErr(
         res.status === 409
           ? res.error ?? 'Needs a print master before it can be sold.'
           : "Couldn't change the shop status — please try again.",
@@ -211,65 +201,40 @@ export function WallArranger({
     setBusy(false);
   }
 
-  // ── Staged delete ────────────────────────────────────────────────────
-  function stage(id: number) {
+  // ── Delete (per-tile, confirmed, permanent) ──────────────────────────
+  async function deleteOne(id: number, title: string) {
     if (inFlight) return;
-    setPending((p) => new Set(p).add(id));
-    if (removeState !== 'idle') setRemoveState('idle');
-  }
-  function unstage(id: number) {
-    if (inFlight) return;
-    setPending((p) => {
-      const n = new Set(p);
-      n.delete(id);
-      return n;
-    });
-  }
-
-  async function commitRemoval() {
-    setRemoveState('removing');
-    setRemoveErrs([]);
-    const ids = [...pending];
-    const settled = await Promise.allSettled(
-      ids.map((id) =>
-        fetch(`/api/admin/artworks/${id}`, { method: 'DELETE' }).then(async (r) => ({
-          ok: r.ok,
-          status: r.status,
-          error: r.ok ? undefined : ((await r.json().catch(() => ({}))) as { error?: string }).error,
-        })),
-      ),
+    // eslint-disable-next-line no-alert
+    const ok = window.confirm(
+      `Permanently delete “${title}”?\n\nThis deletes the photo everywhere and can’t be undone. ` +
+        `To just take it off the wall (and keep it), use the Wall switch instead.`,
     );
-    const ok = new Set<number>();
-    const errs: RemoveErr[] = [];
-    settled.forEach((res, i) => {
-      const id = ids[i];
-      if (res.status === 'fulfilled' && res.value.ok) {
-        ok.add(id);
-      } else {
-        const title = grid.find((t) => t.id === id)?.title ?? `#${id}`;
-        const reason =
-          res.status === 'fulfilled'
-            ? res.value.error ?? `HTTP ${res.value.status}`
-            : 'network error';
-        errs.push({ id, title, reason });
-      }
-    });
-    // Safe to read the closure `grid`/`savedGrid` here: stage/unstage/toggle are
-    // all disabled while removeState==='removing', so nothing mutated them
-    // during the await.
-    if (ok.size) {
-      const r = removeFromGrid(grid, savedGrid.current, ok);
-      setGrid(r.grid);
-      savedGrid.current = r.savedGrid;
+    if (!ok) return;
+    setBusy(true);
+    setActionErr(null);
+    let res: { ok: boolean; status: number; error?: string };
+    try {
+      const r = await fetch(`/api/admin/artworks/${id}`, { method: 'DELETE' });
+      res = {
+        ok: r.ok,
+        status: r.status,
+        error: r.ok ? undefined : ((await r.json().catch(() => ({}))) as { error?: string }).error,
+      };
+    } catch {
+      res = { ok: false, status: 0, error: 'network error' };
     }
-    setPending(new Set(errs.map((e) => e.id)));
-    setRemoveErrs(errs);
-    setRemoveState('idle');
-  }
-
-  const liveRef = useRef<HTMLDivElement>(null);
-  function announce(msg: string) {
-    if (liveRef.current) liveRef.current.textContent = msg;
+    if (res.ok) {
+      setGrid((g) => g.filter((t) => t.id !== id));
+      savedGrid.current = savedGrid.current.filter((t) => t.id !== id);
+      announce(`Deleted ${title}`);
+    } else {
+      setActionErr(
+        res.error
+          ? `Couldn’t delete “${title}” — ${res.error}`
+          : `Couldn’t delete “${title}” — please try again.`,
+      );
+    }
+    setBusy(false);
   }
 
   // ── Render ───────────────────────────────────────────────────────────
@@ -280,8 +245,9 @@ export function WallArranger({
           <h1>Wall &amp; shop</h1>
           <p>
             Drag to reorder the wall. Toggle each photo on or off the wall and in
-            or out of the shop — they&apos;re independent. Deleting is permanent and
-            only for duplicates or junk.
+            or out of the shop — they&apos;re independent. The ✕ permanently
+            deletes a photo (for duplicates or junk); to just hide one, switch
+            it off the wall instead.
           </p>
         </div>
         <div className="actions">
@@ -311,127 +277,69 @@ export function WallArranger({
       {orderState === 'error' && (
         <p className="wl-adm-wall-err">Couldn&apos;t save the order — please try again.</p>
       )}
-      {toggleErr && <p className="wl-adm-wall-err">{toggleErr}</p>}
+      {actionErr && <p className="wl-adm-wall-err">{actionErr}</p>}
 
       <p className="wl-adm-wall-hint">
         {grid.length} on the wall · the green dot marks pieces for sale
       </p>
 
       <div className="wl-adm-wall-grid">
-        {grid.map((t, i) => {
-          const staged = pending.has(t.id);
-          return (
-            <div
-              key={t.id}
-              className={`wl-adm-wall-tile ${dragId === t.id ? 'dragging' : ''} ${staged ? 'staged' : ''}`}
-              draggable={!staged && !inFlight}
-              onDragStart={() => {
-                if (staged || inFlight) return;
-                setDragId(t.id);
-                if (orderState !== 'idle') setOrderState('idle');
-              }}
-              onDragEnter={() => moveOver(t.id)}
-              onDragOver={(e) => e.preventDefault()}
-              onDragEnd={() => setDragId(null)}
-              onDrop={(e) => e.preventDefault()}
-              title={t.title}
-            >
-              <span className="pos">{i + 1}</span>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={t.image_web_url} alt={t.title} loading="lazy" draggable={false} />
-              {t.available && <span className="dot" aria-hidden="true" />}
-              <div className="wl-adm-wall-ctl">
+        {grid.map((t, i) => (
+          <div
+            key={t.id}
+            className={`wl-adm-wall-tile ${dragId === t.id ? 'dragging' : ''}`}
+            draggable={!inFlight}
+            onDragStart={() => {
+              if (inFlight) return;
+              setDragId(t.id);
+              if (orderState !== 'idle') setOrderState('idle');
+            }}
+            onDragEnter={() => moveOver(t.id)}
+            onDragOver={(e) => e.preventDefault()}
+            onDragEnd={() => setDragId(null)}
+            onDrop={(e) => e.preventDefault()}
+            title={t.title}
+          >
+            <span className="pos">{i + 1}</span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={t.image_web_url} alt={t.title} loading="lazy" draggable={false} />
+            {t.available && <span className="dot" aria-hidden="true" />}
+            <div className="wl-adm-wall-ctl">
+              <Switch
+                kind="wall"
+                on
+                disabled={inFlight}
+                label={`Take ${t.title} off the wall`}
+                onClick={() => wallOff(t.id)}
+              />
+              {t.canSell && (
                 <Switch
-                  kind="wall"
-                  on
+                  kind="shop"
+                  on={t.status === 'published'}
                   disabled={inFlight}
-                  label={`Take ${t.title} off the wall`}
-                  onClick={() => wallOff(t.id)}
+                  label={`${t.status === 'published' ? 'Remove' : 'Put'} ${t.title} ${t.status === 'published' ? 'from' : 'in'} the shop`}
+                  onClick={() => toggleShop(t.id, t.status !== 'published')}
                 />
-                {t.canSell && (
-                  <Switch
-                    kind="shop"
-                    on={t.status === 'published'}
-                    disabled={inFlight}
-                    label={`${t.status === 'published' ? 'Remove' : 'Put'} ${t.title} ${t.status === 'published' ? 'from' : 'in'} the shop`}
-                    onClick={() => toggleShop(t.id, t.status !== 'published')}
-                  />
-                )}
-              </div>
-              {!t.available &&
-                (staged ? (
-                  <button
-                    type="button"
-                    className="wl-adm-wall-undo"
-                    disabled={inFlight}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      unstage(t.id);
-                    }}
-                  >
-                    Undo
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="wl-adm-wall-x"
-                    aria-label={`Remove ${t.title}`}
-                    disabled={inFlight}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      stage(t.id);
-                    }}
-                  >
-                    ✕
-                  </button>
-                ))}
-              <span className="cap">{t.title}</span>
+              )}
             </div>
-          );
-        })}
+            {!t.available && (
+              <button
+                type="button"
+                className="wl-adm-wall-x"
+                aria-label={`Delete ${t.title}`}
+                disabled={inFlight}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void deleteOne(t.id, t.title);
+                }}
+              >
+                ✕
+              </button>
+            )}
+            <span className="cap">{t.title}</span>
+          </div>
+        ))}
       </div>
-
-      {pending.size > 0 && (
-        <div className="wl-adm-wall-removebar">
-          {removeState === 'confirming' || removeState === 'removing' ? (
-            <>
-              <span>
-                Permanently delete {pending.size} photo{pending.size > 1 ? 's' : ''}? This
-                can&apos;t be undone.
-              </span>
-              <button
-                type="button"
-                className="danger"
-                onClick={commitRemoval}
-                disabled={removeState === 'removing'}
-              >
-                {removeState === 'removing' ? 'Removing…' : 'Delete'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setRemoveState('idle')}
-                disabled={removeState === 'removing'}
-              >
-                Cancel
-              </button>
-            </>
-          ) : (
-            <button type="button" className="danger" onClick={() => setRemoveState('confirming')}>
-              Remove {pending.size} photo{pending.size > 1 ? 's' : ''}
-            </button>
-          )}
-        </div>
-      )}
-
-      {removeErrs.length > 0 && (
-        <ul className="wl-adm-wall-removeerrs">
-          {removeErrs.map((e) => (
-            <li key={e.id}>
-              Couldn&apos;t remove “{e.title}” — {e.reason}
-            </li>
-          ))}
-        </ul>
-      )}
 
       {tray.length > 0 && (
         <section className="wl-adm-wall-tray">

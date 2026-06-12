@@ -1692,8 +1692,7 @@
   border-color: var(--adm-green);
 }
 
-.wl-adm-wall-x,
-.wl-adm-wall-undo {
+.wl-adm-wall-x {
   position: absolute;
   bottom: 4px;
   right: 4px;
@@ -1710,50 +1709,8 @@
   transition: opacity 0.12s ease;
 }
 .wl-adm-wall-tile:hover .wl-adm-wall-x,
-.wl-adm-wall-tile:focus-within .wl-adm-wall-x,
-.wl-adm-wall-undo {
+.wl-adm-wall-tile:focus-within .wl-adm-wall-x {
   opacity: 1;
-}
-.wl-adm-wall-tile.staged {
-  opacity: 0.45;
-  outline: 2px dashed var(--adm-red);
-  outline-offset: -2px;
-}
-
-.wl-adm-wall-removebar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 14px 0;
-  padding: 10px 14px;
-  border: 1px solid var(--adm-rule);
-  border-radius: var(--adm-radius-md);
-  background: color-mix(in srgb, var(--adm-red) 7%, var(--adm-paper));
-  font-size: 13px;
-}
-.wl-adm-wall-removebar button {
-  font-family: inherit;
-  font-size: 13px;
-  padding: 7px 14px;
-  border-radius: var(--adm-radius-md);
-  border: 1px solid var(--adm-rule);
-  background: var(--adm-paper);
-  cursor: pointer;
-}
-.wl-adm-wall-removebar button.danger {
-  background: var(--adm-red);
-  border-color: var(--adm-red);
-  color: #fff;
-}
-.wl-adm-wall-removebar button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.wl-adm-wall-removeerrs {
-  margin: 0 0 14px;
-  padding-left: 18px;
-  color: var(--adm-red);
-  font-size: 13px;
 }
 
 .wl-adm-wall-tray {
