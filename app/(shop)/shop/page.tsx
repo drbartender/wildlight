@@ -62,7 +62,7 @@ export default async function HomePage() {
         </div>
         <div className="wl-masthead-side">
           <div>
-            <b>Est.</b> 2004
+            <b>Est.</b> 2017
           </div>
           <div>
             <b>Plates on file</b> {String(count).padStart(3, '0')}

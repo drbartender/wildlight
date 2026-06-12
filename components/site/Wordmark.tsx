@@ -20,7 +20,7 @@ export function Wordmark({
       <ApertureMark size={ms} />
       <span className="wl-mark-text">
         <span className="w1">wildlight</span>
-        <span className="w2">Imagery · Est. 2004</span>
+        <span className="w2">Imagery · Est. 2017</span>
       </span>
     </span>
   );

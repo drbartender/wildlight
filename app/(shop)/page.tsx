@@ -75,7 +75,7 @@ export default async function MarketingHome() {
           {forSale > 0 && (
             <Link href="/shop">{forSale} available as prints →</Link>
           )}
-          <span>Est. 2004</span>
+          <span>Est. 2017</span>
         </div>
       </section>
 
