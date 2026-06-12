@@ -60,6 +60,7 @@ const Patch = z.object({
   status: z.enum(['draft', 'published', 'retired']).optional(),
   collection_id: z.number().int().nullable().optional(),
   display_order: z.number().int().optional(),
+  on_wall: z.boolean().optional(),
   edition_size: z.number().int().positive().nullable().optional(),
   signed: z.boolean().optional(),
   // Keys live under `artworks-print/<collection-or-id>/<slug>.<ext>`; enforce
@@ -129,6 +130,14 @@ export async function PATCH(
         if (k === 'status' && v === 'published') continue;
         updateCols.push(`${k} = $${vals.length + 1}`);
         vals.push(v);
+      }
+      // Toggling wall membership clears any saved arrangement position, so a
+      // piece taken off the wall and later put back sorts to the END of the
+      // public wall (which orders by wall_order) until explicitly re-arranged —
+      // instead of resurfacing mid-wall on its stale wall_order. Constant 0, no
+      // param; column names come from the fixed Zod schema, never user keys.
+      if (d.on_wall !== undefined) {
+        updateCols.push('wall_order = 0');
       }
       if (updateCols.length) {
         vals.push(id);
