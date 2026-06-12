@@ -294,8 +294,8 @@ component call them.
 - `components/admin/WallArranger.tsx` — grid + tray + switches + staged delete +
   Add-photos link.
 - `lib/wall-arrange.ts` — new, pure transforms (+ `tests/lib/wall-arrange.test.ts`).
-- `app/globals.css` (admin `.wl-adm-wall*` styles) — switches, tray, staged/Undo,
-  confirm bar.
+- `app/admin/admin.css` (the `.wl-adm-wall*` block, ~line 1504) — switches,
+  tray, staged/Undo, confirm bar, sr-only live region.
 
 ## Review pass (2026-06-11, Gemini, read-only)
 
