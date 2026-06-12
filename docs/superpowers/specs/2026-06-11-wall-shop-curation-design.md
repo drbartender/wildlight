@@ -1,7 +1,10 @@
 # Wall & shop curation — design
 
 **Date:** 2026-06-11
-**Status:** Approved (design); pending spec review
+**Status:** Implemented on `feat/wall-shop-curation`. Automated gates green
+(typecheck · 145 tests · production build) and passed code/security/database/
+consistency review. Pending: manual e2e + UI/UX review (need a running dev
+server + admin login).
 **Surfaces:** `/admin/wall` (admin), homepage vintage wall (public)
 
 ## Problem
