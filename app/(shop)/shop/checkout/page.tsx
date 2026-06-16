@@ -262,11 +262,13 @@ export default function CheckoutPage() {
         setSubmitting(false);
         return;
       }
-      const siteUrl =
-        process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
-      const result = await res.actions.confirm({
-        returnUrl: `${siteUrl}/api/orders/by-session/{CHECKOUT_SESSION_ID}`,
-      });
+      // The Checkout Session already carries `return_url` (set server-side in
+      // app/api/checkout/route.ts). Stripe rejects confirm() when a returnUrl
+      // is also passed here ("cannot provide returnUrl … when return_url was
+      // already provided when creating the Checkout Session"), so pass none —
+      // on success Stripe redirects to the session's return_url (the
+      // by-session token redirector).
+      const result = await res.actions.confirm();
       // Reaching here without a redirect means the buyer needs to fix
       // something. Keep the cart intact so they can retry. The order
       // receipt page clears the cart on its own success path.
