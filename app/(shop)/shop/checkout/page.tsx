@@ -123,6 +123,7 @@ export default function CheckoutPage() {
   const expressMount = useRef<HTMLDivElement | null>(null);
   const contactMount = useRef<HTMLDivElement | null>(null);
   const shippingMount = useRef<HTMLDivElement | null>(null);
+  const billingMount = useRef<HTMLDivElement | null>(null);
   const paymentMount = useRef<HTMLDivElement | null>(null);
 
   // Imperative SDK handle. Held in a ref so the confirm handler reads the
@@ -180,7 +181,15 @@ export default function CheckoutPage() {
         // elements from.
         const sdk = stripe.initCheckoutElementsSdk({
           clientSecret: data.clientSecret,
-          elementsOptions: { appearance: readAppearance() },
+          // The session sets billing_address_collection: 'required'
+          // (app/api/checkout/route.ts), so confirm() needs a billing address.
+          // syncAddressCheckbox: 'billing' renders a "Billing address same as
+          // shipping" checkbox on the billing Address Element below, so buyers
+          // don't retype it but the value is still supplied.
+          elementsOptions: {
+            appearance: readAppearance(),
+            syncAddressCheckbox: 'billing',
+          },
         });
         sdkRef.current = sdk;
 
@@ -199,6 +208,11 @@ export default function CheckoutPage() {
           const sh = sdk.createShippingAddressElement();
           sh.mount(shippingMount.current);
           elements.push(sh);
+        }
+        if (billingMount.current) {
+          const ba = sdk.createBillingAddressElement();
+          ba.mount(billingMount.current);
+          elements.push(ba);
         }
         if (paymentMount.current) {
           const pe = sdk.createPaymentElement();
@@ -376,6 +390,7 @@ export default function CheckoutPage() {
             <div ref={expressMount} className="wl-checkout-field" />
             <div ref={contactMount} className="wl-checkout-field" />
             <div ref={shippingMount} className="wl-checkout-field" />
+            <div ref={billingMount} className="wl-checkout-field" />
             <div ref={paymentMount} className="wl-checkout-field" />
 
             {error && <p className="wl-sum-error">{error}</p>}
