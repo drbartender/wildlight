@@ -11,6 +11,24 @@ import {
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
+// Every mutation runs behind `inFlight`, which disables ALL controls AND
+// tile dragging until it settles. A fetch that never settles (hung TCP,
+// stalled Neon connect) would therefore wedge the whole page — no drags, no
+// toggles — until a reload. 30s clears the server's legitimate worst case
+// (15s connect cap + 15s statement_timeout), so only truly-hung requests get
+// aborted. Optional-chained: very old engines lack AbortSignal.timeout.
+const mutationTimeout = () => AbortSignal.timeout?.(30_000);
+
+// AbortSignal.timeout rejects with a TimeoutError DOMException (some engines
+// report AbortError). A timed-out request may have committed server-side, so
+// callers must NOT roll back on it — see reconcileAfterTimeout.
+function isTimeout(err: unknown): boolean {
+  return (
+    err instanceof DOMException &&
+    (err.name === 'TimeoutError' || err.name === 'AbortError')
+  );
+}
+
 async function patchArtwork(
   id: number,
   body: Record<string, unknown>,
@@ -20,12 +38,17 @@ async function patchArtwork(
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal: mutationTimeout(),
     });
     if (r.ok) return { ok: true, status: r.status };
     const data = (await r.json().catch(() => ({}))) as { error?: string };
     return { ok: false, status: r.status, error: data.error };
-  } catch {
-    return { ok: false, status: 0, error: 'network error' };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      error: isTimeout(err) ? 'timeout' : 'network error',
+    };
   }
 }
 
@@ -102,6 +125,16 @@ export function WallArranger({
     if (liveRef.current) liveRef.current.textContent = msg;
   };
 
+  // A timed-out mutation may or may not have committed server-side, so
+  // neither the optimistic state nor a rollback can be trusted. Say so and
+  // reload to the persisted truth; controls stay disabled (busy/orderState
+  // are deliberately NOT reset) until the reload lands.
+  function reconcileAfterTimeout() {
+    setActionErr('That took too long to confirm — reloading to show the saved state…');
+    announce('Request timed out; reloading');
+    window.setTimeout(() => window.location.reload(), 1200);
+  }
+
   // ── Reorder ──────────────────────────────────────────────────────────
   function moveOver(overId: number) {
     if (dragId === null || dragId === overId) return;
@@ -124,11 +157,13 @@ export function WallArranger({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids: grid.map((t) => t.id) }),
+        signal: mutationTimeout(),
       });
       if (!r.ok) throw new Error(String(r.status));
       savedGrid.current = grid;
       setOrderState('saved');
-    } catch {
+    } catch (err) {
+      if (isTimeout(err)) return reconcileAfterTimeout();
       setOrderState('error');
     }
   }
@@ -150,6 +185,7 @@ export function WallArranger({
     setActionErr(null);
     announce('Moved to the off-the-wall tray');
     const res = await patchArtwork(id, { on_wall: false });
+    if (res.error === 'timeout') return reconcileAfterTimeout();
     if (!res.ok) {
       setGrid(prev.grid);
       setTray(prev.tray);
@@ -170,6 +206,7 @@ export function WallArranger({
     setActionErr(null);
     announce('Put on the wall');
     const res = await patchArtwork(id, { on_wall: true });
+    if (res.error === 'timeout') return reconcileAfterTimeout();
     if (!res.ok) {
       setGrid(prev.grid);
       setTray(prev.tray);
@@ -189,6 +226,7 @@ export function WallArranger({
     setTray((t) => applyShop(t, id, on));
     setActionErr(null);
     const res = await patchArtwork(id, { status: on ? 'published' : 'retired' });
+    if (res.error === 'timeout') return reconcileAfterTimeout();
     if (!res.ok) {
       setGrid(prevGrid);
       setTray(prevTray);
@@ -214,15 +252,23 @@ export function WallArranger({
     setActionErr(null);
     let res: { ok: boolean; status: number; error?: string };
     try {
-      const r = await fetch(`/api/admin/artworks/${id}`, { method: 'DELETE' });
+      const r = await fetch(`/api/admin/artworks/${id}`, {
+        method: 'DELETE',
+        signal: mutationTimeout(),
+      });
       res = {
         ok: r.ok,
         status: r.status,
         error: r.ok ? undefined : ((await r.json().catch(() => ({}))) as { error?: string }).error,
       };
-    } catch {
-      res = { ok: false, status: 0, error: 'network error' };
+    } catch (err) {
+      res = {
+        ok: false,
+        status: 0,
+        error: isTimeout(err) ? 'timeout' : 'network error',
+      };
     }
+    if (res.error === 'timeout') return reconcileAfterTimeout();
     if (res.ok) {
       setGrid((g) => g.filter((t) => t.id !== id));
       savedGrid.current = savedGrid.current.filter((t) => t.id !== id);
@@ -289,8 +335,12 @@ export function WallArranger({
             key={t.id}
             className={`wl-adm-wall-tile ${dragId === t.id ? 'dragging' : ''}`}
             draggable={!inFlight}
-            onDragStart={() => {
+            onDragStart={(e) => {
               if (inFlight) return;
+              // Some engines (Firefox ESR, iPadOS) abort a drag whose
+              // dataTransfer carries no data — set it or drags never start.
+              e.dataTransfer.setData('text/plain', String(t.id));
+              e.dataTransfer.effectAllowed = 'move';
               setDragId(t.id);
               if (orderState !== 'idle') setOrderState('idle');
             }}

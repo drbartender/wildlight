@@ -1613,6 +1613,8 @@
 }
 .wl-adm-wall-tile .cap {
   position: absolute;
+  /* decorative only — must never intercept clicks meant for the controls */
+  pointer-events: none;
   left: 0;
   right: 0;
   bottom: 0;
@@ -1648,6 +1650,11 @@
 .wl-adm-wall-add:hover {
   border-color: var(--adm-ink);
 }
+.wl-adm-wall-add.small {
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
 
 .wl-adm-wall-ctl {
   position: absolute;
@@ -1662,11 +1669,26 @@
 .wl-adm-wall-tile:focus-within .wl-adm-wall-ctl {
   opacity: 1;
 }
+/* Off-wall tray: controls overlay the photo bottom, always visible. They must
+   stay INSIDE the tile box — the tile is aspect-ratio'd with overflow:hidden,
+   so anything in static flow below the img is clipped and unreachable. */
 .wl-adm-wall-tile.off .wl-adm-wall-ctl {
-  position: static;
+  top: auto;
+  right: 4px;
+  left: 4px;
+  bottom: 4px;
   opacity: 1;
   justify-content: center;
-  padding: 6px;
+  padding: 2px;
+  border-radius: var(--adm-radius-sm);
+  background: color-mix(in srgb, var(--adm-paper) 55%, transparent);
+  backdrop-filter: blur(2px);
+}
+/* The hover caption and the tray controls both anchor to the tile bottom —
+   suppress the caption on off-wall tiles so it can't paint over the buttons
+   (the title is still on the tile's title attribute). */
+.wl-adm-wall-tile.off .cap {
+  display: none;
 }
 
 .wl-adm-wall-switch {
