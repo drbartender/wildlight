@@ -2093,12 +2093,32 @@
 .wl-adm-col-darkroom .h .t { color: var(--adm-ink); }
 .wl-adm-col-darkroom .h .c { color: var(--adm-muted); }
 .wl-adm-col-darkroom .h .n { color: var(--adm-muted); }
-.wl-adm-col-darkroom .h .wl-adm-btn { margin-left: auto; }
+.wl-adm-col-darkroom .h .wl-adm-btn { margin-left: 8px; }
+.wl-adm-col-darkroom .h .wl-adm-btn:first-of-type { margin-left: auto; }
 .wl-adm-col-darkroom .f {
   padding: 8px 14px;
   border-top: 1px solid var(--adm-rule);
   color: var(--adm-muted);
   font-size: 10px;
+}
+/* Reorder by the grip cell only — row text stays selectable. */
+.wl-adm-col-darkroom td.grip {
+  cursor: grab;
+  user-select: none;
+  white-space: nowrap;
+}
+.wl-adm-col-darkroom td.grip:active {
+  cursor: grabbing;
+}
+.wl-adm-col-darkroom tbody tr.dragging {
+  opacity: 0.45;
+  outline: 1px dashed var(--adm-ink);
+  outline-offset: -1px;
+}
+.wl-adm-col-err {
+  padding: 8px 14px;
+  color: var(--adm-red);
+  font-size: 11px;
 }
 .wl-adm-col-tagline-inline {
   width: 100%;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
 
@@ -21,7 +21,12 @@ export default function AdminCollections() {
   async function reload() {
     const r = await fetch('/api/admin/collections');
     const d = (await r.json()) as { rows: Row[] };
-    setRows(d.rows);
+    // Stored sorted: array order IS display order, everywhere it renders.
+    const sorted = d.rows
+      .slice()
+      .sort((a, b) => a.display_order - b.display_order || a.id - b.id);
+    savedRows.current = sorted;
+    setRows(sorted);
     setLoading(false);
   }
 
@@ -49,6 +54,65 @@ export default function AdminCollections() {
     void reload();
   }
 
+  // ── Drag to reorder (darkroom table) ─────────────────────────────────
+  // Same interaction model as the wall arranger: drag (by the ⋮⋮ grip, so
+  // row text stays selectable) live-reorders LOCAL state only; an explicit
+  // Save order button persists the full order atomically via PATCH { order }
+  // (one statement server-side — no partial write), and Reset reverts a
+  // mis-drag. Deliberately NOT persist-on-drop: Chromium does not deliver a
+  // drop event when the drag source node was moved mid-drag (which a live
+  // reorder always does) and Esc never reaches the page during a native
+  // drag, so any commit/cancel logic keyed on drop signals silently breaks.
+  const [dragId, setDragId] = useState<number | null>(null);
+  const [orderState, setOrderState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  // The last server-confirmed order, for the dirty check and Reset.
+  const savedRows = useRef<Row[]>([]);
+  const dirty =
+    rows.map((r) => r.id).join(',') !== savedRows.current.map((r) => r.id).join(',');
+
+  function moveOver(overId: number) {
+    if (dragId === null || dragId === overId) return;
+    setRows((prev) => {
+      const from = prev.findIndex((r) => r.id === dragId);
+      const to = prev.findIndex((r) => r.id === overId);
+      if (from === -1 || to === -1 || from === to) return prev;
+      const next = prev.slice();
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next.map((r, i) => ({ ...r, display_order: i + 1 }));
+    });
+  }
+
+  async function saveOrder() {
+    if (orderState === 'saving') return;
+    setOrderState('saving');
+    try {
+      const r = await fetch('/api/admin/collections', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order: rows.map((row) => row.id) }),
+        signal: AbortSignal.timeout?.(30_000),
+      });
+      if (!r.ok) throw new Error(String(r.status));
+      savedRows.current = rows;
+      setOrderState('saved');
+    } catch (err) {
+      // A timed-out request may have committed server-side — reload to the
+      // persisted truth rather than guessing (mirrors the wall arranger).
+      if (err instanceof DOMException && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+        setOrderState('error');
+        window.setTimeout(() => window.location.reload(), 1200);
+        return;
+      }
+      setOrderState('error');
+    }
+  }
+
+  function resetOrder() {
+    setRows(savedRows.current);
+    setOrderState('idle');
+  }
+
   return (
     <>
       <AdminTopBar
@@ -63,10 +127,7 @@ export default function AdminCollections() {
           <>
             {/* Atelier card grid */}
             <div className="wl-adm-col-grid">
-              {rows
-                .slice()
-                .sort((a, b) => a.display_order - b.display_order)
-                .map((c) => (
+              {rows.map((c) => (
                   <div key={c.id} className="wl-adm-col-card">
                     <div className="wl-adm-col-cover">
                       {c.cover_image_url && (
@@ -142,7 +203,34 @@ export default function AdminCollections() {
                 <button type="button" className="wl-adm-btn small primary" onClick={create}>
                   + new
                 </button>
+                {dirty && (
+                  <button
+                    type="button"
+                    className="wl-adm-btn small"
+                    onClick={resetOrder}
+                    disabled={orderState === 'saving'}
+                  >
+                    reset
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="wl-adm-btn small primary"
+                  onClick={() => void saveOrder()}
+                  disabled={!dirty || orderState === 'saving'}
+                >
+                  {orderState === 'saving'
+                    ? 'saving…'
+                    : !dirty && orderState === 'saved'
+                      ? 'saved ✓'
+                      : 'save order'}
+                </button>
               </div>
+              {orderState === 'error' && (
+                <p className="wl-adm-col-err">
+                  Couldn&apos;t save the order — it may not have gone through. Try again.
+                </p>
+              )}
               <table className="wl-adm-table mono">
                 <thead>
                   <tr>
@@ -156,12 +244,34 @@ export default function AdminCollections() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows
-                    .slice()
-                    .sort((a, b) => a.display_order - b.display_order)
-                    .map((c) => (
-                      <tr key={c.id}>
-                        <td className="muted">⋮⋮ {c.display_order}</td>
+                  {rows.map((c) => (
+                      <tr
+                        key={c.id}
+                        className={dragId === c.id ? 'dragging' : ''}
+                        onDragEnter={() => moveOver(c.id)}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => e.preventDefault()}
+                      >
+                        <td
+                          className="muted grip"
+                          draggable={orderState !== 'saving'}
+                          onDragStart={(e) => {
+                            // Custom type: satisfies engines that abort
+                            // dataless drags (FF ESR/iPadOS) without making
+                            // text inputs valid drop targets — this table
+                            // grows inline tagline editing later.
+                            e.dataTransfer.setData(
+                              'application/x-wildlight-reorder',
+                              String(c.id),
+                            );
+                            e.dataTransfer.effectAllowed = 'move';
+                            setDragId(c.id);
+                            if (orderState !== 'idle') setOrderState('idle');
+                          }}
+                          onDragEnd={() => setDragId(null)}
+                        >
+                          ⋮⋮ {c.display_order}
+                        </td>
                         <td>
                           {c.cover_image_url && (
                             <img

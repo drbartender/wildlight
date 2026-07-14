@@ -38,9 +38,34 @@ const Patch = z.object({
   display_order: z.number().int().optional(),
   cover_image_url: z.string().nullable().optional(),
 });
+// Atomic reorder: the full ordered id list, written in ONE statement so a
+// partial failure can never leave a mix of old and new display_order values
+// (same pattern as POST /api/admin/wall).
+const Reorder = z.object({
+  order: z
+    .array(z.number().int().positive())
+    .min(1)
+    .max(200)
+    .refine((a) => new Set(a).size === a.length, 'duplicate ids'),
+});
 export async function PATCH(req: Request) {
   await requireAdmin();
-  const p = Patch.safeParse(await req.json().catch(() => null));
+  const body = await req.json().catch(() => null);
+  const reorder = Reorder.safeParse(body);
+  if (reorder.success) {
+    await pool.query(
+      `UPDATE collections c
+          SET display_order = v.ord
+         FROM (
+           SELECT id, ord
+             FROM unnest($1::int[]) WITH ORDINALITY AS t(id, ord)
+         ) v
+        WHERE c.id = v.id`,
+      [reorder.data.order],
+    );
+    return NextResponse.json({ ok: true });
+  }
+  const p = Patch.safeParse(body);
   if (!p.success) return NextResponse.json({ error: 'invalid' }, { status: 400 });
   const { id, ...rest } = p.data;
   const entries = Object.entries(rest).filter(([, v]) => v !== undefined);
