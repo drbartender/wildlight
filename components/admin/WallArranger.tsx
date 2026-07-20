@@ -422,14 +422,26 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
   // capped shelf (dragEnter can't hit a clipped tile), so moving a photo more
   // than ~a row was impossible — and there was no keyboard path at all. Typing
   // a position is O(1) in wall length and keyboard-operable for free.
+  // Put focus back on the moved tile's position badge (it re-renders at the new
+  // slot) so a keyboard user keeps their place across moves.
+  function focusPos(id: number) {
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const el = document.querySelector<HTMLElement>(`[data-pos-id="${id}"]`);
+        (el ?? document.getElementById('wl-library-heading'))?.focus({ preventScroll: true });
+      }),
+    );
+  }
   async function moveToPosition(id: number, pos1: number) {
     if (inFlight) return;
     const cur = wallIdsRef.current;
     const from = cur.indexOf(id);
     setEditPos(null);
-    if (from === -1 || !Number.isFinite(pos1)) return;
-    const to = Math.max(0, Math.min(cur.length - 1, Math.round(pos1) - 1));
-    if (to === from) return;
+    // Empty field → Number('') === 0; reject anything not a whole position >= 1
+    // so a stray Enter can't jump the photo to the front.
+    if (from === -1 || !Number.isInteger(pos1) || pos1 < 1) return focusPos(id);
+    const to = Math.max(0, Math.min(cur.length - 1, pos1 - 1));
+    if (to === from) return focusPos(id);
     const next = cur.slice();
     next.splice(from, 1);
     next.splice(to, 0, id);
@@ -446,6 +458,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
       window.setTimeout(() => setSavedFlash(false), 2200);
     }
     setSavingOrder(false);
+    focusPos(id);
   }
 
   // ── Drag wiring ──────────────────────────────────────────────────────
@@ -523,7 +536,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
             <span style={{ flex: 1 }} />
             {savedFlash && <span className="wl-adm-ws-saved">order saved ✓</span>}
             {dropTarget === 'wall' && <span className="wl-adm-ws-saved">drop to add ↓</span>}
-            {!wallMin && <span className="wl-adm-ws-note">Drag to reorder, saves automatically</span>}
+            {!wallMin && <span className="wl-adm-ws-note">Click a photo&apos;s number to move it. Drag to nudge.</span>}
           </div>
           {!wallMin &&
             (wall.length === 0 ? (
@@ -537,6 +550,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
                     draggable={!inFlight && editPos !== p.id}
                     onDragStart={(e) => {
                       if (inFlight || editPos === p.id) return;
+                      setEditPos(null); // close any open position editor on another tile
                       e.dataTransfer.setData('text/plain', String(p.id));
                       e.dataTransfer.effectAllowed = 'move';
                       setDrag({ id: p.id, from: 'wall' });
@@ -551,33 +565,38 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
                     onDrop={(e) => e.preventDefault()}
                   >
                     {editPos === p.id ? (
-                      <input
-                        className="wl-adm-ws-posinput"
-                        type="number"
-                        min={1}
-                        max={wall.length}
-                        defaultValue={i + 1}
-                        autoFocus
-                        draggable={false}
-                        aria-label={`Move ${p.title} to position (1 to ${wall.length})`}
-                        onClick={(e) => e.stopPropagation()}
-                        onBlur={() => setEditPos(null)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            void moveToPosition(p.id, Number((e.target as HTMLInputElement).value));
-                          } else if (e.key === 'Escape') {
-                            e.preventDefault();
-                            setEditPos(null);
-                          }
-                        }}
-                      />
+                      <span className="wl-adm-ws-posedit">
+                        <input
+                          className="wl-adm-ws-posinput"
+                          type="number"
+                          min={1}
+                          max={wall.length}
+                          defaultValue={i + 1}
+                          autoFocus
+                          draggable={false}
+                          aria-label={`Move ${p.title} to position (1 to ${wall.length})`}
+                          onClick={(e) => e.stopPropagation()}
+                          onBlur={() => setEditPos((cur) => (cur === p.id ? null : cur))}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              void moveToPosition(p.id, Number((e.target as HTMLInputElement).value));
+                            } else if (e.key === 'Escape') {
+                              e.preventDefault();
+                              setEditPos(null);
+                              focusPos(p.id);
+                            }
+                          }}
+                        />
+                        <span className="wl-adm-ws-poshint">of {wall.length} · Enter</span>
+                      </span>
                     ) : (
                       <button
                         type="button"
                         className="wl-adm-ws-pos"
+                        data-pos-id={p.id}
                         aria-label={`${p.title} is at position ${i + 1} of ${wall.length}. Activate to move it.`}
-                        title="Click to move to a position"
+                        title="Click to move this photo to a position"
                         disabled={inFlight}
                         onClick={(e) => {
                           e.stopPropagation();

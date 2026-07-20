@@ -82,11 +82,13 @@ async function main() {
   const protectedSlugs = new Set(
     (
       await pool.query<{ slug: string }>(
+        // Protect a slug that appears in ANY order history, incl. canceled and
+        // refunded — matching the admin delete guard. Deleting an artwork nulls
+        // order_items.variant_id regardless of order status, so refunded/canceled
+        // history must protect the row too.
         `SELECT DISTINCT oi.artwork_snapshot->>'slug' AS slug
          FROM order_items oi
-         JOIN orders o ON o.id = oi.order_id
-         WHERE o.status NOT IN ('canceled', 'refunded')
-           AND oi.artwork_snapshot->>'slug' IS NOT NULL`,
+         WHERE oi.artwork_snapshot->>'slug' IS NOT NULL`,
       )
     ).rows.map((r) => r.slug),
   );

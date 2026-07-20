@@ -5,6 +5,7 @@ import { pool, withTransaction } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 import { requireSameOrigin } from '@/lib/origin-check';
 import { publishArtworks } from '@/lib/publish-artworks';
+import { ConflictError } from '@/lib/errors';
 
 function isFkViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23503';
@@ -102,34 +103,38 @@ export async function POST(req: Request) {
     // orders and the isFkViolation catch below can never fire for them.
     // Filtering on order status here is what let a refunded-order artwork be
     // destroyed. Steer admins to Retire, which preserves the history.
-    const blocked = await pool.query<{ id: number; title: string }>(
-      `SELECT a.id, a.title
-       FROM artworks a
-       WHERE a.id = ANY($1)
-         AND EXISTS (
-           SELECT 1 FROM order_items oi
-           JOIN artwork_variants vv ON vv.id = oi.variant_id
-           WHERE vv.artwork_id = a.id
-         )`,
-      [ids],
-    );
-    if (blocked.rowCount && blocked.rowCount > 0) {
-      const titles = blocked.rows
-        .slice(0, 3)
-        .map((r) => r.title)
-        .join(', ');
-      const more =
-        blocked.rowCount > 3 ? ` and ${blocked.rowCount - 3} more` : '';
-      return NextResponse.json(
-        {
-          error: `Cannot delete: ${titles}${more} ${blocked.rowCount === 1 ? 'has' : 'have'} order history. Retire instead.`,
-        },
-        { status: 409 },
-      );
-    }
+    // Check + delete in one transaction, for parity with the per-artwork
+    // DELETE (an order landing between the two statements can't slip past).
     try {
-      await pool.query('DELETE FROM artworks WHERE id = ANY($1)', [ids]);
+      await withTransaction(async (client) => {
+        const blocked = await client.query<{ id: number; title: string }>(
+          `SELECT a.id, a.title
+           FROM artworks a
+           WHERE a.id = ANY($1)
+             AND EXISTS (
+               SELECT 1 FROM order_items oi
+               JOIN artwork_variants vv ON vv.id = oi.variant_id
+               WHERE vv.artwork_id = a.id
+             )`,
+          [ids],
+        );
+        if (blocked.rowCount && blocked.rowCount > 0) {
+          const titles = blocked.rows
+            .slice(0, 3)
+            .map((r) => r.title)
+            .join(', ');
+          const more =
+            blocked.rowCount > 3 ? ` and ${blocked.rowCount - 3} more` : '';
+          throw new ConflictError(
+            `Cannot delete: ${titles}${more} ${blocked.rowCount === 1 ? 'has' : 'have'} order history. Retire instead.`,
+          );
+        }
+        await client.query('DELETE FROM artworks WHERE id = ANY($1)', [ids]);
+      });
     } catch (err) {
+      if (err instanceof ConflictError) {
+        return NextResponse.json({ error: err.message }, { status: 409 });
+      }
       if (isFkViolation(err)) {
         return NextResponse.json(
           { error: 'Cannot delete: one or more artworks are still referenced.' },
