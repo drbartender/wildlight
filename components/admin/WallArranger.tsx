@@ -121,9 +121,21 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
     }
   }, []);
   function clampBand(h: number): number {
-    const max = Math.max(160, window.innerHeight - 320); // leave room for the Library floor
+    // Reserve the real non-band chrome above the Library floor: top padding +
+    // wall header + gaps + the resize handle + the 220px Library floor (~340),
+    // so a maxed band can't clip the Library inside the overflow:hidden box.
+    const max = Math.max(160, window.innerHeight - 340);
     return Math.round(Math.max(120, Math.min(max, h)));
   }
+  // Re-clamp a customised band height when the window shrinks, so a band sized
+  // on a tall monitor can't later overflow the Library.
+  useEffect(() => {
+    function onResize() {
+      setBandH((h) => (h == null ? h : clampBand(h)));
+    }
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
   function onResizeDown(e: React.PointerEvent) {
     const band = document.querySelector<HTMLElement>('.wl-adm-ws-shelves');
     if (!band) return;
@@ -324,9 +336,23 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
       );
       return;
     }
-    if (action === 'shopOn') {
-      // eslint-disable-next-line no-alert
-      if (!window.confirm(`Put ${targets.length} photo${targets.length === 1 ? '' : 's'} up for sale in the shop?`)) return;
+    const n = targets.length;
+    const plural = n === 1 ? '' : 's';
+    // Confirm the money action (publish) and the two bulk removals (a mis-click
+    // on a big selection is worth a gate); bulk add-to-wall is additive and
+    // reversible, so it stays confirm-free like the single-photo path.
+    if (
+      (action === 'shopOn' &&
+        // eslint-disable-next-line no-alert
+        !window.confirm(`Put ${n} photo${plural} up for sale in the shop?`)) ||
+      (action === 'wallOff' &&
+        // eslint-disable-next-line no-alert
+        !window.confirm(`Take ${n} photo${plural} off the wall?`)) ||
+      (action === 'shopOff' &&
+        // eslint-disable-next-line no-alert
+        !window.confirm(`Stop selling ${n} photo${plural}?`))
+    ) {
+      return;
     }
     setBusy(true);
     setActionErr(null);
@@ -365,11 +391,20 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
       }
     }
     // Rewrite 1..N once so the admin order matches the public wall.
+    let orderFailed = false;
     if (touchesWall) {
       const ord = await persistOrder(wallIdsRef.current);
       if (ord.timedOut) {
         setBulkProgress(null);
         return reconcileAfterTimeout();
+      }
+      if (!ord.ok) {
+        // The memberships persisted; only the order POST failed. Keep the saved
+        // snapshot in lockstep with reality (else a later failed reorder rolls
+        // back to a baseline missing these ids and silently drops them from the
+        // shelf) and warn — mirrors the single-photo placeOnWall guard.
+        savedWallIds.current = wallIdsRef.current.slice();
+        orderFailed = true;
       }
     }
     setBulkProgress(null);
@@ -380,10 +415,16 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
     const parts: string[] = [`${done} updated`];
     if (skippedNoHd) parts.push(`${skippedNoHd} skipped (no print file)`);
     if (failedTitles.length) parts.push(`${failedTitles.length} failed`);
-    const msg = parts.join(', ');
-    announce(msg);
-    if (failedTitles.length) fail(`Couldn't update ${failedTitles.length} photo${failedTitles.length === 1 ? '' : 's'}. Reload to see the current state.`);
-    else if (skippedNoHd) setActionErr(`${done} added to the shop. ${skippedNoHd} skipped — they need a print file first.`);
+    announce(parts.join(', '));
+    if (failedTitles.length) {
+      fail(`Couldn't update ${failedTitles.length} photo${failedTitles.length === 1 ? '' : 's'}. Reload to see the current state.`);
+    } else if (orderFailed) {
+      fail("Photos added to the wall, but the new order couldn't be saved. Reload to see the current order.");
+    } else if (skippedNoHd) {
+      setActionErr(`${done} added to the shop. ${skippedNoHd} skipped — they need a print file first.`);
+    }
+    // The bulk bar unmounts when the selection clears; move focus somewhere sane.
+    requestAnimationFrame(() => document.getElementById('wl-library-heading')?.focus({ preventScroll: true }));
   }
 
   // ── Wall placement (no confirm; reversible) ──────────────────────────
@@ -876,6 +917,8 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
         role="separator"
         aria-orientation="horizontal"
         aria-label="Resize the shelves — drag, or use the up and down arrow keys"
+        aria-valuenow={bandH != null ? Math.round(bandH) : undefined}
+        aria-valuemin={120}
         tabIndex={0}
         onPointerDown={onResizeDown}
         onPointerMove={onResizeMove}
@@ -925,7 +968,10 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
             <span className="count">
               {bulkProgress
                 ? `Working… ${bulkProgress.done} of ${bulkProgress.total}`
-                : `${selected.size} selected`}
+                : (() => {
+                    const hidden = selected.size - libList.filter((p) => selected.has(p.id)).length;
+                    return `${selected.size} selected${hidden > 0 ? ` · ${hidden} hidden by filter` : ''}`;
+                  })()}
             </span>
             <button type="button" disabled={inFlight} onClick={() => void bulkApply('wallOn')}>Add to Wall</button>
             <button type="button" disabled={inFlight} onClick={() => void bulkApply('shopOn')}>Add to Shop</button>

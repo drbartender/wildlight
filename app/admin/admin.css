@@ -3717,6 +3717,8 @@
 /* Bulk-select checkbox (top-right; hd/web badges are top-left, ✕ bottom-right). */
 .wl-adm-ws-check { position: absolute; top: 5px; right: 5px; z-index: 3; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; border-radius: 4px; border: 1.5px solid rgba(255,255,255,0.9); background: rgba(0,0,0,0.4); color: #fff; font-size: 12px; line-height: 1; cursor: pointer; }
 .wl-adm-ws-check.on { background: var(--adm-blue); border-color: var(--adm-blue); }
+/* Dark --adm-blue is a light blue, so white ✓ was 2.5:1; use a dark check on it. */
+.wl-admin-surface[data-theme='dark'] .wl-adm-ws-check.on { color: #0e1013; }
 .wl-adm-ws-check:focus-visible { outline: 2px solid var(--adm-blue); outline-offset: 2px; }
 .wl-adm-ws-check:disabled { cursor: default; opacity: 0.6; }
 
@@ -3793,7 +3795,7 @@
     display: flex; align-items: center; justify-content: center;
     flex: 0 0 auto; height: 12px; cursor: ns-resize; touch-action: none;
   }
-  .wl-adm-wall.ws-fixed .wl-adm-ws-resize .grip { width: 44px; height: 3px; border-radius: 2px; background: var(--adm-rule); transition: background 120ms; }
+  .wl-adm-wall.ws-fixed .wl-adm-ws-resize .grip { width: 44px; height: 3px; border-radius: 2px; background: var(--adm-muted); transition: background 120ms; }
   .wl-adm-wall.ws-fixed .wl-adm-ws-resize:hover .grip,
   .wl-adm-wall.ws-fixed .wl-adm-ws-resize:focus-visible .grip { background: var(--adm-blue); }
   .wl-adm-wall.ws-fixed .wl-adm-ws-resize:focus-visible { outline: none; }
