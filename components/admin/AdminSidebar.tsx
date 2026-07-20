@@ -38,7 +38,7 @@ const CATALOG: NavDef[] = [
   },
   {
     id: 'wall',
-    label: 'Arrange wall',
+    label: 'Wall & shop',
     href: '/admin/wall',
     icon: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
     match: ({ path }) => path.startsWith('/admin/wall'),
