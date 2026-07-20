@@ -3649,6 +3649,9 @@
 .wl-adm-ws-shelf.hot-ok { border-color: var(--adm-green); box-shadow: 0 0 0 1px var(--adm-green); }
 .wl-adm-ws-shelf.hot-bad { border-color: var(--adm-red); }
 .wl-adm-ws-library { background: var(--adm-paper-alt); border: 1px solid var(--adm-rule); border-radius: var(--adm-radius-lg); padding: 16px; }
+/* Resize handle only exists in the fixed-pane layout (below, the band isn't
+   height-constrained so there's nothing to resize). */
+.wl-adm-ws-resize { display: none; }
 
 .wl-adm-ws-head { display: flex; align-items: center; gap: 10px; }
 .wl-adm-ws-head.open { margin-bottom: 12px; }
@@ -3759,16 +3762,41 @@
   .wl-adm-wall.ws-fixed .wl-adm-wall-head { flex: 0 0 auto; margin-bottom: 0; }
   .wl-adm-wall.ws-fixed .wl-adm-wall-err { flex: 0 0 auto; margin: 0; }
 
-  /* Shelves band. Collapsing a shelf shrinks it and hands the room to the Library. */
-  .wl-adm-wall.ws-fixed .wl-adm-ws-shelves { flex: 0 0 auto; min-height: 0; }
+  /* Shelves band: a flex row. A minimized shelf collapses to its header and
+     hands its WIDTH to the other. Band height defaults to min(36vh,300px) but
+     the resize handle overrides it via --wl-band-h. Collapsing both shrinks the
+     band and the Library grows. */
+  .wl-adm-wall.ws-fixed .wl-adm-ws-shelves {
+    flex: 0 0 auto;
+    display: flex;
+    gap: 22px;
+    align-items: flex-start;
+    max-height: var(--wl-band-h, min(36vh, 300px));
+    min-height: 0;
+  }
   .wl-adm-wall.ws-fixed .wl-adm-ws-shelf {
     display: flex;
     flex-direction: column;
     min-height: 0;
-    /* vh alone ballooned the band on tall monitors and starved the Library on
-       short ones; the px cap keeps the shelves a band, not a half-screen. */
-    max-height: min(36vh, 300px);
+    max-height: 100%;
   }
+  .wl-adm-wall.ws-fixed .wl-adm-ws-shelf.wall { flex: 3 1 0; }
+  .wl-adm-wall.ws-fixed .wl-adm-ws-shelf.shop { flex: 2 1 0; }
+  /* A minimized shelf shrinks to its header; the OTHER fills the row (unless it
+     too is minimized, in which case both stay compact and the band collapses). */
+  .wl-adm-wall.ws-fixed .wl-adm-ws-shelves.wall-min .wl-adm-ws-shelf.wall,
+  .wl-adm-wall.ws-fixed .wl-adm-ws-shelves.shop-min .wl-adm-ws-shelf.shop { flex: 0 0 auto; max-height: none; }
+  .wl-adm-wall.ws-fixed .wl-adm-ws-shelves.wall-min:not(.shop-min) .wl-adm-ws-shelf.shop { flex: 1 1 0; }
+  .wl-adm-wall.ws-fixed .wl-adm-ws-shelves.shop-min:not(.wall-min) .wl-adm-ws-shelf.wall { flex: 1 1 0; }
+
+  .wl-adm-wall.ws-fixed .wl-adm-ws-resize {
+    display: flex; align-items: center; justify-content: center;
+    flex: 0 0 auto; height: 12px; cursor: ns-resize; touch-action: none;
+  }
+  .wl-adm-wall.ws-fixed .wl-adm-ws-resize .grip { width: 44px; height: 3px; border-radius: 2px; background: var(--adm-rule); transition: background 120ms; }
+  .wl-adm-wall.ws-fixed .wl-adm-ws-resize:hover .grip,
+  .wl-adm-wall.ws-fixed .wl-adm-ws-resize:focus-visible .grip { background: var(--adm-blue); }
+  .wl-adm-wall.ws-fixed .wl-adm-ws-resize:focus-visible { outline: none; }
   .wl-adm-wall.ws-fixed .wl-adm-ws-shelf > .wl-adm-ws-head { flex: 0 0 auto; }
   .wl-adm-wall.ws-fixed .wl-adm-ws-shelf > .wl-adm-ws-grid,
   .wl-adm-wall.ws-fixed .wl-adm-ws-shelf > .wl-adm-ws-empty {

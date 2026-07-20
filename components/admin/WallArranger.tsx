@@ -104,9 +104,63 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
   const lastClickedRef = useRef<number | null>(null);
+  const [bandH, setBandH] = useState<number | null>(null);
+  const resizeRef = useRef<{ startY: number; startH: number } | null>(null);
   const [actionErr, setActionErr] = useState<string | null>(null);
 
   const inFlight = busy || savingOrder;
+
+  // Persisted band height (the resize handle). Read post-mount so SSR renders
+  // the CSS default and there's no hydration mismatch.
+  useEffect(() => {
+    try {
+      const v = window.localStorage.getItem('wl-wall-bandh');
+      if (v) setBandH(clampBand(Number(v)));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  function clampBand(h: number): number {
+    const max = Math.max(160, window.innerHeight - 320); // leave room for the Library floor
+    return Math.round(Math.max(120, Math.min(max, h)));
+  }
+  function onResizeDown(e: React.PointerEvent) {
+    const band = document.querySelector<HTMLElement>('.wl-adm-ws-shelves');
+    if (!band) return;
+    resizeRef.current = { startY: e.clientY, startH: band.getBoundingClientRect().height };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+  function onResizeMove(e: React.PointerEvent) {
+    const s = resizeRef.current;
+    if (!s) return;
+    setBandH(clampBand(s.startH + (e.clientY - s.startY)));
+  }
+  function onResizeUp(e: React.PointerEvent) {
+    if (!resizeRef.current) return;
+    resizeRef.current = null;
+    (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+    const band = document.querySelector<HTMLElement>('.wl-adm-ws-shelves');
+    if (band) {
+      try {
+        window.localStorage.setItem('wl-wall-bandh', String(Math.round(band.getBoundingClientRect().height)));
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  function onResizeKey(e: React.KeyboardEvent) {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    e.preventDefault();
+    const band = document.querySelector<HTMLElement>('.wl-adm-ws-shelves');
+    const cur = bandH ?? (band ? band.getBoundingClientRect().height : 260);
+    const h = clampBand(cur + (e.key === 'ArrowDown' ? 24 : -24));
+    setBandH(h);
+    try {
+      window.localStorage.setItem('wl-wall-bandh', String(h));
+    } catch {
+      /* ignore */
+    }
+  }
 
   const liveRef = useRef<HTMLDivElement>(null);
   const announce = (msg: string) => {
@@ -633,10 +687,13 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
         </p>
       )}
 
-      <div className="wl-adm-ws-shelves">
+      <div
+        className={`wl-adm-ws-shelves ${wallMin ? 'wall-min' : ''} ${shopMin ? 'shop-min' : ''}`}
+        style={{ ['--wl-band-h' as string]: bandH != null ? `${bandH}px` : undefined } as React.CSSProperties}
+      >
         {/* THE WALL */}
         <section
-          className={`wl-adm-ws-shelf ${dropTarget === 'wall' ? 'hot-ok' : ''}`}
+          className={`wl-adm-ws-shelf wall ${dropTarget === 'wall' ? 'hot-ok' : ''}`}
           aria-label="The Wall"
           onDragOver={overShelf('wall')}
           onDragLeave={leaveShelf}
@@ -750,7 +807,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
 
         {/* THE SHOP */}
         <section
-          className={`wl-adm-ws-shelf ${shopHot ? 'hot-ok' : ''} ${shopBad ? 'hot-bad' : ''}`}
+          className={`wl-adm-ws-shelf shop ${shopHot ? 'hot-ok' : ''} ${shopBad ? 'hot-bad' : ''}`}
           aria-label="The Shop"
           onDragOver={overShelf('shop')}
           onDragLeave={leaveShelf}
@@ -812,6 +869,20 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
               </div>
             ))}
         </section>
+      </div>
+
+      <div
+        className="wl-adm-ws-resize"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize the shelves — drag, or use the up and down arrow keys"
+        tabIndex={0}
+        onPointerDown={onResizeDown}
+        onPointerMove={onResizeMove}
+        onPointerUp={onResizeUp}
+        onKeyDown={onResizeKey}
+      >
+        <span className="grip" aria-hidden="true" />
       </div>
 
       {/* LIBRARY */}
