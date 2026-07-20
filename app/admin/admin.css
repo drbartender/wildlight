@@ -3793,7 +3793,8 @@
   outline: 2px solid var(--adm-blue);
   outline-offset: 2px;
 }
-/* Dark-theme secondary labels: --adm-muted on --adm-card is 3.2:1; bump the
-   shelf meta/notes to ink-2 so they clear AA. */
-.wl-admin-surface[data-theme='dark'] .wl-adm-ws-meta,
-.wl-admin-surface[data-theme='dark'] .wl-adm-ws-note { color: var(--adm-ink-2); }
+/* Shelf secondary labels: --adm-muted is sub-AA on --adm-card in BOTH themes
+   (light 4.45 / 3.87, dark 3.2); ink-2 clears 4.5:1 everywhere. The note here
+   teaches the reorder feature, so it has to be readable. */
+.wl-adm-ws-meta,
+.wl-adm-ws-note { color: var(--adm-ink-2); }
