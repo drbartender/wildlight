@@ -3686,5 +3686,57 @@
 .wl-adm-ws-pill:disabled { color: var(--adm-dim); border-style: dashed; cursor: not-allowed; }
 .wl-adm-ws-edit { font-size: 11px; color: var(--adm-muted); text-decoration: none; white-space: nowrap; }
 .wl-adm-ws-edit:hover { color: var(--adm-ink); }
-.wl-adm-ws-hint { display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; background: var(--adm-card); border: 1px solid var(--adm-rule); border-radius: var(--adm-radius-md); font-size: 13px; color: var(--adm-ink-2); line-height: 1.55; }
-.wl-adm-ws-hint .dismiss { margin-left: auto; border: none; background: none; color: var(--adm-muted); font-size: 12px; cursor: pointer; flex-shrink: 0; }
+/* Fixed panes: Wall/Shop as a capped band on top, Library filling the rest.
+   Each pane scrolls internally so all three stay on screen at once — the drag
+   gesture needs the source (Library) and the target (a shelf) both visible.
+   Scoped with :has() so ONLY this page gives up page-scroll; every other admin
+   page keeps normal document flow. Below 1001px it falls back to that flow. */
+@media (min-width: 1001px) {
+  .wl-admin-surface:has(.wl-adm-wall.ws-fixed) { height: 100vh; overflow: hidden; }
+  .wl-admin-surface:has(.wl-adm-wall.ws-fixed) .wl-adm-main { min-height: 0; }
+
+  .wl-adm-wall.ws-fixed {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px 24px;
+    overflow: hidden;
+  }
+  .wl-adm-wall.ws-fixed .wl-adm-wall-head { flex: 0 0 auto; margin-bottom: 0; }
+  .wl-adm-wall.ws-fixed .wl-adm-wall-err { flex: 0 0 auto; margin: 0; }
+
+  /* Shelves band. Collapsing a shelf shrinks it and hands the room to the Library. */
+  .wl-adm-wall.ws-fixed .wl-adm-ws-shelves { flex: 0 0 auto; min-height: 0; }
+  .wl-adm-wall.ws-fixed .wl-adm-ws-shelf {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    max-height: 36vh; /* knob: raise for more wall, lower for more library */
+  }
+  .wl-adm-wall.ws-fixed .wl-adm-ws-shelf > .wl-adm-ws-head { flex: 0 0 auto; }
+  .wl-adm-wall.ws-fixed .wl-adm-ws-shelf > .wl-adm-ws-grid,
+  .wl-adm-wall.ws-fixed .wl-adm-ws-shelf > .wl-adm-ws-empty {
+    overflow-y: auto;
+    min-height: 0;
+    align-content: start;
+  }
+
+  /* Library takes every remaining pixel; its filter bar stays put while it scrolls. */
+  .wl-adm-wall.ws-fixed .wl-adm-ws-library {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .wl-adm-wall.ws-fixed .wl-adm-ws-library > .wl-adm-ws-head { flex: 0 0 auto; }
+  .wl-adm-wall.ws-fixed .wl-adm-ws-library > .wl-adm-ws-grid,
+  .wl-adm-wall.ws-fixed .wl-adm-ws-library > .wl-adm-ws-empty {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    min-height: 0;
+    align-content: start;
+  }
+}

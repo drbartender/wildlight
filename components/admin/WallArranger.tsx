@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { formatUSD } from '@/lib/money';
 import {
   applyFilter,
@@ -13,8 +13,6 @@ import {
   type FilterKey,
   type LibraryPhoto,
 } from '@/lib/wall-arrange';
-
-const HINT_KEY = 'wl-wall-hints-dismissed';
 
 // Every mutation runs behind `inFlight` (disables controls + dragging) so the
 // interaction models can't interleave. A hung request would wedge the page, so
@@ -71,7 +69,6 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
   const [savedFlash, setSavedFlash] = useState(false);
   const [wallMin, setWallMin] = useState(false);
   const [shopMin, setShopMin] = useState(false);
-  const [hintsDismissed, setHintsDismissed] = useState(true); // hidden until localStorage read (avoids hydration flash)
   const [actionErr, setActionErr] = useState<string | null>(null);
 
   const inFlight = busy || savingOrder;
@@ -80,23 +77,6 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
   const announce = (msg: string) => {
     if (liveRef.current) liveRef.current.textContent = msg;
   };
-
-  // Post-mount: read the dismissal from localStorage (never during render).
-  useEffect(() => {
-    try {
-      setHintsDismissed(window.localStorage.getItem(HINT_KEY) === '1');
-    } catch {
-      setHintsDismissed(false);
-    }
-  }, []);
-  function dismissHints() {
-    setHintsDismissed(true);
-    try {
-      window.localStorage.setItem(HINT_KEY, '1');
-    } catch {
-      /* ignore */
-    }
-  }
 
   const byId = useMemo(() => {
     const m = new Map<number, LibraryPhoto>();
@@ -342,16 +322,10 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
 
   // ── Render ───────────────────────────────────────────────────────────
   return (
-    <div className="wl-adm-wall">
+    <div className="wl-adm-wall ws-fixed">
       <header className="wl-adm-wall-head">
         <div>
           <h1>Wall &amp; shop</h1>
-          <p>
-            Every photo lives in the Library. Drag one up onto the Wall (the
-            homepage gallery) or the Shop (for sale), or use its toggles. Taking
-            a photo off a shelf never deletes it. Only photos with a print file
-            can go in the Shop.
-          </p>
         </div>
         <div className="actions">
           <a className="wl-adm-wall-add" href="/admin/artworks/bulk-upload">
@@ -361,20 +335,6 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
       </header>
 
       {actionErr && <p className="wl-adm-wall-err">{actionErr}</p>}
-
-      {!hintsDismissed && (
-        <div className="wl-adm-ws-hint">
-          <div>
-            Every photo lives in the <strong>Library</strong>. Drag one up into
-            the <strong>Wall</strong> or the <strong>Shop</strong>, or both.
-            Removing it from a shelf just returns it to Library-only. Only photos
-            with a print file can be sold.
-          </div>
-          <button type="button" className="dismiss" onClick={dismissHints}>
-            Dismiss
-          </button>
-        </div>
-      )}
 
       <div className={`wl-adm-ws-shelves ${wallMin || shopMin ? 'stacked' : ''}`}>
         {/* THE WALL */}
@@ -519,9 +479,6 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
             ))}
           </div>
         </div>
-        <p className="wl-adm-ws-note" style={{ margin: '0 0 12px' }}>
-          Photos never leave the Library — drag one onto a shelf above, or use its Wall / Shop toggles. ✕ deletes the photo everywhere, forever.
-        </p>
         {libList.length === 0 ? (
           <div className="wl-adm-ws-empty">
             {counts.all === 0 ? 'No photos yet.' : 'No photos match this filter.'}
