@@ -57,7 +57,7 @@ This maps one-to-one onto axes that already exist:
 | On the Wall | `on_wall = true` | yes (`on_wall` column) |
 | In the Shop | `status = 'published'` | yes (publish/retire) |
 | `hd` (sellable) | `image_print_url` present | yes |
-| Buyable (real green-light) | published AND a buyable variant | yes (`available`) |
+| Buyable (can actually transact) | a buyable variant exists (read only with `inShop`) | yes (`available`) |
 | Wall order | `wall_order` | yes |
 
 Because editing (titles, pricing, print-file upload, AI draft, bulk upload)
@@ -98,8 +98,13 @@ SELECT a.id, a.slug, a.title, a.image_web_url, a.status, a.on_wall,
 - `hd` here mirrors the old `canSell` (stricter than the publish gate's
   `IS NOT NULL`, so a transient reserved row with `image_print_url = ''` reads
   as non-`hd` and gets no Shop affordance).
-- `buyable` mirrors the old `available` (published AND a buyable variant). Used
-  only for the "hidden — sizes blocked" badge on Shop tiles.
+- `buyable` is a bare `EXISTS(a buyable variant)`, **independent of publish**
+  (unlike the old `available`, which also required `status='published'`). It is
+  only ever read on Shop tiles, which are already `inShop` (published), so
+  `inShop && !buyable` = "published with no buyable variant" = the
+  "hidden — sizes blocked" badge. Authoritative rule: never gate the badge or
+  the price on `buyable` alone, always in combination with `inShop`.
+  `price_from_cents` follows the same rule.
 - `price_from_cents` is the lowest buyable-variant price, formatted through
   `lib/money.ts` (never inline). Null when nothing is buyable, rendered as "—".
 - `updated_at DESC` puts freshly uploaded photos at the top of the Library,
@@ -177,13 +182,41 @@ the public wall, not mid-wall on a stale order). Placing in the Shop →
 `PATCH … { status: 'published' }`, which routes through the existing
 `publishArtworks` gate.
 
+- **No-op re-placement (load-bearing).** If a dragged photo is **already** on
+  the target shelf (already `on_wall`, or already `inShop`), the drop is a
+  no-op: skip the PATCH entirely. Re-firing `{ on_wall: true }` resets
+  `wall_order = 0` and would silently scramble Dan's saved wall order, so guard
+  on current membership before dispatching, on **both** the drag and the toggle
+  path, for both shelves.
+- **Confirm on Shop-placement.** Publishing puts a piece live for sale in
+  `/shop`, the one money-facing, customer-visible action on this screen, so it
+  takes one inline confirm ("Put {title} up for sale?") symmetric with Remove,
+  before the publish PATCH. Wall placement stays confirm-free (not commerce,
+  instantly reversible). A single inline confirm, not the two-step + native
+  `confirm()` that Delete uses.
+
 ### Wall reordering (auto-save)
 
 Drag to reorder within the Wall shelf. Reordering is **live** on `dragEnter`
 (the tiles rearrange as you drag) and **commits on `dragEnd`**: if the order
-changed, fire `POST /api/admin/wall` with the new id sequence and flash
+changed (`wallIds` differs from `savedWallIds`), fire `POST /api/admin/wall`
+with the current `wallIds` sequence, then set `savedWallIds = wallIds` and flash
 "order saved ✓". There is no Save / Reset button and no persistent dirty state
 (a deliberate departure from today's explicit Save; approved 2026-07-19).
+
+The reorder POST runs **through the single `inFlight` guard** (see State model),
+so it never interleaves with a place / remove / publish, and its payload is
+rebuilt from `wallIds` at commit time, never a stale snapshot captured at drag
+start.
+
+**On failure** (`POST` 500 or timeout): revert `wallIds` to `savedWallIds` (the
+tiles snap back to the last-saved order), show a transient inline error with a
+**Retry**, and do not advance `savedWallIds`. A **timeout** is treated as
+unknown rather than success: reconcile by reloading the page's server data
+(mirroring the current arranger's `reconcileAfterTimeout`), because the reorder
+may have committed server-side even though the client saw a timeout. This
+revert path is the reason `savedWallIds` exists: removing explicit Save removed
+the old dirty-snapshot, so the snapshot has to live in state instead.
 
 Reordering is low-stakes and trivially reversible (drag it back). The commit is
 keyed off `dragEnd`, which always fires, never off a `drop` event (see DnD
@@ -242,9 +275,17 @@ server:
   inline error. Because the Library, Wall, and Shop all derive from one photos
   array plus one `wallIds` list, a single state update reflects everywhere (the
   Library toggle and the shelf tile can never disagree).
-- The reorder POST fires at most once per completed drag. `POST /api/admin/wall`
-  requires a non-empty id list; removing the last Wall photo is a `PATCH`
-  (`on_wall=false`), not a reorder, so an empty-array POST never happens.
+- The reorder POST fires at most once per completed drag, through the single
+  `inFlight` guard. `POST /api/admin/wall` requires a non-empty id list;
+  removing the last Wall photo is a `PATCH` (`on_wall=false`), not a reorder, so
+  an empty-array POST never happens.
+- **Cap reconciliation.** `POST /api/admin/wall` caps its id list at 600
+  (`ids.max(600)`), and only the on-wall subset is ever sent (~100 today, far
+  under the cap). The Library `LIMIT 1000` is the whole catalog, not the wall,
+  so the two caps are about different sets. If the wall itself ever approaches
+  600, both the route cap and its now-stale "the admin wall query caps at 600"
+  comment must be revisited; tracked as a follow-up, not changed here (this
+  redesign touches no endpoint).
 
 ## DnD architecture and the Chromium no-drop invariant
 
@@ -275,10 +316,20 @@ the primary placement path.
 Single source of truth in the component:
 
 - `photos: LibraryPhoto[]` — every loaded row (the Library).
-- `wallIds: number[]` — ordered ids of the Wall shelf.
+- `wallIds: number[]` — ordered ids of the Wall shelf (the live order).
+- `savedWallIds: number[]` — the last order the server accepted; the revert
+  target for a failed auto-save (see Wall reordering). `orderChanged` diffs
+  `wallIds` against `savedWallIds`.
 - `filter`, `drag` (`{ id, from: 'lib' | 'wall' }`), `dropTarget`, `confirm`
   (`{ kind: 'wall' | 'shop' | 'del', id }`), `wallSaved`, per-shelf `min`,
   `inFlight`, transient errors.
+- **One serialization domain.** `inFlight` covers **every** mutation, the
+  auto-save reorder POST included, not just toggles and removes. At most one
+  place / remove / publish / retire / reorder is in flight at a time; the others
+  are disabled or wait until it resolves. This is what stops a Remove (which
+  resets `wall_order = 0`) from racing an in-flight reorder POST and persisting
+  `on_wall = false` with a nonzero `wall_order` (which would violate the reorder
+  route's own "only submitted rows have a nonzero `wall_order`" invariant).
 
 Derived each render: Wall = `wallIds.map(byId)`; Shop = `photos.filter(inShop)`
 in loader order (`updated_at DESC`; the Shop is not reorderable in v1); filter
@@ -331,9 +382,13 @@ old `WallTile`; `inShop` derived from `status === 'published'`).
 ## Testing & verification
 
 - **Unit (Vitest, `tests/lib/wall-arrange.test.ts`)** — rewrite for the new
-  helpers: `deriveWallIds` ordering matches the homepage sort; `reorder` splices
-  correctly; `place`/`remove` keep `wallIds` and `inShop` consistent;
-  `filterCounts` and `applyFilter`; `orderChanged` true only on a real move.
+  helpers: `deriveWallIds` ordering matches the homepage sort **byte-for-byte**
+  (sort `slug_hash` by code-unit comparison, not `localeCompare`, which can
+  diverge from Postgres text collation; assert against the ordering the homepage
+  query would produce for the same fixture); `reorder` splices correctly;
+  `place`/`remove` keep `wallIds` and `inShop` consistent; `filterCounts` and
+  `applyFilter`; `orderChanged` true only on a real move (`wallIds` vs
+  `savedWallIds`).
 - **Manual e2e** (DnD / publish / delete are not unit-tested, per repo
   convention):
   1. Drag a `web only` photo from the Library onto the Wall → appears on the
@@ -379,9 +434,10 @@ old `WallTile`; `inShop` derived from `status === 'published'`).
   helpers and types above (+ rewritten `tests/lib/wall-arrange.test.ts`).
 - `app/admin/admin.css` — only if a shelf/badge style can't be expressed with
   existing `--adm-*` tokens; expected to be minimal.
-- Admin sidebar (`app/admin/layout.tsx` or the sidebar component) — relabel the
-  nav item "Arrange wall" → "Wall & shop". Route stays `/admin/wall`. Update the
-  page `metadata.title` to "Wall & shop · Wildlight admin".
+- `components/admin/AdminSidebar.tsx` — relabel the nav item "Arrange wall" →
+  "Wall & shop" (the `CATALOG` array, ~line 41). Route stays `/admin/wall`.
+- `app/admin/wall/page.tsx` `metadata.title` (~line 7) → "Wall & shop ·
+  Wildlight admin" (this is the same file as the loader change above).
 
 ## Explicitly unchanged (do not touch)
 
@@ -390,3 +446,33 @@ old `WallTile`; `inShop` derived from `status === 'published'`).
   changes which of them the UI calls and when.
 - The `artworks` schema, `on_wall` / `wall_order` semantics, the publish gate,
   resolution gating, and the homepage / `/shop` queries.
+
+## Review pass (2026-07-19, spec fleet — grounding · gaps · risk)
+
+Three design-stage reviewers ran read-only against the codebase. No blocker to
+the model; the load-bearing findings are **folded in above**:
+
+- Re-placing an already-placed photo re-fired a PATCH that resets
+  `wall_order = 0`, scrambling the saved wall order → no-op re-placement guard
+  (Placing a photo).
+- The auto-save reorder had no revert target once Save/Reset was removed →
+  `savedWallIds` snapshot plus a defined failure / retry / timeout-reconcile
+  path (State model, Wall reordering).
+- `buyable` SQL is publish-independent → clarified it is authoritative only in
+  combination with `inShop` (Data & the loader query).
+- The auto-save reorder now runs under the single `inFlight` guard with the
+  payload rebuilt from `wallIds` (State model, Persistence).
+- A confirm on Shop-placement, symmetric with Remove/Delete (Placing a photo).
+- `LIMIT 1000` vs the reorder route's 600 id cap reconciled as a noted
+  follow-up (Persistence).
+- Client-side wall order uses code-unit comparison, asserted against the
+  homepage sort (Testing).
+- File touch list corrected to `components/admin/AdminSidebar.tsx:41`.
+
+**Deferred to the implementation plan** (flow/UX detail, not model changes):
+the default Library filter vs the retired-duplicate backlog; filtered-to-zero
+and slow-query loading states; the stale-row / 404 reconcile; the
+remove-from-shelf focus target; hint-banner hydration (post-mount read);
+`aria-live` for save / rejected-drop / error; drop-outside-zone drag-state
+reset; optimistic wall-order vs the homepage shuffle until reload; and R2 orphan
+reaping on delete (a pre-existing follow-up).
