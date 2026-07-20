@@ -95,8 +95,13 @@ export async function POST(req: Request) {
       [ids],
     );
   } else if (action === 'delete') {
-    // Same sold-count gate as the per-artwork DELETE — block the whole
-    // batch if any selected artwork has live order_items references.
+    // Same gate as the per-artwork DELETE: block the batch if ANY selected
+    // artwork has order history — including canceled and refunded orders.
+    // order_items.variant_id is ON DELETE SET NULL and artwork_variants
+    // cascades from artworks, so deleting silently severs the link to those
+    // orders and the isFkViolation catch below can never fire for them.
+    // Filtering on order status here is what let a refunded-order artwork be
+    // destroyed. Steer admins to Retire, which preserves the history.
     const blocked = await pool.query<{ id: number; title: string }>(
       `SELECT a.id, a.title
        FROM artworks a
@@ -104,9 +109,7 @@ export async function POST(req: Request) {
          AND EXISTS (
            SELECT 1 FROM order_items oi
            JOIN artwork_variants vv ON vv.id = oi.variant_id
-           JOIN orders o ON o.id = oi.order_id
            WHERE vv.artwork_id = a.id
-             AND o.status NOT IN ('canceled', 'refunded')
          )`,
       [ids],
     );
@@ -119,7 +122,7 @@ export async function POST(req: Request) {
         blocked.rowCount > 3 ? ` and ${blocked.rowCount - 3} more` : '';
       return NextResponse.json(
         {
-          error: `Cannot delete: ${titles}${more} ${blocked.rowCount === 1 ? 'has' : 'have'} sold orders. Retire instead.`,
+          error: `Cannot delete: ${titles}${more} ${blocked.rowCount === 1 ? 'has' : 'have'} order history. Retire instead.`,
         },
         { status: 409 },
       );

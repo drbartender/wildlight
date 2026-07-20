@@ -79,12 +79,15 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
   const wallIdsRef = useRef<number[]>(wallIds);
   const savedWallIds = useRef<number[]>(wallIds);
 
+  // Derive from the ref and assign it SYNCHRONOUSLY at the call site. Writing
+  // the ref inside the setState updater made it only as fresh as React's
+  // eager-state path: React can skip an updater whose lane isn't in the current
+  // render, so two dragEnter events in back-to-back tasks could leave the ref a
+  // move behind and commitOrder would POST a stale order.
   function setWall(next: number[] | ((cur: number[]) => number[])) {
-    setWallIds((cur) => {
-      const v = typeof next === 'function' ? next(cur) : next;
-      wallIdsRef.current = v;
-      return v;
-    });
+    const v = typeof next === 'function' ? next(wallIdsRef.current) : next;
+    wallIdsRef.current = v;
+    setWallIds(v);
   }
 
   const [filter, setFilter] = useState<FilterKey>('all');
@@ -97,6 +100,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
   const [savedFlash, setSavedFlash] = useState(false);
   const [wallMin, setWallMin] = useState(false);
   const [shopMin, setShopMin] = useState(false);
+  const [editPos, setEditPos] = useState<number | null>(null);
   const [actionErr, setActionErr] = useState<string | null>(null);
 
   const inFlight = busy || savingOrder;
@@ -105,26 +109,36 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
   const announce = (msg: string) => {
     if (liveRef.current) liveRef.current.textContent = msg;
   };
+  // The error <p> carries role="alert", which announces on its own — also
+  // pushing it through the polite live region announced every failure twice.
   function fail(msg: string) {
     setActionErr(msg);
-    announce(msg);
   }
 
   // Disabling the just-clicked control mid-flight blurs it, dumping focus to
   // <body>. Remember it and put focus back when the mutation settles.
   const refocus = useRef<HTMLElement | null>(null);
   const rememberFocus = () => {
-    refocus.current = (document.activeElement as HTMLElement) ?? null;
+    const el = document.activeElement as HTMLElement | null;
+    // On the drag-drop path activeElement is <body>; "restoring" that is a
+    // no-op that also suppressed the fallback. Treat it as "nothing focused".
+    refocus.current = el && el !== document.body ? el : null;
   };
   const restoreFocus = () => {
     const el = refocus.current;
     refocus.current = null;
-    if (el && el.isConnected) el.focus();
-    else document.getElementById('wl-library-heading')?.focus();
+    if (!el) return; // nothing was focused (drag) — don't move focus at all
+    if (el.isConnected && !(el as HTMLButtonElement).disabled) {
+      el.focus({ preventScroll: true });
+      if (document.activeElement === el) return;
+    }
+    document.getElementById('wl-library-heading')?.focus({ preventScroll: true });
   };
   function settle() {
     setBusy(false);
-    window.setTimeout(restoreFocus, 0);
+    // Two frames: setTimeout(0) could beat React's commit on a large grid, so
+    // the element was still disabled when focused and focus fell to <body>.
+    requestAnimationFrame(() => requestAnimationFrame(restoreFocus));
   }
 
   // Escape clears an armed confirm — otherwise an armed Remove/Delete stays
@@ -222,8 +236,18 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
     // Rewrite 1..N so the admin's order IS the public order.
     const ord = await persistOrder(next);
     if (ord.timedOut) return reconcileAfterTimeout();
-    if (!ord.ok) fail(`"${p.title}" is on the wall, but its position couldn't be saved.`);
-    else announce(`Put "${p.title}" on the wall`);
+    if (!ord.ok) {
+      // The photo IS on the wall (the PATCH succeeded), so the saved snapshot
+      // must include it even though its position didn't persist. Leaving it out
+      // poisons the snapshot: a later failed reorder rolls back to a baseline
+      // missing this id, silently dropping it from the shelf while it stays
+      // on_wall in the DB and live on the homepage — unrecoverable without a
+      // reload, because the Library pill then routes to "remove".
+      savedWallIds.current = next;
+      fail(`"${p.title}" is on the wall, but its position couldn't be saved.`);
+    } else {
+      announce(`Put "${p.title}" on the wall`);
+    }
     settle();
   }
 
@@ -394,6 +418,36 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
     setSavingOrder(false);
   }
 
+  // Reorder without dragging. Drag only reaches tiles rendered inside the
+  // capped shelf (dragEnter can't hit a clipped tile), so moving a photo more
+  // than ~a row was impossible — and there was no keyboard path at all. Typing
+  // a position is O(1) in wall length and keyboard-operable for free.
+  async function moveToPosition(id: number, pos1: number) {
+    if (inFlight) return;
+    const cur = wallIdsRef.current;
+    const from = cur.indexOf(id);
+    setEditPos(null);
+    if (from === -1 || !Number.isFinite(pos1)) return;
+    const to = Math.max(0, Math.min(cur.length - 1, Math.round(pos1) - 1));
+    if (to === from) return;
+    const next = cur.slice();
+    next.splice(from, 1);
+    next.splice(to, 0, id);
+    setWall(next);
+    setSavingOrder(true);
+    const res = await persistOrder(next);
+    if (res.timedOut) return reconcileAfterTimeout();
+    if (!res.ok) {
+      setWall(savedWallIds.current.slice());
+      fail("Couldn't save the new wall order. Please try again.");
+    } else {
+      setSavedFlash(true);
+      announce(`Moved to position ${to + 1} of ${next.length}`);
+      window.setTimeout(() => setSavedFlash(false), 2200);
+    }
+    setSavingOrder(false);
+  }
+
   // ── Drag wiring ──────────────────────────────────────────────────────
   const overShelf = (which: 'wall' | 'shop') => (e: React.DragEvent) => {
     e.preventDefault();
@@ -428,7 +482,11 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
           <h1>Wall &amp; shop</h1>
         </div>
         <div className="actions">
-          {inFlight && <span className="wl-adm-ws-meta">saving…</span>}
+          {/* Always rendered at a fixed width so "Add photos" doesn't slide
+              sideways on every mutation. */}
+          <span className="wl-adm-ws-saving" role="status">
+            {inFlight ? 'saving…' : ''}
+          </span>
           <a className="wl-adm-wall-add" href="/admin/artworks/bulk-upload">
             Add photos
           </a>
@@ -476,9 +534,9 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
                   <figure
                     key={p.id}
                     className={`wl-adm-ws-tile grab ${drag?.id === p.id && drag.from === 'wall' ? 'dragging' : ''}`}
-                    draggable={!inFlight}
+                    draggable={!inFlight && editPos !== p.id}
                     onDragStart={(e) => {
-                      if (inFlight) return;
+                      if (inFlight || editPos === p.id) return;
                       e.dataTransfer.setData('text/plain', String(p.id));
                       e.dataTransfer.effectAllowed = 'move';
                       setDrag({ id: p.id, from: 'wall' });
@@ -492,7 +550,43 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
                     }}
                     onDrop={(e) => e.preventDefault()}
                   >
-                    <span className="wl-adm-ws-pos">{i + 1}</span>
+                    {editPos === p.id ? (
+                      <input
+                        className="wl-adm-ws-posinput"
+                        type="number"
+                        min={1}
+                        max={wall.length}
+                        defaultValue={i + 1}
+                        autoFocus
+                        draggable={false}
+                        aria-label={`Move ${p.title} to position (1 to ${wall.length})`}
+                        onClick={(e) => e.stopPropagation()}
+                        onBlur={() => setEditPos(null)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            void moveToPosition(p.id, Number((e.target as HTMLInputElement).value));
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setEditPos(null);
+                          }
+                        }}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="wl-adm-ws-pos"
+                        aria-label={`${p.title} is at position ${i + 1} of ${wall.length}. Activate to move it.`}
+                        title="Click to move to a position"
+                        disabled={inFlight}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditPos(p.id);
+                        }}
+                      >
+                        {i + 1}
+                      </button>
+                    )}
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={p.image_web_url} alt={p.title} draggable={false} />
                     <figcaption className="wl-adm-ws-cap">
@@ -537,7 +631,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
             <span style={{ flex: 1 }} />
             {shopHot && <span className="wl-adm-ws-saved">drop to sell ↓</span>}
             {shopBad && <span className="wl-adm-ws-blocked-note">needs a print file ✕</span>}
-            {!shopMin && !drag && (
+            {!shopMin && dropTarget !== 'shop' && (
               <span className="wl-adm-ws-note">
                 {blockedCount > 0
                   ? `${shop.length - blockedCount} buyable, ${blockedCount} hidden`
@@ -586,7 +680,11 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
           <h2 id="wl-library-heading" tabIndex={-1}>
             Library
           </h2>
-          <span className="wl-adm-ws-meta">every photo · {counts.all}</span>
+          <span className="wl-adm-ws-meta">
+            {libList.length === counts.all
+              ? `every photo · ${counts.all}`
+              : `showing ${libList.length} of ${counts.all}`}
+          </span>
           <span className="wl-adm-ws-note">Removing from a shelf keeps the photo here. ✕ deletes it forever.</span>
           <span style={{ flex: 1 }} />
           <input

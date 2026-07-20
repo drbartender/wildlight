@@ -23,7 +23,7 @@
   --adm-amber-soft: #f1e3c0;
   /* Translucent chip backdrop laid over photo tiles. Must flip per theme —
      a hardcoded cream stayed cream in Darkroom and tanked badge contrast. */
-  --adm-scrim: rgba(252, 250, 244, 0.85);
+  --adm-scrim: rgba(252, 250, 244, 0.95);
   --adm-red: #9e3a2a;
   --adm-red-soft: #f1d9d0;
   --adm-blue: #3a5d7a;
@@ -57,7 +57,7 @@
   --adm-green-soft: #1d2920;
   --adm-amber: #d9a25b;
   --adm-amber-soft: #2b220f;
-  --adm-scrim: rgba(14, 16, 19, 0.85);
+  --adm-scrim: rgba(14, 16, 19, 0.95);
   --adm-red: #d86c5f;
   --adm-red-soft: #2d1914;
   --adm-blue: #7aa8cf;
@@ -3653,7 +3653,7 @@
 .wl-adm-ws-head { display: flex; align-items: center; gap: 10px; }
 .wl-adm-ws-head.open { margin-bottom: 12px; }
 .wl-adm-ws-head h2 { margin: 0; font-size: 1rem; }
-.wl-adm-ws-head h2:focus { outline: none; }
+.wl-adm-ws-head h2:focus-visible { outline: 2px solid var(--adm-blue); outline-offset: 2px; }
 .wl-adm-ws-search { font-size: 12px; padding: 4px 9px; border: 1px solid var(--adm-rule); border-radius: 999px; background: var(--adm-paper); color: var(--adm-ink); min-width: 160px; }
 .wl-adm-ws-search:focus-visible { outline: 2px solid var(--adm-blue); outline-offset: 1px; }
 .wl-adm-ws-blocked-note { font-family: var(--f-mono), monospace; font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--adm-red); }
@@ -3671,7 +3671,13 @@
 .wl-adm-ws-tile.grab { cursor: grab; }
 .wl-adm-ws-tile.dragging { opacity: 0.4; outline: 2px dashed var(--adm-ink); outline-offset: -2px; }
 .wl-adm-ws-tile img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
-.wl-adm-ws-pos { position: absolute; top: 5px; left: 5px; z-index: 2; font-family: var(--f-mono), monospace; font-size: 10px; font-weight: 600; padding: 2px 5px; border-radius: 3px; background: rgba(0,0,0,0.6); color: #fff; }
+/* The position badge is the primary reorder control (click, type, Enter) —
+   drag can only reach tiles rendered inside the capped shelf. */
+.wl-adm-ws-pos { position: absolute; top: 5px; left: 5px; z-index: 3; font-family: var(--f-mono), monospace; font-size: 10px; font-weight: 600; padding: 2px 5px; border-radius: 3px; background: rgba(0,0,0,0.6); color: #fff; border: 1px solid transparent; cursor: pointer; }
+.wl-adm-ws-pos:hover:not(:disabled) { background: rgba(0,0,0,0.85); border-color: rgba(255,255,255,0.6); }
+.wl-adm-ws-pos:disabled { cursor: default; opacity: 0.7; }
+.wl-adm-ws-posinput { position: absolute; top: 4px; left: 4px; z-index: 4; width: 52px; font-family: var(--f-mono), monospace; font-size: 11px; padding: 2px 4px; border-radius: 3px; border: 1px solid var(--adm-blue); background: var(--adm-paper); color: var(--adm-ink); }
+.wl-adm-ws-saving { font-family: var(--f-mono), monospace; font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--adm-ink-2); min-width: 5.5em; text-align: right; }
 .wl-adm-ws-cap { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 6px; padding: 12px 6px 5px 7px; background: linear-gradient(to top, rgba(0,0,0,0.72), rgba(0,0,0,0)); color: #fff; font-size: 10.5px; }
 .wl-adm-ws-cap .name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; flex: 1; }
 .wl-adm-ws-cap .price { font-family: var(--f-mono), monospace; font-size: 10px; }
@@ -3681,7 +3687,7 @@
 .wl-adm-ws-badges { position: absolute; top: 5px; left: 5px; z-index: 2; display: flex; gap: 4px; }
 .wl-adm-ws-badge { font-family: var(--f-mono), monospace; font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; padding: 2px 6px; border-radius: 3px; background: var(--adm-scrim); }
 .wl-adm-ws-badge.hd { color: var(--adm-blue); border: 1px solid var(--adm-blue); }
-.wl-adm-ws-badge.web { color: var(--adm-muted); border: 1px solid var(--adm-rule); }
+.wl-adm-ws-badge.web { color: var(--adm-ink-2); border: 1px solid var(--adm-rule); }
 /* ink-on-amber-soft reads in both themes; amber-on-amber-soft was 2.6:1 in light. */
 .wl-adm-ws-badge.blocked { background: var(--adm-amber-soft); color: var(--adm-ink); border: 1px solid var(--adm-amber); }
 
@@ -3694,7 +3700,7 @@
 .wl-adm-ws-libitem.dragging { opacity: 0.4; }
 .wl-adm-ws-libctl { display: flex; align-items: center; gap: 6px; padding: 6px 2px 0; }
 .wl-adm-ws-libctl .name { flex: 1; font-size: 11px; color: var(--adm-ink-2); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.wl-adm-ws-pill { font-family: var(--f-mono), monospace; font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; cursor: pointer; line-height: 1; background: transparent; color: var(--adm-muted); border: 1px solid var(--adm-rule); }
+.wl-adm-ws-pill { font-family: var(--f-mono), monospace; font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; cursor: pointer; line-height: 1; background: transparent; color: var(--adm-ink-2); border: 1px solid var(--adm-rule); }
 .wl-adm-ws-pill.on-wall { background: var(--adm-ink); color: var(--adm-paper); border-color: var(--adm-ink); }
 .wl-adm-ws-pill.on-shop { background: var(--adm-green); color: #fff; border-color: var(--adm-green); }
 /* Darkroom's --adm-green is a light sage, so white-on-green was 2.2:1. Use the
@@ -3703,7 +3709,7 @@
 .wl-adm-ws-pill:disabled { color: var(--adm-dim); border-style: dashed; cursor: not-allowed; }
 /* Shop pill on a photo with no print file: looks unavailable but stays
    focusable and clickable so it can explain itself (see aria-disabled note). */
-.wl-adm-ws-pill.nohd { color: var(--adm-dim); border-style: dashed; cursor: help; }
+.wl-adm-ws-pill.nohd { color: var(--adm-ink-2); border-style: dashed; cursor: help; }
 .wl-adm-ws-edit { font-size: 11px; color: var(--adm-muted); text-decoration: none; white-space: nowrap; }
 .wl-adm-ws-edit:hover { color: var(--adm-ink); }
 /* Fixed panes: Wall/Shop as a capped band on top, Library filling the rest.
