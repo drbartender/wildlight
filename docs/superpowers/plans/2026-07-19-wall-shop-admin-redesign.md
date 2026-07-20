@@ -16,7 +16,7 @@
 - **`_`-prefixed folders under `app/` are private (404).** Do not place any route file under one.
 - **Copy rule (house style): no em dashes in user-facing copy.** Use commas, periods, colons, parentheticals.
 - **Design source of truth:** `docs/superpowers/specs/2026-07-19-wall-shop-admin-redesign-design.md` and its "Review pass" section. The three confirm rules below and the load-bearing guards come from it.
-- **Confirm rules (from spec):** Shop-placement (publish, goes live in `/shop`) always confirms. Wall placement never confirms (reversible, not commerce). Shelf Remove (Wall or Shop) uses a light inline two-state confirm. Library delete (permanent) uses inline two-state + a final native `confirm()`.
+- **Confirm rules (from spec, modality reconciled 2026-07-20):** Shop-placement (publish, goes live in `/shop`) takes a single native `confirm()` on both the toggle and drag paths. Wall placement never confirms (reversible, not commerce). Shelf Remove (Wall or Shop) uses a light inline two-state confirm ("Sure — remove?"). Library delete (permanent) uses inline two-state ("Delete forever?") + a final native `confirm()`.
 - **No-op re-placement (load-bearing):** placing a photo already on the target shelf must skip the PATCH entirely — re-firing `{on_wall:true}` resets `wall_order=0` and would scramble the saved wall order.
 - **Single serialization domain:** at most one mutation (place / remove / publish / retire / delete / reorder) is in flight at a time (`inFlight`), and controls/dragging are disabled while it round-trips.
 
@@ -24,11 +24,11 @@
 
 ### Task 1: Pure ordering + filter helpers (`lib/wall-arrange.ts`)
 
-Rewrite the pure helpers for the Library model and unit-test them. This is the fully testable core: the `LibraryPhoto` type, the wall-order derivation, the reorder splice, the order-dirty diff, and the filter/counts logic. No React, no DB.
+Add the pure helpers for the Library model and unit-test them, **additively**: the new exports (`LibraryPhoto`, `deriveWallIds`, `reorder`, `orderChanged`, `filterCounts`, `applyFilter`, `isInShop`) go in alongside the existing grid/tray helpers, which the current consumers still import. This keeps `typecheck`/`build` green after this commit and lets it be reverted independently; Task 2 removes the now-dead old exports when it rewrites the consumers. No React, no DB.
 
 **Files:**
-- Modify (full rewrite): `lib/wall-arrange.ts`
-- Modify (full rewrite): `tests/lib/wall-arrange.test.ts`
+- Modify (append new exports; keep the existing ones): `lib/wall-arrange.ts`
+- Create: `tests/lib/wall-arrange-library.test.ts`
 
 **Interfaces:**
 - Consumes: nothing (leaf module).
@@ -44,7 +44,7 @@ Rewrite the pure helpers for the Library model and unit-test them. This is the f
 
 - [ ] **Step 1: Write the failing tests**
 
-Replace the entire contents of `tests/lib/wall-arrange.test.ts` with:
+Create `tests/lib/wall-arrange-library.test.ts` with (the existing `tests/lib/wall-arrange.test.ts` stays untouched — Task 2 deletes it):
 
 ```ts
 import { describe, it, expect } from 'vitest';
@@ -143,12 +143,12 @@ describe('filterCounts / applyFilter', () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd ~/projects/wildlight && npx vitest run tests/lib/wall-arrange.test.ts`
-Expected: FAIL — the new exports (`deriveWallIds`, `reorder`, `orderChanged`, `filterCounts`, `applyFilter`, `isInShop`, `LibraryPhoto`) don't exist yet (the file still exports the old `WallTile`/`partition`/`toTray`/etc).
+Run: `cd ~/projects/wildlight && npx vitest run tests/lib/wall-arrange-library.test.ts`
+Expected: FAIL — the new exports (`deriveWallIds`, `reorder`, `orderChanged`, `filterCounts`, `applyFilter`, `isInShop`, `LibraryPhoto`) don't exist yet.
 
 - [ ] **Step 3: Write the implementation**
 
-Replace the entire contents of `lib/wall-arrange.ts` with:
+**Append** the following to `lib/wall-arrange.ts`, below the existing exports (do NOT remove `WallTile`/`partition`/`toTray`/`toGrid`/`applyShop`/`orderKey`/`removeFromGrid` — the current `WallArranger.tsx`/`page.tsx` still import them until Task 2):
 
 ```ts
 // Pure helpers for the Wall & Shop admin tool — no React, no DB. The Library
@@ -241,23 +241,24 @@ export function applyFilter(photos: LibraryPhoto[], key: FilterKey): LibraryPhot
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd ~/projects/wildlight && npx vitest run tests/lib/wall-arrange.test.ts`
+Run: `cd ~/projects/wildlight && npx vitest run tests/lib/wall-arrange-library.test.ts`
 Expected: PASS (all cases green).
 
-- [ ] **Step 5: Typecheck (the old component still imports removed symbols — expect errors here, fixed in Task 2)**
+- [ ] **Step 5: Full typecheck + test suite (must be GREEN — the change is additive)**
 
-Run: `cd ~/projects/wildlight && npm run typecheck`
-Expected: FAIL, but ONLY in `components/admin/WallArranger.tsx` and `app/admin/wall/page.tsx` (they still import `WallTile`/`partition`/`toTray`/`toGrid`/`applyShop`). No errors inside `lib/wall-arrange.ts` or the test. This confirms the leaf module is self-consistent; the consumers are rewritten in Task 2.
+Run: `cd ~/projects/wildlight && npm run typecheck && npm test`
+Expected: PASS. The new exports are additive, so the existing consumers still compile against the old exports, and both the old `tests/lib/wall-arrange.test.ts` and the new `wall-arrange-library.test.ts` pass. This commit leaves the tree green and independently revertable.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 cd ~/projects/wildlight
-git add lib/wall-arrange.ts tests/lib/wall-arrange.test.ts
-git commit -m "feat(wall): Library-model pure helpers + unit tests
+git add lib/wall-arrange.ts tests/lib/wall-arrange-library.test.ts
+git commit -m "feat(wall): add Library-model pure helpers + unit tests
 
 deriveWallIds/reorder/orderChanged/filterCounts/applyFilter + LibraryPhoto,
-replacing the grid/tray helpers. Consumers rewritten next."
+added alongside the existing grid/tray helpers (additive; consumers rewritten
+and old helpers removed in Task 2)."
 ```
 
 ---
@@ -271,6 +272,8 @@ Broaden the loader to every photo, add the `wall_rank` and shop-price columns, a
 - Modify: `app/admin/wall/page.tsx` (loader query + metadata + render)
 - Modify (full rewrite): `components/admin/WallArranger.tsx`
 - Modify: `app/admin/admin.css` (append a `.wl-adm-ws-*` block)
+- Modify: `lib/wall-arrange.ts` (remove the now-dead old grid/tray exports)
+- Delete: `tests/lib/wall-arrange.test.ts` (tested the removed old helpers)
 
 **Interfaces:**
 - Consumes: `LibraryPhoto`, `deriveWallIds`, `reorder`, `orderChanged`, `filterCounts`, `applyFilter`, `isInShop` from Task 1; `formatUSD` from `lib/money.ts`; the routes `PATCH`/`DELETE /api/admin/artworks/[id]` and `POST /api/admin/wall`.
@@ -293,18 +296,18 @@ Append this block to the end of `app/admin/admin.css` (uses existing `--adm-*` t
 
 .wl-adm-ws-head { display: flex; align-items: center; gap: 10px; }
 .wl-adm-ws-head.open { margin-bottom: 12px; }
-.wl-adm-ws-head h3 { margin: 0; font-size: var(--adm-fs-h3); }
+.wl-adm-ws-head h3 { margin: 0; font-size: 1rem; }
 .wl-adm-ws-meta { font-family: var(--f-mono), monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--adm-muted); }
 .wl-adm-ws-note { font-size: 12px; color: var(--adm-muted); }
 .wl-adm-ws-saved { font-family: var(--f-mono), monospace; font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--adm-green); background: var(--adm-green-soft); padding: 2px 8px; border-radius: 999px; }
-.wl-adm-ws-min { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; flex-shrink: 0; border: 1px solid var(--adm-rule); border-radius: var(--adm-radius-sm); background: transparent; color: var(--adm-muted); cursor: pointer; }
+.wl-adm-ws-min { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; flex-shrink: 0; border: 1px solid var(--adm-rule); border-radius: var(--adm-radius-sm, 4px); background: transparent; color: var(--adm-muted); cursor: pointer; }
 .wl-adm-ws-min svg { transition: transform 160ms; }
 .wl-adm-ws-min.collapsed svg { transform: rotate(-90deg); }
 
 .wl-adm-ws-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .wl-adm-ws-empty { border: 1.5px dashed var(--adm-rule); border-radius: var(--adm-radius-md); padding: 34px; text-align: center; color: var(--adm-muted); font-size: 13px; }
 
-.wl-adm-ws-tile { position: relative; aspect-ratio: 3 / 2; border-radius: var(--adm-radius-sm); overflow: hidden; background: var(--adm-paper-alt); border: 1px solid var(--adm-rule); user-select: none; }
+.wl-adm-ws-tile { position: relative; aspect-ratio: 3 / 2; border-radius: var(--adm-radius-sm, 4px); overflow: hidden; background: var(--adm-paper-alt); border: 1px solid var(--adm-rule); user-select: none; }
 .wl-adm-ws-tile.grab { cursor: grab; }
 .wl-adm-ws-tile.dragging { opacity: 0.4; outline: 2px dashed var(--adm-ink); outline-offset: -2px; }
 .wl-adm-ws-tile img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
@@ -1046,15 +1049,25 @@ function RemoveButton({
 }
 ```
 
+- [ ] **Step 4b: Remove the now-dead old helpers**
+
+The rewritten consumers no longer import the grid/tray helpers. In `lib/wall-arrange.ts`, delete the old code: the `WallTile` / `WallSections` / `Snapshotted` types and the `partition` / `orderKey` / `removeFromGrid` / `toTray` / `toGrid` / `applyShop` functions — keep only the Library-model exports added in Task 1. Then remove the old test file:
+
+Run: `cd ~/projects/wildlight && git rm tests/lib/wall-arrange.test.ts`
+Expected: staged for deletion; only `tests/lib/wall-arrange-library.test.ts` remains under `tests/lib/`.
+
 - [ ] **Step 5: Typecheck**
 
 Run: `cd ~/projects/wildlight && npm run typecheck`
-Expected: PASS with no errors (the loader and component now agree on the `photos: LibraryPhoto[]` contract, and all `lib/wall-arrange` imports resolve).
+Expected: PASS with no errors (the loader and component now agree on the `photos: LibraryPhoto[]` contract; all `lib/wall-arrange` imports resolve; nothing imports the removed old exports).
 
-- [ ] **Step 6: Lint the client build gate (catches CI-fatal warnings early)**
+- [ ] **Step 6: (ESLint runs inside the build — no standalone lint)**
 
-Run: `cd ~/projects/wildlight && npm run lint`
-Expected: PASS (no `react/no-unstable-nested-components`, `no-alert` is inline-disabled where used, `@next/next/no-img-element` is inline-disabled on each `<img>`).
+`next lint` was removed in Next 16, so there is no `npm run lint`. ESLint runs as
+part of `next build` (Step 7), which is the real gate for
+`react/no-unstable-nested-components`, `no-alert` (inline-disabled where used),
+and `@next/next/no-img-element` (inline-disabled on each `<img>`). Nothing to run
+here; proceed to the build.
 
 - [ ] **Step 7: Production build**
 
@@ -1067,19 +1080,24 @@ Start the dev server (`npm run dev`), log into `/admin`, open `/admin/wall`, and
 
   - [ ] 8.1 The screen shows Library (every photo, newest first), a Wall shelf, and a Shop shelf. The hint banner shows on first load; Dismiss hides it and it stays hidden after reload.
   - [ ] 8.2 Drag a `web only` photo from the Library onto the Wall → it appears on the Wall; its Library Wall pill goes on; the public homepage `/` shows it after refresh. Its Library Shop pill is disabled.
-  - [ ] 8.3 Drag an `hd` photo onto the Shop → confirm prompt → accept → it appears in the Shop shelf and on `/shop`. An `hd`, published piece with no buyable variant shows the amber "hidden — sizes blocked" badge and price "—".
+  - [ ] 8.3 Drag an `hd` photo onto the Shop → native confirm prompt → accept → it appears in the Shop shelf and on `/shop`. A piece with a KNOWN priced buyable variant shows that exact price (e.g. a $420 variant renders "$420.00", confirming cents→dollars via `formatUSD`). An `hd`, published piece with NO buyable variant shows the amber "hidden — sizes blocked" badge and price "—".
   - [ ] 8.4 **Reorder the Wall**: drag a tile to a new slot, release → "order saved ✓" flashes. Refresh `/admin/wall` AND the public `/` homepage → both show the new order and they match.
   - [ ] 8.5 Re-drag a photo that is ALREADY on the Wall back onto the Wall → nothing changes and the saved order is NOT scrambled (verify the homepage order is unchanged). Same for an already-published photo dropped on the Shop.
   - [ ] 8.6 Drag a `web only` (non-hd) photo onto the Shop → the shelf border turns red and no placement happens (inline "needs a print file" error).
   - [ ] 8.7 On a Wall tile and a Shop tile, click Remove → "Sure — remove?" → click again → the photo leaves the shelf but remains in the Library with its pill off; homepage/shop update.
   - [ ] 8.8 In the Library, click ✕ on a never-sold photo → "Delete forever?" → click again → native confirm → accept → the photo is gone from Library, Wall, Shop. Try ✕ on a sold photo → inline 409 message, the photo stays.
   - [ ] 8.9 Filters (All / On wall / In shop / Unplaced / No print file) show correct counts and subsets; a filter matching zero shows "No photos match this filter." Minimize each shelf (the layout stacks). "Edit ↗" opens `/admin/artworks/[id]`.
+  - [ ] 8.10 While a mutation round-trips (place / remove / publish / delete / reorder-save), controls and tile dragging are disabled (the single `inFlight` guard): rapidly clicking two pills does not double-fire; a second action waits until the first resolves.
+
+- [ ] **Step 8b: Focused review checkpoint (publish + delete are commerce paths)**
+
+This change drives publish (goes live in `/shop`), retire, and permanent delete, so run a proportional **code + consistency** review over the diff before committing (not a full security review — no new endpoint, no weakened guard). Verify specifically: the no-op re-placement guard truly prevents the `wall_order=0` reset on a re-drag/re-toggle; the single `inFlight` guard disables controls/dragging during EVERY mutation incl. the reorder POST; the `{on_wall}` / `{status}` / `{ids}` payloads match the existing route contracts; and price renders via `formatUSD` (cents in, no float/inline math). Fix anything it surfaces before Step 9.
 
 - [ ] **Step 9: Commit**
 
 ```bash
 cd ~/projects/wildlight
-git add app/admin/wall/page.tsx app/admin/wall/loading.tsx components/admin/WallArranger.tsx app/admin/admin.css
+git add app/admin/wall/page.tsx app/admin/wall/loading.tsx components/admin/WallArranger.tsx app/admin/admin.css lib/wall-arrange.ts
 git commit -m "feat(wall): Library + two-shelves Wall & Shop admin screen
 
 Rebuild /admin/wall around a Library base with Wall/Shop shelves: drag or
@@ -1139,7 +1157,7 @@ git commit -m "feat(wall): relabel sidebar nav 'Arrange wall' → 'Wall & shop'"
 
 ## Deferred (recorded in the spec's Review pass; out of scope for this plan)
 
-These flow/UX items are intentionally not built here. Revisit if they bite in use: default Library filter tuning vs a large retired-duplicate backlog (currently defaults to "All"); optimistic wall-append vs the homepage md5-shuffle before a reload; touch-drag reordering and DnD keyboard a11y (pre-existing follow-up — placement via toggles already works on touch); Library pagination if the catalog approaches the 1000-row cap; Shop-shelf reordering; R2 orphan reaping after a hard delete (pre-existing follow-up); reconciling the `POST /api/admin/wall` 600-id cap if the wall ever exceeds 600.
+These flow/UX items are intentionally not built here. Revisit if they bite in use: default Library filter tuning vs a large retired-duplicate backlog (currently defaults to "All"); optimistic wall-append vs the homepage md5-shuffle before a reload; touch-drag reordering and DnD keyboard a11y (pre-existing follow-up — placement via toggles already works on touch); Library pagination if the catalog approaches the 1000-row cap; Shop-shelf reordering; R2 orphan reaping after a hard delete (pre-existing follow-up); reconciling the `POST /api/admin/wall` 600-id cap if the wall ever exceeds 600; remove-from-shelf focus management (the removed shelf tile unmounts, dropping focus to `<body>` — the action is announced via `aria-live`, but no destination focus target is set); and an explicit reorder-save Retry control (today the failure path reverts to the saved order, and re-dragging is the retry).
 
 ## Self-Review
 

@@ -76,7 +76,7 @@ need: `hd` and a shop price.
 
 ```sql
 SELECT a.id, a.slug, a.title, a.image_web_url, a.status, a.on_wall,
-       a.wall_order, a.updated_at::text AS updated_at, md5(a.slug) AS slug_hash,
+       a.wall_order, a.updated_at::text AS updated_at,
        (a.image_print_url IS NOT NULL AND a.image_print_url <> '') AS hd,
        EXISTS (SELECT 1 FROM artwork_variants v
                  WHERE v.artwork_id = a.id AND v.buyable) AS buyable,
@@ -110,10 +110,12 @@ SELECT a.id, a.slug, a.title, a.image_web_url, a.status, a.on_wall,
 - `updated_at DESC` puts freshly uploaded photos at the top of the Library,
   where placement usually happens. The Wall shelf re-sorts its own subset
   client-side (see state model), so the Library sort does not affect it.
-- `slug_hash` (= `md5(slug)`) is returned so the client can reproduce the
-  homepage's stable shuffle for never-arranged (`wall_order = 0`) Wall pieces
-  without hashing in JS. This keeps the admin Wall order identical to the public
-  homepage order.
+- The Wall shelf order is reproduced with a SQL `wall_rank` column:
+  `row_number()` over the on_wall rows using the SAME expression the homepage
+  orders by (`(wall_order = 0)`, `wall_order`, `md5(slug)`). The client sorts the
+  Wall by `wall_rank`, so the admin Wall order is byte-identical to the public
+  homepage order with zero client-side hashing. (This supersedes an earlier
+  `slug_hash` + client-side sort; see Review pass — resolves W6.)
 - `LIMIT 1000` is far above today's ~100 rows. Pagination / lazy-loading the
   Library is a follow-up if the catalog ever approaches that cap; called out in
   Out of scope. The `try/catch` fail-soft (render an empty screen on a Neon
@@ -190,10 +192,11 @@ the public wall, not mid-wall on a stale order). Placing in the Shop →
   path, for both shelves.
 - **Confirm on Shop-placement.** Publishing puts a piece live for sale in
   `/shop`, the one money-facing, customer-visible action on this screen, so it
-  takes one inline confirm ("Put {title} up for sale?") symmetric with Remove,
-  before the publish PATCH. Wall placement stays confirm-free (not commerce,
-  instantly reversible). A single inline confirm, not the two-step + native
-  `confirm()` that Delete uses.
+  takes a single native `confirm()` ("Put {title} up for sale in the shop?"), on
+  both the toggle and the drag-drop path. Wall placement stays confirm-free (not
+  commerce, instantly reversible). The escalation ladder: Wall place = no
+  confirm; shelf Remove = light inline two-state ("Sure — remove?"); Shop place =
+  single native confirm; Delete = two-step inline + native confirm (heaviest).
 
 ### Wall reordering (auto-save)
 
@@ -339,9 +342,9 @@ Factor the pure, testable operations into `lib/wall-arrange.ts` (rewriting its
 current grid/tray helpers for the Library model), so the component only wires
 them to state + fetch:
 
-- `deriveWallIds(photos)` — initial `wallIds` from `on_wall` rows sorted by
-  `(wall_order = 0)`, `wall_order`, then `slug_hash` (the loader's `md5(slug)`),
-  matching the homepage sort so the admin order equals the public order.
+- `deriveWallIds(photos)` — initial `wallIds` from `on_wall` rows sorted by the
+  loader's `wall_rank` (which encodes the homepage order in SQL), so the admin
+  order equals the public order with no client-side hashing.
 - `reorder(wallIds, dragId, overId)` — pure splice used by the live `dragEnter`.
 - `place(photos, id, shelf, on)` / `remove` — flip `on_wall` / `inShop` on the
   photo and maintain `wallIds`.
@@ -381,14 +384,12 @@ old `WallTile`; `inShop` derived from `status === 'published'`).
 
 ## Testing & verification
 
-- **Unit (Vitest, `tests/lib/wall-arrange.test.ts`)** — rewrite for the new
-  helpers: `deriveWallIds` ordering matches the homepage sort **byte-for-byte**
-  (sort `slug_hash` by code-unit comparison, not `localeCompare`, which can
-  diverge from Postgres text collation; assert against the ordering the homepage
-  query would produce for the same fixture); `reorder` splices correctly;
-  `place`/`remove` keep `wallIds` and `inShop` consistent; `filterCounts` and
-  `applyFilter`; `orderChanged` true only on a real move (`wallIds` vs
-  `savedWallIds`).
+- **Unit (Vitest)** — cover the new helpers: `deriveWallIds` sorts by `wall_rank`
+  (nulls last); `reorder` splices correctly; `filterCounts` and `applyFilter`
+  bucket correctly; `orderChanged` true only on a real move (`wallIds` vs
+  `savedWallIds`). Homepage-order equivalence is guaranteed by the loader
+  computing `wall_rank` from the identical SQL expression the homepage uses (no
+  JS byte-comparison needed) and is checked in manual e2e.
 - **Manual e2e** (DnD / publish / delete are not unit-tested, per repo
   convention):
   1. Drag a `web only` photo from the Library onto the Wall → appears on the
@@ -462,11 +463,14 @@ the model; the load-bearing findings are **folded in above**:
   combination with `inShop` (Data & the loader query).
 - The auto-save reorder now runs under the single `inFlight` guard with the
   payload rebuilt from `wallIds` (State model, Persistence).
-- A confirm on Shop-placement, symmetric with Remove/Delete (Placing a photo).
+- A confirm on Shop-placement: a single native `confirm()` on both the toggle
+  and drag paths (Placing a photo). [Confirm modality reconciled during plan
+  review 2026-07-20.]
 - `LIMIT 1000` vs the reorder route's 600 id cap reconciled as a noted
   follow-up (Persistence).
-- Client-side wall order uses code-unit comparison, asserted against the
-  homepage sort (Testing).
+- Wall order is reproduced by a SQL `wall_rank` (identical expression to the
+  homepage), superseding the earlier client-side `slug_hash` sort and resolving
+  W6 (Data & the loader query, Testing). [Plan-review refinement 2026-07-20.]
 - File touch list corrected to `components/admin/AdminSidebar.tsx:41`.
 
 **Deferred to the implementation plan** (flow/UX detail, not model changes):
