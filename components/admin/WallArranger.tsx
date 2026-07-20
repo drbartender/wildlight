@@ -1,38 +1,35 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import Link from 'next/link';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { formatUSD } from '@/lib/money';
 import {
-  orderKey,
-  toTray,
-  toGrid,
-  applyShop,
-  type WallTile,
+  applyFilter,
+  deriveWallIds,
+  filterCounts,
+  isInShop,
+  orderChanged,
+  reorder,
+  type FilterKey,
+  type LibraryPhoto,
 } from '@/lib/wall-arrange';
 
-type SaveState = 'idle' | 'saving' | 'saved' | 'error';
+const HINT_KEY = 'wl-wall-hints-dismissed';
 
-// Every mutation runs behind `inFlight`, which disables ALL controls AND
-// tile dragging until it settles. A fetch that never settles (hung TCP,
-// stalled Neon connect) would therefore wedge the whole page — no drags, no
-// toggles — until a reload. 30s clears the server's legitimate worst case
-// (15s connect cap + 15s statement_timeout), so only truly-hung requests get
-// aborted. Optional-chained: very old engines lack AbortSignal.timeout.
+// Every mutation runs behind `inFlight` (disables controls + dragging) so the
+// interaction models can't interleave. A hung request would wedge the page, so
+// abort at 30s (server worst case = 15s connect + 15s statement_timeout). A
+// timed-out request MAY have committed, so callers reconcile by reload rather
+// than rolling back (see reconcileAfterTimeout).
 const mutationTimeout = () => AbortSignal.timeout?.(30_000);
-
-// AbortSignal.timeout rejects with a TimeoutError DOMException (some engines
-// report AbortError). A timed-out request may have committed server-side, so
-// callers must NOT roll back on it — see reconcileAfterTimeout.
 function isTimeout(err: unknown): boolean {
   return (
     err instanceof DOMException &&
     (err.name === 'TimeoutError' || err.name === 'AbortError')
   );
 }
-
-async function patchArtwork(
-  id: number,
-  body: Record<string, unknown>,
-): Promise<{ ok: boolean; status: number; error?: string }> {
+type MutResult = { ok: boolean; status: number; error?: string };
+async function patchArtwork(id: number, body: Record<string, unknown>): Promise<MutResult> {
   try {
     const r = await fetch(`/api/admin/artworks/${id}`, {
       method: 'PATCH',
@@ -44,213 +41,220 @@ async function patchArtwork(
     const data = (await r.json().catch(() => ({}))) as { error?: string };
     return { ok: false, status: r.status, error: data.error };
   } catch (err) {
-    return {
-      ok: false,
-      status: 0,
-      error: isTimeout(err) ? 'timeout' : 'network error',
-    };
+    return { ok: false, status: 0, error: isTimeout(err) ? 'timeout' : 'network error' };
   }
 }
 
-// Module scope so it isn't re-created every render (avoids
-// react/no-unstable-nested-components). Uses only its props — no closure over
-// component state.
-function Switch({
-  on,
-  label,
-  onClick,
-  kind,
-  disabled,
-}: {
-  on: boolean;
-  label: string;
-  onClick: () => void;
-  kind: 'wall' | 'shop';
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      aria-label={label}
-      disabled={disabled}
-      className={`wl-adm-wall-switch ${kind} ${on ? 'on' : ''}`}
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-    >
-      {kind === 'wall' ? 'Wall' : 'Shop'}
-    </button>
-  );
-}
+const FILTERS: { key: FilterKey; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'wall', label: 'On wall' },
+  { key: 'shop', label: 'In shop' },
+  { key: 'unplaced', label: 'Unplaced' },
+  { key: 'nohd', label: 'No print file' },
+];
 
-/**
- * Wall & shop curation. Three independent interaction models on one screen:
- *   1. Reorder  — drag, then explicit Save order (writes wall_order).
- *   2. Toggles  — Wall / Shop switches, optimistic + reversible (one PATCH each).
- *   3. Delete   — per-tile ✕, behind a confirm. Permanent; grid-only; not
- *                 offered on for-sale pieces (manage those in the catalog).
- *
- * The three are SERIALIZED via `inFlight`: while any single mutation is round-
- * tripping, every interactive control is disabled, so an optimistic rollback
- * can't be stomped by a concurrent edit. Order-dirtiness is tracked against
- * savedGrid; tiles leaving/entering the grid update savedGrid too so a toggle
- * or delete never looks like a reorder.
- */
-export function WallArranger({
-  initialGrid,
-  initialTray,
-}: {
-  initialGrid: WallTile[];
-  initialTray: WallTile[];
-}) {
-  const [grid, setGrid] = useState<WallTile[]>(initialGrid);
-  const [tray, setTray] = useState<WallTile[]>(initialTray);
-  const savedGrid = useRef<WallTile[]>(initialGrid);
+type ConfirmKind = 'wallRemove' | 'shopRemove' | 'del';
+type Confirm = { kind: ConfirmKind; id: number } | null;
+type Drag = { id: number; from: 'lib' | 'wall' } | null;
 
-  const [dragId, setDragId] = useState<number | null>(null);
-  const [orderState, setOrderState] = useState<SaveState>('idle');
-  const [actionErr, setActionErr] = useState<string | null>(null);
-  // True while one optimistic mutation (toggle or delete) is round-tripping.
-  // Disables every control so the interaction models can't interleave.
+export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
+  const [photos, setPhotos] = useState<LibraryPhoto[]>(initial);
+  const [wallIds, setWallIds] = useState<number[]>(() => deriveWallIds(initial));
+  const savedWallIds = useRef<number[]>(deriveWallIds(initial));
+
+  const [filter, setFilter] = useState<FilterKey>('all');
+  const [drag, setDrag] = useState<Drag>(null);
+  const [dropTarget, setDropTarget] = useState<'wall' | 'shop' | null>(null);
+  const [confirm, setConfirm] = useState<Confirm>(null);
   const [busy, setBusy] = useState(false);
+  const [savingOrder, setSavingOrder] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
+  const [wallMin, setWallMin] = useState(false);
+  const [shopMin, setShopMin] = useState(false);
+  const [hintsDismissed, setHintsDismissed] = useState(true); // hidden until localStorage read (avoids hydration flash)
+  const [actionErr, setActionErr] = useState<string | null>(null);
 
-  const dirty = orderKey(grid) !== orderKey(savedGrid.current);
-  const inFlight = busy || orderState === 'saving';
+  const inFlight = busy || savingOrder;
 
   const liveRef = useRef<HTMLDivElement>(null);
   const announce = (msg: string) => {
     if (liveRef.current) liveRef.current.textContent = msg;
   };
 
-  // A timed-out mutation may or may not have committed server-side, so
-  // neither the optimistic state nor a rollback can be trusted. Say so and
-  // reload to the persisted truth; controls stay disabled (busy/orderState
-  // are deliberately NOT reset) until the reload lands.
+  // Post-mount: read the dismissal from localStorage (never during render).
+  useEffect(() => {
+    try {
+      setHintsDismissed(window.localStorage.getItem(HINT_KEY) === '1');
+    } catch {
+      setHintsDismissed(false);
+    }
+  }, []);
+  function dismissHints() {
+    setHintsDismissed(true);
+    try {
+      window.localStorage.setItem(HINT_KEY, '1');
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const byId = useMemo(() => {
+    const m = new Map<number, LibraryPhoto>();
+    for (const p of photos) m.set(p.id, p);
+    return m;
+  }, [photos]);
+  const counts = filterCounts(photos);
+  const wall = wallIds.map((id) => byId.get(id)).filter((p): p is LibraryPhoto => !!p);
+  const shop = photos.filter(isInShop); // loader order (updated_at DESC)
+  const libList = applyFilter(photos, filter);
+
+  function setPhoto(id: number, patch: Partial<LibraryPhoto>) {
+    setPhotos((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  }
+  // A stale row (deleted/retired elsewhere) returns 404: drop it everywhere and
+  // announce, rather than showing a retry that would 404 again.
+  function dropStale(id: number, title: string) {
+    setPhotos((ps) => ps.filter((p) => p.id !== id));
+    setWallIds((ids) => ids.filter((x) => x !== id));
+    savedWallIds.current = savedWallIds.current.filter((x) => x !== id);
+    setActionErr(`"${title}" was changed elsewhere and has been removed from this view.`);
+  }
   function reconcileAfterTimeout() {
     setActionErr('That took too long to confirm — reloading to show the saved state…');
     announce('Request timed out; reloading');
     window.setTimeout(() => window.location.reload(), 1200);
   }
 
-  // ── Reorder ──────────────────────────────────────────────────────────
-  function moveOver(overId: number) {
-    if (dragId === null || dragId === overId) return;
-    setGrid((prev) => {
-      const from = prev.findIndex((t) => t.id === dragId);
-      const to = prev.findIndex((t) => t.id === overId);
-      if (from === -1 || to === -1 || from === to) return prev;
-      const next = prev.slice();
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      return next;
-    });
-  }
-
-  async function saveOrder() {
+  // ── Wall placement (no confirm; reversible) ──────────────────────────
+  async function placeOnWall(id: number) {
     if (inFlight) return;
-    setOrderState('saving');
-    try {
-      const r = await fetch('/api/admin/wall', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: grid.map((t) => t.id) }),
-        signal: mutationTimeout(),
-      });
-      if (!r.ok) throw new Error(String(r.status));
-      savedGrid.current = grid;
-      setOrderState('saved');
-    } catch (err) {
-      if (isTimeout(err)) return reconcileAfterTimeout();
-      setOrderState('error');
-    }
-  }
-
-  function resetOrder() {
-    setGrid(savedGrid.current);
-    setOrderState('idle');
-  }
-
-  // ── Wall toggle (optimistic, serialized via inFlight) ────────────────
-  async function wallOff(id: number) {
-    if (inFlight) return;
+    const p = byId.get(id);
+    if (!p || p.on_wall) return; // no-op re-placement (never re-fires wall_order reset)
     setBusy(true);
-    const prev = { grid, tray, saved: savedGrid.current };
-    const next = toTray({ grid, tray, savedGrid: savedGrid.current }, id);
-    setGrid(next.grid);
-    setTray(next.tray);
-    savedGrid.current = next.savedGrid;
     setActionErr(null);
-    announce('Moved to the off-the-wall tray');
-    const res = await patchArtwork(id, { on_wall: false });
-    if (res.error === 'timeout') return reconcileAfterTimeout();
-    if (!res.ok) {
-      setGrid(prev.grid);
-      setTray(prev.tray);
-      savedGrid.current = prev.saved;
-      setActionErr("Couldn't take that off the wall — please try again.");
-    }
-    setBusy(false);
-  }
-
-  async function wallOn(id: number) {
-    if (inFlight) return;
-    setBusy(true);
-    const prev = { grid, tray, saved: savedGrid.current };
-    const next = toGrid({ grid, tray, savedGrid: savedGrid.current }, id);
-    setGrid(next.grid);
-    setTray(next.tray);
-    savedGrid.current = next.savedGrid;
-    setActionErr(null);
-    announce('Put on the wall');
+    setPhoto(id, { on_wall: true });
+    setWallIds((ids) => [...ids, id]);
+    savedWallIds.current = [...savedWallIds.current, id];
+    announce(`Put "${p.title}" on the wall`);
     const res = await patchArtwork(id, { on_wall: true });
     if (res.error === 'timeout') return reconcileAfterTimeout();
     if (!res.ok) {
-      setGrid(prev.grid);
-      setTray(prev.tray);
-      savedGrid.current = prev.saved;
-      setActionErr("Couldn't put that on the wall — please try again.");
+      if (res.status === 404) dropStale(id, p.title);
+      else {
+        setPhoto(id, { on_wall: false });
+        setWallIds((ids) => ids.filter((x) => x !== id));
+        savedWallIds.current = savedWallIds.current.filter((x) => x !== id);
+        setActionErr(`Couldn't put "${p.title}" on the wall — please try again.`);
+      }
     }
     setBusy(false);
   }
-
-  // ── Shop toggle (optimistic, serialized via inFlight) ────────────────
-  async function toggleShop(id: number, on: boolean) {
+  async function removeFromWall(id: number) {
     if (inFlight) return;
+    const p = byId.get(id);
+    if (!p || !p.on_wall) return;
+    // Capture the original positions so a failed remove restores exactly, not
+    // to the end (a post-failure reorder must diff against the true baseline).
+    const idx = wallIds.indexOf(id);
+    const savedIdx = savedWallIds.current.indexOf(id);
     setBusy(true);
-    const prevGrid = grid;
-    const prevTray = tray;
-    setGrid((g) => applyShop(g, id, on));
-    setTray((t) => applyShop(t, id, on));
     setActionErr(null);
-    const res = await patchArtwork(id, { status: on ? 'published' : 'retired' });
+    setConfirm(null);
+    setPhoto(id, { on_wall: false });
+    setWallIds((ids) => ids.filter((x) => x !== id));
+    savedWallIds.current = savedWallIds.current.filter((x) => x !== id);
+    announce(`Removed "${p.title}" from the wall`);
+    const res = await patchArtwork(id, { on_wall: false });
     if (res.error === 'timeout') return reconcileAfterTimeout();
     if (!res.ok) {
-      setGrid(prevGrid);
-      setTray(prevTray);
-      setActionErr(
-        res.status === 409
-          ? res.error ?? 'Needs a print master before it can be sold.'
-          : "Couldn't change the shop status — please try again.",
-      );
+      if (res.status === 404) dropStale(id, p.title);
+      else {
+        setPhoto(id, { on_wall: true });
+        setWallIds((ids) => {
+          if (ids.includes(id)) return ids;
+          const next = ids.slice();
+          next.splice(idx < 0 ? next.length : idx, 0, id);
+          return next;
+        });
+        if (!savedWallIds.current.includes(id)) {
+          const next = savedWallIds.current.slice();
+          next.splice(savedIdx < 0 ? next.length : savedIdx, 0, id);
+          savedWallIds.current = next;
+        }
+        setActionErr(`Couldn't take "${p.title}" off the wall — please try again.`);
+      }
     }
     setBusy(false);
   }
 
-  // ── Delete (per-tile, confirmed, permanent) ──────────────────────────
-  async function deleteOne(id: number, title: string) {
+  // ── Shop placement (always confirmed; hd-gated) ──────────────────────
+  async function placeInShop(id: number) {
     if (inFlight) return;
+    const p = byId.get(id);
+    if (!p || isInShop(p)) return; // no-op re-placement
+    if (!p.hd) {
+      setActionErr(`"${p.title}" needs a print file before it can be sold.`);
+      return;
+    }
     // eslint-disable-next-line no-alert
-    const ok = window.confirm(
-      `Permanently delete “${title}”?\n\nThis deletes the photo everywhere and can’t be undone. ` +
-        `To just take it off the wall (and keep it), use the Wall switch instead.`,
-    );
-    if (!ok) return;
+    if (!window.confirm(`Put "${p.title}" up for sale in the shop?`)) return;
     setBusy(true);
     setActionErr(null);
-    let res: { ok: boolean; status: number; error?: string };
+    setPhoto(id, { status: 'published' });
+    announce(`Put "${p.title}" up for sale`);
+    const res = await patchArtwork(id, { status: 'published' });
+    if (res.error === 'timeout') return reconcileAfterTimeout();
+    if (!res.ok) {
+      setPhoto(id, { status: p.status });
+      if (res.status === 404) dropStale(id, p.title);
+      else
+        setActionErr(
+          res.status === 409
+            ? res.error ?? `"${p.title}" needs a print file before it can be sold.`
+            : `Couldn't put "${p.title}" up for sale — please try again.`,
+        );
+    }
+    setBusy(false);
+  }
+  async function removeFromShop(id: number) {
+    if (inFlight) return;
+    const p = byId.get(id);
+    if (!p || !isInShop(p)) return;
+    setBusy(true);
+    setActionErr(null);
+    setConfirm(null);
+    setPhoto(id, { status: 'retired' });
+    announce(`Stopped selling "${p.title}"`);
+    const res = await patchArtwork(id, { status: 'retired' });
+    if (res.error === 'timeout') return reconcileAfterTimeout();
+    if (!res.ok) {
+      if (res.status === 404) dropStale(id, p.title);
+      else {
+        setPhoto(id, { status: p.status });
+        setActionErr(`Couldn't stop selling "${p.title}" — please try again.`);
+      }
+    }
+    setBusy(false);
+  }
+
+  // ── Library delete (permanent; two-step + native confirm) ────────────
+  async function deletePhoto(id: number) {
+    if (inFlight) return;
+    const p = byId.get(id);
+    if (!p) return;
+    // eslint-disable-next-line no-alert
+    const ok = window.confirm(
+      `Last check — permanently delete "${p.title}"?\n\n` +
+        `It will be removed from the Library, the Wall, and the Shop. This cannot be undone.`,
+    );
+    if (!ok) {
+      setConfirm(null);
+      return;
+    }
+    setBusy(true);
+    setActionErr(null);
+    setConfirm(null);
+    let res: MutResult;
     try {
       const r = await fetch(`/api/admin/artworks/${id}`, {
         method: 'DELETE',
@@ -262,26 +266,79 @@ export function WallArranger({
         error: r.ok ? undefined : ((await r.json().catch(() => ({}))) as { error?: string }).error,
       };
     } catch (err) {
-      res = {
-        ok: false,
-        status: 0,
-        error: isTimeout(err) ? 'timeout' : 'network error',
-      };
+      res = { ok: false, status: 0, error: isTimeout(err) ? 'timeout' : 'network error' };
     }
     if (res.error === 'timeout') return reconcileAfterTimeout();
     if (res.ok) {
-      setGrid((g) => g.filter((t) => t.id !== id));
-      savedGrid.current = savedGrid.current.filter((t) => t.id !== id);
-      announce(`Deleted ${title}`);
+      setPhotos((ps) => ps.filter((x) => x.id !== id));
+      setWallIds((ids) => ids.filter((x) => x !== id));
+      savedWallIds.current = savedWallIds.current.filter((x) => x !== id);
+      announce(`Deleted "${p.title}"`);
     } else {
       setActionErr(
         res.error
-          ? `Couldn’t delete “${title}” — ${res.error}`
-          : `Couldn’t delete “${title}” — please try again.`,
+          ? `Couldn't delete "${p.title}" — ${res.error}`
+          : `Couldn't delete "${p.title}" — please try again.`,
       );
     }
     setBusy(false);
   }
+
+  // ── Wall reorder (live on dragEnter, auto-save on dragEnd) ────────────
+  function moveOver(overId: number) {
+    if (!drag || drag.from !== 'wall') return;
+    setWallIds((ids) => reorder(ids, drag.id, overId));
+  }
+  async function commitOrder() {
+    if (inFlight) return; // matches the other mutators; guards any future non-drag caller
+    if (!orderChanged(wallIds, savedWallIds.current)) return;
+    setSavingOrder(true); // state (not a ref) so inFlight re-renders and disables controls
+    const attempt = wallIds.slice(); // rebuild payload from current order, never a drag-start snapshot
+    try {
+      const r = await fetch('/api/admin/wall', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: attempt }),
+        signal: mutationTimeout(),
+      });
+      if (!r.ok) throw new Error(String(r.status));
+      savedWallIds.current = attempt;
+      setSavedFlash(true);
+      announce('Wall order saved');
+      window.setTimeout(() => setSavedFlash(false), 2200);
+    } catch (err) {
+      if (isTimeout(err)) return reconcileAfterTimeout(); // leave savingOrder true → controls stay disabled until reload
+      setWallIds(savedWallIds.current); // revert to last-saved order
+      setActionErr("Couldn't save the new wall order — please try again.");
+    }
+    setSavingOrder(false);
+  }
+
+  // ── Drag wiring ──────────────────────────────────────────────────────
+  const overShelf = (which: 'wall' | 'shop') => (e: React.DragEvent) => {
+    e.preventDefault();
+    if (drag?.from === 'lib' && dropTarget !== which) setDropTarget(which);
+  };
+  const leaveShelf = (e: React.DragEvent) => {
+    if (!(e.currentTarget as Node).contains(e.relatedTarget as Node)) setDropTarget(null);
+  };
+  const dropOnWall = (e: React.DragEvent) => {
+    e.preventDefault();
+    const d = drag;
+    setDropTarget(null);
+    setDrag(null);
+    if (d?.from === 'lib') void placeOnWall(d.id);
+  };
+  const dropOnShop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const d = drag;
+    setDropTarget(null);
+    setDrag(null);
+    if (d?.from === 'lib') void placeInShop(d.id);
+  };
+
+  const shopHot = dropTarget === 'shop' && !!drag && byId.get(drag.id)?.hd;
+  const shopBad = dropTarget === 'shop' && !!drag && !byId.get(drag.id)?.hd;
 
   // ── Render ───────────────────────────────────────────────────────────
   return (
@@ -290,144 +347,302 @@ export function WallArranger({
         <div>
           <h1>Wall &amp; shop</h1>
           <p>
-            Drag to reorder the wall. Toggle each photo on or off the wall and in
-            or out of the shop — they&apos;re independent. The ✕ permanently
-            deletes a photo (for duplicates or junk); to just hide one, switch
-            it off the wall instead.
+            Every photo lives in the Library. Drag one up onto the Wall (the
+            homepage gallery) or the Shop (for sale), or use its toggles. Taking
+            a photo off a shelf never deletes it. Only photos with a print file
+            can go in the Shop.
           </p>
         </div>
         <div className="actions">
           <a className="wl-adm-wall-add" href="/admin/artworks/bulk-upload">
             Add photos
           </a>
-          {dirty && (
-            <button type="button" onClick={resetOrder} disabled={inFlight}>
-              Reset
-            </button>
-          )}
-          <button
-            type="button"
-            className="primary"
-            onClick={saveOrder}
-            disabled={!dirty || inFlight}
-          >
-            {orderState === 'saving'
-              ? 'Saving…'
-              : !dirty && orderState === 'saved'
-                ? 'Saved ✓'
-                : 'Save order'}
-          </button>
         </div>
       </header>
 
-      {orderState === 'error' && (
-        <p className="wl-adm-wall-err">Couldn&apos;t save the order — please try again.</p>
-      )}
       {actionErr && <p className="wl-adm-wall-err">{actionErr}</p>}
 
-      <p className="wl-adm-wall-hint">
-        {grid.length} on the wall · the green dot marks pieces for sale
-      </p>
-
-      <div className="wl-adm-wall-grid">
-        {grid.map((t, i) => (
-          <div
-            key={t.id}
-            className={`wl-adm-wall-tile ${dragId === t.id ? 'dragging' : ''}`}
-            draggable={!inFlight}
-            onDragStart={(e) => {
-              if (inFlight) return;
-              // Some engines (Firefox ESR, iPadOS) abort a drag whose
-              // dataTransfer carries no data — set it or drags never start.
-              e.dataTransfer.setData('text/plain', String(t.id));
-              e.dataTransfer.effectAllowed = 'move';
-              setDragId(t.id);
-              if (orderState !== 'idle') setOrderState('idle');
-            }}
-            onDragEnter={() => moveOver(t.id)}
-            onDragOver={(e) => e.preventDefault()}
-            onDragEnd={() => setDragId(null)}
-            onDrop={(e) => e.preventDefault()}
-            title={t.title}
-          >
-            <span className="pos">{i + 1}</span>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={t.image_web_url} alt={t.title} loading="lazy" draggable={false} />
-            {t.available && <span className="dot" aria-hidden="true" />}
-            <div className="wl-adm-wall-ctl">
-              <Switch
-                kind="wall"
-                on
-                disabled={inFlight}
-                label={`Take ${t.title} off the wall`}
-                onClick={() => wallOff(t.id)}
-              />
-              {t.canSell && (
-                <Switch
-                  kind="shop"
-                  on={t.status === 'published'}
-                  disabled={inFlight}
-                  label={`${t.status === 'published' ? 'Remove' : 'Put'} ${t.title} ${t.status === 'published' ? 'from' : 'in'} the shop`}
-                  onClick={() => toggleShop(t.id, t.status !== 'published')}
-                />
-              )}
-            </div>
-            {!t.available && (
-              <button
-                type="button"
-                className="wl-adm-wall-x"
-                aria-label={`Delete ${t.title}`}
-                disabled={inFlight}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void deleteOne(t.id, t.title);
-                }}
-              >
-                ✕
-              </button>
-            )}
-            <span className="cap">{t.title}</span>
+      {!hintsDismissed && (
+        <div className="wl-adm-ws-hint">
+          <div>
+            Every photo lives in the <strong>Library</strong>. Drag one up into
+            the <strong>Wall</strong> or the <strong>Shop</strong>, or both.
+            Removing it from a shelf just returns it to Library-only. Only photos
+            with a print file can be sold.
           </div>
-        ))}
-      </div>
+          <button type="button" className="dismiss" onClick={dismissHints}>
+            Dismiss
+          </button>
+        </div>
+      )}
 
-      {tray.length > 0 && (
-        <section className="wl-adm-wall-tray">
-          <p className="wl-adm-wall-hint">Off the wall · {tray.length}</p>
-          <div className="wl-adm-wall-grid">
-            {tray.map((t) => (
-              <div key={t.id} className="wl-adm-wall-tile off" title={t.title}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={t.image_web_url} alt={t.title} loading="lazy" draggable={false} />
-                {t.available && <span className="dot" aria-hidden="true" />}
-                <div className="wl-adm-wall-ctl">
-                  <button
-                    type="button"
-                    className="wl-adm-wall-add small"
-                    onClick={() => wallOn(t.id)}
-                    disabled={inFlight}
-                    aria-label={`Put ${t.title} on the wall`}
+      <div className={`wl-adm-ws-shelves ${wallMin || shopMin ? 'stacked' : ''}`}>
+        {/* THE WALL */}
+        <section
+          className={`wl-adm-ws-shelf ${dropTarget === 'wall' ? 'hot-ok' : ''}`}
+          aria-label="The Wall"
+          onDragOver={overShelf('wall')}
+          onDragLeave={leaveShelf}
+          onDrop={dropOnWall}
+        >
+          <div className={`wl-adm-ws-head ${wallMin ? '' : 'open'}`}>
+            <button
+              type="button"
+              className={`wl-adm-ws-min ${wallMin ? 'collapsed' : ''}`}
+              aria-label={wallMin ? 'Expand the Wall' : 'Minimize the Wall'}
+              onClick={() => setWallMin((v) => !v)}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
+            </button>
+            <h3>The Wall</h3>
+            <span className="wl-adm-ws-meta">homepage gallery · {wall.length}</span>
+            <span style={{ flex: 1 }} />
+            {savedFlash && <span className="wl-adm-ws-saved">order saved ✓</span>}
+            {!wallMin && <span className="wl-adm-ws-note">Drag to reorder — saves automatically</span>}
+          </div>
+          {!wallMin &&
+            (wall.length === 0 ? (
+              <div className="wl-adm-ws-empty">Drag photos here from the Library to hang them on the homepage.</div>
+            ) : (
+              <div className="wl-adm-ws-grid">
+                {wall.map((p, i) => (
+                  <figure
+                    key={p.id}
+                    className={`wl-adm-ws-tile grab ${drag?.id === p.id && drag.from === 'wall' ? 'dragging' : ''}`}
+                    title={p.title}
+                    draggable={!inFlight}
+                    onDragStart={(e) => {
+                      if (inFlight) return;
+                      e.dataTransfer.setData('text/plain', String(p.id));
+                      e.dataTransfer.effectAllowed = 'move';
+                      setDrag({ id: p.id, from: 'wall' });
+                    }}
+                    onDragEnter={() => moveOver(p.id)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDragEnd={() => {
+                      setDrag(null);
+                      setDropTarget(null);
+                      void commitOrder();
+                    }}
+                    onDrop={(e) => e.preventDefault()}
                   >
-                    Put on wall
-                  </button>
-                  {t.canSell && (
-                    <Switch
-                      kind="shop"
-                      on={t.status === 'published'}
-                      disabled={inFlight}
-                      label={`${t.status === 'published' ? 'Remove' : 'Put'} ${t.title} ${t.status === 'published' ? 'from' : 'in'} the shop`}
-                      onClick={() => toggleShop(t.id, t.status !== 'published')}
-                    />
-                  )}
-                </div>
-                <span className="cap">{t.title}</span>
+                    <span className="wl-adm-ws-pos">{i + 1}</span>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={p.image_web_url} alt={p.title} draggable={false} />
+                    <figcaption className="wl-adm-ws-cap">
+                      <span className="name">{p.title}</span>
+                      <RemoveButton
+                        confirming={confirm?.kind === 'wallRemove' && confirm.id === p.id}
+                        disabled={inFlight}
+                        label={`Remove ${p.title} from the wall`}
+                        onClick={() =>
+                          confirm?.kind === 'wallRemove' && confirm.id === p.id
+                            ? void removeFromWall(p.id)
+                            : setConfirm({ kind: 'wallRemove', id: p.id })
+                        }
+                      />
+                    </figcaption>
+                  </figure>
+                ))}
               </div>
             ))}
-          </div>
         </section>
-      )}
+
+        {/* THE SHOP */}
+        <section
+          className={`wl-adm-ws-shelf ${shopHot ? 'hot-ok' : ''} ${shopBad ? 'hot-bad' : ''}`}
+          aria-label="The Shop"
+          onDragOver={overShelf('shop')}
+          onDragLeave={leaveShelf}
+          onDrop={dropOnShop}
+        >
+          <div className={`wl-adm-ws-head ${shopMin ? '' : 'open'}`}>
+            <button
+              type="button"
+              className={`wl-adm-ws-min ${shopMin ? 'collapsed' : ''}`}
+              aria-label={shopMin ? 'Expand the Shop' : 'Minimize the Shop'}
+              onClick={() => setShopMin((v) => !v)}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
+            </button>
+            <h3>The Shop</h3>
+            <span className="wl-adm-ws-meta">for sale · {shop.length}</span>
+            <span style={{ flex: 1 }} />
+            {!shopMin && <span className="wl-adm-ws-note">Exactly what customers can buy</span>}
+          </div>
+          {!shopMin &&
+            (shop.length === 0 ? (
+              <div className="wl-adm-ws-empty">Drag photos with a print file here to put them up for sale.</div>
+            ) : (
+              <div className="wl-adm-ws-grid">
+                {shop.map((p) => (
+                  <figure key={p.id} className="wl-adm-ws-tile" title={p.title}>
+                    {isInShop(p) && !p.buyable && (
+                      <div className="wl-adm-ws-badges">
+                        <span className="wl-adm-ws-badge blocked">hidden — sizes blocked</span>
+                      </div>
+                    )}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={p.image_web_url} alt={p.title} draggable={false} />
+                    <figcaption className="wl-adm-ws-cap">
+                      <span className="name">{p.title}</span>
+                      <span className="price">{p.price_from_cents != null ? formatUSD(p.price_from_cents) : '—'}</span>
+                      <RemoveButton
+                        confirming={confirm?.kind === 'shopRemove' && confirm.id === p.id}
+                        disabled={inFlight}
+                        label={`Remove ${p.title} from the shop`}
+                        onClick={() =>
+                          confirm?.kind === 'shopRemove' && confirm.id === p.id
+                            ? void removeFromShop(p.id)
+                            : setConfirm({ kind: 'shopRemove', id: p.id })
+                        }
+                      />
+                    </figcaption>
+                  </figure>
+                ))}
+              </div>
+            ))}
+        </section>
+      </div>
+
+      {/* LIBRARY */}
+      <section className="wl-adm-ws-library" aria-label="Library">
+        <div className="wl-adm-ws-head open" style={{ flexWrap: 'wrap' }}>
+          <h3>Library</h3>
+          <span className="wl-adm-ws-meta">every photo · {counts.all}</span>
+          <span style={{ flex: 1 }} />
+          <div className="wl-adm-seg">
+            {FILTERS.map((f) => (
+              <button key={f.key} className={filter === f.key ? 'on' : ''} onClick={() => setFilter(f.key)}>
+                {f.label} <span className="sub">{counts[f.key]}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <p className="wl-adm-ws-note" style={{ margin: '0 0 12px' }}>
+          Photos never leave the Library — drag one onto a shelf above, or use its Wall / Shop toggles. ✕ deletes the photo everywhere, forever.
+        </p>
+        {libList.length === 0 ? (
+          <div className="wl-adm-ws-empty">
+            {counts.all === 0 ? 'No photos yet.' : 'No photos match this filter.'}
+          </div>
+        ) : (
+          <div className="wl-adm-ws-grid">
+            {libList.map((p) => {
+              const onWall = p.on_wall;
+              const inShop = isInShop(p);
+              const delConfirming = confirm?.kind === 'del' && confirm.id === p.id;
+              return (
+                <div key={p.id} className={`wl-adm-ws-libitem ${drag?.id === p.id && drag.from === 'lib' ? 'dragging' : ''}`}>
+                  <figure
+                    className="wl-adm-ws-tile grab"
+                    title={p.title}
+                    draggable={!inFlight}
+                    onDragStart={(e) => {
+                      if (inFlight) return;
+                      e.dataTransfer.setData('text/plain', String(p.id));
+                      e.dataTransfer.effectAllowed = 'copy';
+                      setDrag({ id: p.id, from: 'lib' });
+                      setConfirm(null);
+                    }}
+                    onDragEnd={() => {
+                      setDrag(null);
+                      setDropTarget(null);
+                    }}
+                  >
+                    <div className="wl-adm-ws-badges">
+                      {p.hd ? (
+                        <span className="wl-adm-ws-badge hd" title="Has a print file — can be sold">hd</span>
+                      ) : (
+                        <span className="wl-adm-ws-badge web" title="No print file yet — upload one to sell this photo">web only</span>
+                      )}
+                    </div>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={p.image_web_url} alt={p.title} draggable={false} />
+                    <button
+                      type="button"
+                      className={`wl-adm-ws-del ${delConfirming ? 'confirming' : ''}`}
+                      aria-label={`Delete ${p.title} forever`}
+                      disabled={inFlight}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (delConfirming) void deletePhoto(p.id);
+                        else setConfirm({ kind: 'del', id: p.id });
+                      }}
+                    >
+                      {delConfirming ? 'Delete forever?' : '✕'}
+                    </button>
+                  </figure>
+                  <div className="wl-adm-ws-libctl">
+                    <span className="name">{p.title}</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={onWall}
+                      className={`wl-adm-ws-pill ${onWall ? 'on-wall' : ''}`}
+                      disabled={inFlight}
+                      title={onWall ? 'On the wall — click to take it down' : 'Click to hang it on the homepage wall'}
+                      onClick={() => (onWall ? void removeFromWall(p.id) : void placeOnWall(p.id))}
+                    >
+                      Wall
+                    </button>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={inShop}
+                      className={`wl-adm-ws-pill ${inShop ? 'on-shop' : ''}`}
+                      disabled={inFlight || !p.hd}
+                      title={
+                        !p.hd
+                          ? 'Needs a print file before it can be sold'
+                          : inShop
+                            ? 'In the shop — click to stop selling it'
+                            : 'Click to put it up for sale'
+                      }
+                      onClick={() => (inShop ? void removeFromShop(p.id) : void placeInShop(p.id))}
+                    >
+                      Shop
+                    </button>
+                    <Link className="wl-adm-ws-edit" href={`/admin/artworks/${p.id}`} title={`Edit ${p.title} details`}>
+                      Edit ↗
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       <div ref={liveRef} aria-live="polite" className="wl-adm-sr-only" />
     </div>
+  );
+}
+
+// Module scope (avoids react/no-unstable-nested-components). Props only.
+function RemoveButton({
+  confirming,
+  disabled,
+  label,
+  onClick,
+}: {
+  confirming: boolean;
+  disabled?: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`wl-adm-ws-rm ${confirming ? 'confirming' : ''}`}
+      aria-label={label}
+      disabled={disabled}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+    >
+      {confirming ? 'Sure — remove?' : 'Remove'}
+    </button>
   );
 }
