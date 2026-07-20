@@ -12,7 +12,8 @@ export interface PublishResult {
  * + first-publish published_at stamping. Used by the per-artwork PATCH, the
  * bulk POST, and scripts/publish-selections.ts so all three paths agree.
  *
- * - Only artworks with image_print_url IS NOT NULL are published.
+ * - Only artworks with a non-empty image_print_url are published (matches the
+ *   admin `hd` gate; an empty-string master must not publish).
  * - published_at = NOW() is stamped only on the transition from
  *   non-'published' to 'published'. Re-publishing a row already at
  *   'published' leaves published_at untouched (it's the first-publish
@@ -30,7 +31,8 @@ export async function publishArtworks(
   const rows = await client.query<{ id: number; status: string }>(
     `SELECT id, status
      FROM artworks
-     WHERE id = ANY($1::int[]) AND image_print_url IS NOT NULL
+     WHERE id = ANY($1::int[])
+       AND image_print_url IS NOT NULL AND image_print_url <> ''
      FOR UPDATE`,
     [ids],
   );

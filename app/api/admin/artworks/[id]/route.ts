@@ -250,32 +250,42 @@ export async function DELETE(
   const { id: raw } = await ctx.params;
   const id = parsePathId(raw);
   if (id == null) return NextResponse.json({ error: 'invalid id' }, { status: 400 });
-  // Block delete when the artwork has any non-canceled order_items
-  // referencing its variants. The schema's ON DELETE SET NULL on
-  // order_items.variant_id would silently sever the live link to historical
-  // sales (the snapshot JSONB preserves data, but live joins like the
-  // sold-count query would undercount). Steer admins to "Retire" instead.
-  const sold = await pool.query<{ sold: number }>(
-    `SELECT COUNT(oi.id)::int AS sold
-     FROM order_items oi
-     JOIN artwork_variants vv ON vv.id = oi.variant_id
-     JOIN orders o ON o.id = oi.order_id
-     WHERE vv.artwork_id = $1
-       AND o.status NOT IN ('canceled', 'refunded')`,
-    [id],
-  );
-  if ((sold.rows[0]?.sold ?? 0) > 0) {
-    return NextResponse.json(
-      {
-        error:
-          'Cannot delete: artwork has sold orders. Retire it instead to hide it from the shop while preserving order history.',
-      },
-      { status: 409 },
-    );
-  }
+  // Block a hard delete when ANY order_items reference this artwork's
+  // variants — including canceled and refunded orders.
+  //
+  // Two reasons this must not filter on order status:
+  //  1. order_items.variant_id is ON DELETE SET NULL and artwork_variants
+  //     cascades from artworks, so deleting SILENTLY severs the link to
+  //     historical sales. The isFkViolation 409 below can therefore never fire
+  //     for order history — it is not a backstop.
+  //  2. A refunded order is still order history. Severing it corrupts every
+  //     live join, including this very guard for future deletes.
+  // Steer admins to "Retire" instead, which preserves everything.
+  //
+  // Check + delete run in one transaction so an order landing between them
+  // can't slip past the guard.
   try {
-    await pool.query('DELETE FROM artworks WHERE id = $1', [id]);
+    await withTransaction(async (client) => {
+      const { rows } = await client.query<{ has_orders: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1
+             FROM order_items oi
+             JOIN artwork_variants vv ON vv.id = oi.variant_id
+            WHERE vv.artwork_id = $1
+         ) AS has_orders`,
+        [id],
+      );
+      if (rows[0]?.has_orders) {
+        throw new ConflictError(
+          'Cannot delete: this artwork has order history. Retire it instead to hide it from the shop while preserving that history.',
+        );
+      }
+      await client.query('DELETE FROM artworks WHERE id = $1', [id]);
+    });
   } catch (err) {
+    if (err instanceof ConflictError) {
+      return NextResponse.json({ error: err.message }, { status: 409 });
+    }
     if (isFkViolation(err)) {
       return NextResponse.json(
         { error: 'Cannot delete: artwork is still referenced. Retire it instead.' },

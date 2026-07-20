@@ -21,6 +21,9 @@
   --adm-green-soft: #d6dfd0;
   --adm-amber: #b8832a;
   --adm-amber-soft: #f1e3c0;
+  /* Translucent chip backdrop laid over photo tiles. Must flip per theme —
+     a hardcoded cream stayed cream in Darkroom and tanked badge contrast. */
+  --adm-scrim: rgba(252, 250, 244, 0.85);
   --adm-red: #9e3a2a;
   --adm-red-soft: #f1d9d0;
   --adm-blue: #3a5d7a;
@@ -54,6 +57,7 @@
   --adm-green-soft: #1d2920;
   --adm-amber: #d9a25b;
   --adm-amber-soft: #2b220f;
+  --adm-scrim: rgba(14, 16, 19, 0.85);
   --adm-red: #d86c5f;
   --adm-red-soft: #2d1914;
   --adm-blue: #7aa8cf;
@@ -3635,8 +3639,11 @@
 
 /* ── Wall & Shop redesign (Library + two shelves) ───────────────────── */
 .wl-adm-ws-shelves { display: grid; grid-template-columns: 3fr 2fr; gap: 22px; align-items: start; }
-.wl-adm-ws-shelves.stacked { display: flex; flex-direction: column; }
-@media (max-width: 1000px) { .wl-adm-ws-shelves { display: flex; flex-direction: column; } }
+/* No `.stacked` flip: switching to a column made the band TALLER when one shelf
+   was minimized, shrinking the Library — the opposite of the intent. Keeping the
+   grid means a collapsed shelf just shortens its own column, and collapsing both
+   shrinks the band and hands the room to the Library. */
+@media (max-width: 1000.98px) { .wl-adm-ws-shelves { display: flex; flex-direction: column; } }
 
 .wl-adm-ws-shelf { background: var(--adm-card); border: 1px solid var(--adm-rule); border-radius: var(--adm-radius-lg); padding: 16px; transition: border-color 120ms, box-shadow 120ms; }
 .wl-adm-ws-shelf.hot-ok { border-color: var(--adm-green); box-shadow: 0 0 0 1px var(--adm-green); }
@@ -3645,7 +3652,11 @@
 
 .wl-adm-ws-head { display: flex; align-items: center; gap: 10px; }
 .wl-adm-ws-head.open { margin-bottom: 12px; }
-.wl-adm-ws-head h3 { margin: 0; font-size: 1rem; }
+.wl-adm-ws-head h2 { margin: 0; font-size: 1rem; }
+.wl-adm-ws-head h2:focus { outline: none; }
+.wl-adm-ws-search { font-size: 12px; padding: 4px 9px; border: 1px solid var(--adm-rule); border-radius: 999px; background: var(--adm-paper); color: var(--adm-ink); min-width: 160px; }
+.wl-adm-ws-search:focus-visible { outline: 2px solid var(--adm-blue); outline-offset: 1px; }
+.wl-adm-ws-blocked-note { font-family: var(--f-mono), monospace; font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--adm-red); }
 .wl-adm-ws-meta { font-family: var(--f-mono), monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--adm-muted); }
 .wl-adm-ws-note { font-size: 12px; color: var(--adm-muted); }
 .wl-adm-ws-saved { font-family: var(--f-mono), monospace; font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--adm-green); background: var(--adm-green-soft); padding: 2px 8px; border-radius: 999px; }
@@ -3668,12 +3679,15 @@
 .wl-adm-ws-rm.confirming { background: var(--adm-red); border-color: var(--adm-red); }
 
 .wl-adm-ws-badges { position: absolute; top: 5px; left: 5px; z-index: 2; display: flex; gap: 4px; }
-.wl-adm-ws-badge { font-family: var(--f-mono), monospace; font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; padding: 2px 6px; border-radius: 3px; background: rgba(252,250,244,0.85); }
+.wl-adm-ws-badge { font-family: var(--f-mono), monospace; font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; padding: 2px 6px; border-radius: 3px; background: var(--adm-scrim); }
 .wl-adm-ws-badge.hd { color: var(--adm-blue); border: 1px solid var(--adm-blue); }
 .wl-adm-ws-badge.web { color: var(--adm-muted); border: 1px solid var(--adm-rule); }
-.wl-adm-ws-badge.blocked { background: var(--adm-amber-soft); color: var(--adm-amber); border: 1px solid var(--adm-amber); }
+/* ink-on-amber-soft reads in both themes; amber-on-amber-soft was 2.6:1 in light. */
+.wl-adm-ws-badge.blocked { background: var(--adm-amber-soft); color: var(--adm-ink); border: 1px solid var(--adm-amber); }
 
-.wl-adm-ws-del { position: absolute; bottom: 5px; right: 5px; z-index: 2; font-family: var(--f-mono), monospace; font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; padding: 3px 7px; border-radius: 3px; cursor: pointer; border: 1px solid var(--adm-rule); background: rgba(252,250,244,0.85); color: var(--adm-red); }
+/* Red-outlined so it never reads as a "close" affordance — this is the only
+   permanent action on the screen. */
+.wl-adm-ws-del { position: absolute; bottom: 5px; right: 5px; z-index: 2; font-family: var(--f-mono), monospace; font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; padding: 3px 7px; border-radius: 3px; cursor: pointer; border: 1px solid var(--adm-red); background: var(--adm-scrim); color: var(--adm-red); }
 .wl-adm-ws-del.confirming { border-color: var(--adm-red); background: var(--adm-red); color: #fff; }
 
 .wl-adm-ws-libitem { display: flex; flex-direction: column; }
@@ -3683,7 +3697,13 @@
 .wl-adm-ws-pill { font-family: var(--f-mono), monospace; font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; cursor: pointer; line-height: 1; background: transparent; color: var(--adm-muted); border: 1px solid var(--adm-rule); }
 .wl-adm-ws-pill.on-wall { background: var(--adm-ink); color: var(--adm-paper); border-color: var(--adm-ink); }
 .wl-adm-ws-pill.on-shop { background: var(--adm-green); color: #fff; border-color: var(--adm-green); }
+/* Darkroom's --adm-green is a light sage, so white-on-green was 2.2:1. Use the
+   established dark pairing (soft bg + green ink), as elsewhere in this file. */
+.wl-admin-surface[data-theme='dark'] .wl-adm-ws-pill.on-shop { background: var(--adm-green-soft); color: var(--adm-green); border-color: var(--adm-green); }
 .wl-adm-ws-pill:disabled { color: var(--adm-dim); border-style: dashed; cursor: not-allowed; }
+/* Shop pill on a photo with no print file: looks unavailable but stays
+   focusable and clickable so it can explain itself (see aria-disabled note). */
+.wl-adm-ws-pill.nohd { color: var(--adm-dim); border-style: dashed; cursor: help; }
 .wl-adm-ws-edit { font-size: 11px; color: var(--adm-muted); text-decoration: none; white-space: nowrap; }
 .wl-adm-ws-edit:hover { color: var(--adm-ink); }
 /* Fixed panes: Wall/Shop as a capped band on top, Library filling the rest.
@@ -3691,7 +3711,7 @@
    gesture needs the source (Library) and the target (a shelf) both visible.
    Scoped with :has() so ONLY this page gives up page-scroll; every other admin
    page keeps normal document flow. Below 1001px it falls back to that flow. */
-@media (min-width: 1001px) {
+@media (min-width: 1001px) and (min-height: 700px) {
   .wl-admin-surface:has(.wl-adm-wall.ws-fixed) { height: 100vh; overflow: hidden; }
   .wl-admin-surface:has(.wl-adm-wall.ws-fixed) .wl-adm-main { min-height: 0; }
 
@@ -3713,7 +3733,9 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-    max-height: 36vh; /* knob: raise for more wall, lower for more library */
+    /* vh alone ballooned the band on tall monitors and starved the Library on
+       short ones; the px cap keeps the shelves a band, not a half-screen. */
+    max-height: min(36vh, 300px);
   }
   .wl-adm-wall.ws-fixed .wl-adm-ws-shelf > .wl-adm-ws-head { flex: 0 0 auto; }
   .wl-adm-wall.ws-fixed .wl-adm-ws-shelf > .wl-adm-ws-grid,
@@ -3721,12 +3743,13 @@
     overflow-y: auto;
     min-height: 0;
     align-content: start;
+    scrollbar-gutter: stable;
   }
 
   /* Library takes every remaining pixel; its filter bar stays put while it scrolls. */
   .wl-adm-wall.ws-fixed .wl-adm-ws-library {
     flex: 1 1 auto;
-    min-height: 0;
+    min-height: 220px; /* floor: the Library is the point, never squeeze it to nothing */
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -3738,5 +3761,17 @@
     overflow-y: auto;
     min-height: 0;
     align-content: start;
+    scrollbar-gutter: stable;
   }
+}
+
+/* Visible keyboard focus on the new controls (UA default ring is weak over the
+   dark `on-wall` fill and over photo-gradient captions). */
+.wl-adm-ws-pill:focus-visible,
+.wl-adm-ws-rm:focus-visible,
+.wl-adm-ws-del:focus-visible,
+.wl-adm-ws-min:focus-visible,
+.wl-adm-ws-edit:focus-visible {
+  outline: 2px solid var(--adm-blue);
+  outline-offset: 2px;
 }

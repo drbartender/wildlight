@@ -8,15 +8,16 @@ import { requireSameOrigin } from '@/lib/origin-check';
 // Persist the homepage "vintage wall" sequence. The body is the full,
 // ordered list of artwork ids; wall_order is set to each id's 1-based
 // position. Separate from display_order (shop/portfolio), which is never
-// touched here. Only the on_wall subset (the arranged grid) is sent here; the
-// admin wall query caps at 600, so the 600 cap below is never hit in practice.
+// touched here. Only the on_wall subset is sent here. The cap must stay >= the
+// admin loader's LIMIT (app/admin/wall/page.tsx), or a large wall would POST
+// more ids than Zod accepts and reordering would 400 with no way to recover.
 // ids must be unique (the unnest below would otherwise assign one row two
 // positions).
 const Body = z.object({
   ids: z
     .array(z.number().int().positive())
     .min(1)
-    .max(600)
+    .max(1000)
     .refine((a) => new Set(a).size === a.length, 'duplicate ids'),
 });
 

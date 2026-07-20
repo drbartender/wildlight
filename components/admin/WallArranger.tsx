@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatUSD } from '@/lib/money';
 import {
   applyFilter,
@@ -14,19 +14,32 @@ import {
   type LibraryPhoto,
 } from '@/lib/wall-arrange';
 
-// Every mutation runs behind `inFlight` (disables controls + dragging) so the
-// interaction models can't interleave. A hung request would wedge the page, so
-// abort at 30s (server worst case = 15s connect + 15s statement_timeout). A
-// timed-out request MAY have committed, so callers reconcile by reload rather
-// than rolling back (see reconcileAfterTimeout).
-const mutationTimeout = () => AbortSignal.timeout?.(30_000);
+// Every mutation runs behind `inFlight` so the interaction models can't
+// interleave. A hung request would wedge the page, so abort at 30s (server
+// worst case = 15s connect + 15s statement_timeout). A timed-out request MAY
+// have committed, so callers reconcile by reload rather than rolling back.
+// AbortSignal.timeout is optional-chained for very old engines; fall back to a
+// real controller so the timeout guarantee is never silently dropped.
+function mutationTimeout(): AbortSignal | undefined {
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    return AbortSignal.timeout(30_000);
+  }
+  if (typeof AbortController === 'undefined') return undefined;
+  const c = new AbortController();
+  setTimeout(() => c.abort(), 30_000);
+  return c.signal;
+}
 function isTimeout(err: unknown): boolean {
   return (
     err instanceof DOMException &&
     (err.name === 'TimeoutError' || err.name === 'AbortError')
   );
 }
-type MutResult = { ok: boolean; status: number; error?: string };
+
+// `timedOut` is a separate flag, not a magic string in `error` — a server body
+// of {error:'timeout'} must not be mistaken for a client-side abort.
+type MutResult = { ok: boolean; status: number; error?: string; timedOut?: boolean };
+
 async function patchArtwork(id: number, body: Record<string, unknown>): Promise<MutResult> {
   try {
     const r = await fetch(`/api/admin/artworks/${id}`, {
@@ -39,7 +52,8 @@ async function patchArtwork(id: number, body: Record<string, unknown>): Promise<
     const data = (await r.json().catch(() => ({}))) as { error?: string };
     return { ok: false, status: r.status, error: data.error };
   } catch (err) {
-    return { ok: false, status: 0, error: isTimeout(err) ? 'timeout' : 'network error' };
+    if (isTimeout(err)) return { ok: false, status: 0, timedOut: true };
+    return { ok: false, status: 0, error: 'network error' };
   }
 }
 
@@ -58,9 +72,23 @@ type Drag = { id: number; from: 'lib' | 'wall' } | null;
 export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
   const [photos, setPhotos] = useState<LibraryPhoto[]>(initial);
   const [wallIds, setWallIds] = useState<number[]>(() => deriveWallIds(initial));
-  const savedWallIds = useRef<number[]>(deriveWallIds(initial));
+  // Mirror of wallIds. commitOrder fires from dragEnd (discrete priority) while
+  // moveOver writes from dragEnter (continuous priority), so reading wallIds out
+  // of the render closure could POST an order the admin never saw. The ref is
+  // always current; ALWAYS write wall order through setWall().
+  const wallIdsRef = useRef<number[]>(wallIds);
+  const savedWallIds = useRef<number[]>(wallIds);
+
+  function setWall(next: number[] | ((cur: number[]) => number[])) {
+    setWallIds((cur) => {
+      const v = typeof next === 'function' ? next(cur) : next;
+      wallIdsRef.current = v;
+      return v;
+    });
+  }
 
   const [filter, setFilter] = useState<FilterKey>('all');
+  const [query, setQuery] = useState('');
   const [drag, setDrag] = useState<Drag>(null);
   const [dropTarget, setDropTarget] = useState<'wall' | 'shop' | null>(null);
   const [confirm, setConfirm] = useState<Confirm>(null);
@@ -77,94 +105,164 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
   const announce = (msg: string) => {
     if (liveRef.current) liveRef.current.textContent = msg;
   };
+  function fail(msg: string) {
+    setActionErr(msg);
+    announce(msg);
+  }
+
+  // Disabling the just-clicked control mid-flight blurs it, dumping focus to
+  // <body>. Remember it and put focus back when the mutation settles.
+  const refocus = useRef<HTMLElement | null>(null);
+  const rememberFocus = () => {
+    refocus.current = (document.activeElement as HTMLElement) ?? null;
+  };
+  const restoreFocus = () => {
+    const el = refocus.current;
+    refocus.current = null;
+    if (el && el.isConnected) el.focus();
+    else document.getElementById('wl-library-heading')?.focus();
+  };
+  function settle() {
+    setBusy(false);
+    window.setTimeout(restoreFocus, 0);
+  }
+
+  // Escape clears an armed confirm — otherwise an armed Remove/Delete stays
+  // armed indefinitely and fires on the next click.
+  useEffect(() => {
+    if (!confirm) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setConfirm(null);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [confirm]);
 
   const byId = useMemo(() => {
     const m = new Map<number, LibraryPhoto>();
     for (const p of photos) m.set(p.id, p);
     return m;
   }, [photos]);
-  const counts = filterCounts(photos);
-  const wall = wallIds.map((id) => byId.get(id)).filter((p): p is LibraryPhoto => !!p);
-  const shop = photos.filter(isInShop); // loader order (updated_at DESC)
-  const libList = applyFilter(photos, filter);
+  const counts = useMemo(() => filterCounts(photos), [photos]);
+  const wall = useMemo(
+    () => wallIds.map((id) => byId.get(id)).filter((p): p is LibraryPhoto => !!p),
+    [wallIds, byId],
+  );
+  const shop = useMemo(() => photos.filter(isInShop), [photos]);
+  const blockedCount = useMemo(() => shop.filter((p) => !p.buyable).length, [shop]);
+  const libList = useMemo(() => {
+    const base = applyFilter(photos, filter);
+    const q = query.trim().toLowerCase();
+    return q ? base.filter((p) => p.title.toLowerCase().includes(q) || p.slug.includes(q)) : base;
+  }, [photos, filter, query]);
 
   function setPhoto(id: number, patch: Partial<LibraryPhoto>) {
     setPhotos((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   }
-  // A stale row (deleted/retired elsewhere) returns 404: drop it everywhere and
-  // announce, rather than showing a retry that would 404 again.
+  // A stale row (deleted/retired elsewhere) returns 404: drop it everywhere
+  // rather than offering a retry that would 404 again.
   function dropStale(id: number, title: string) {
     setPhotos((ps) => ps.filter((p) => p.id !== id));
-    setWallIds((ids) => ids.filter((x) => x !== id));
+    setWall((ids) => ids.filter((x) => x !== id));
     savedWallIds.current = savedWallIds.current.filter((x) => x !== id);
-    setActionErr(`"${title}" was changed elsewhere and has been removed from this view.`);
+    fail(`"${title}" was changed elsewhere and has been removed from this view.`);
   }
   function reconcileAfterTimeout() {
-    setActionErr('That took too long to confirm — reloading to show the saved state…');
-    announce('Request timed out; reloading');
+    fail('That took too long to confirm. Reloading to show the saved state…');
     window.setTimeout(() => window.location.reload(), 1200);
+  }
+
+  // Persist the wall sequence. The server resets wall_order=0 on any on_wall
+  // toggle, and the public wall sorts all wall_order=0 rows by md5(slug) — so
+  // after ANY placement the order must be rewritten explicitly or the admin's
+  // displayed order is not what visitors see (and is lost on reload).
+  async function persistOrder(ids: number[]): Promise<MutResult> {
+    if (ids.length === 0) {
+      savedWallIds.current = ids;
+      return { ok: true, status: 200 };
+    }
+    try {
+      const r = await fetch('/api/admin/wall', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+        signal: mutationTimeout(),
+      });
+      if (!r.ok) return { ok: false, status: r.status };
+      savedWallIds.current = ids;
+      return { ok: true, status: r.status };
+    } catch (err) {
+      if (isTimeout(err)) return { ok: false, status: 0, timedOut: true };
+      return { ok: false, status: 0, error: 'network error' };
+    }
   }
 
   // ── Wall placement (no confirm; reversible) ──────────────────────────
   async function placeOnWall(id: number) {
     if (inFlight) return;
     const p = byId.get(id);
-    if (!p || p.on_wall) return; // no-op re-placement (never re-fires wall_order reset)
+    if (!p || p.on_wall) return; // no-op re-placement: never re-fire the wall_order reset
+    rememberFocus();
     setBusy(true);
     setActionErr(null);
+    const next = [...wallIdsRef.current, id];
     setPhoto(id, { on_wall: true });
-    setWallIds((ids) => [...ids, id]);
-    savedWallIds.current = [...savedWallIds.current, id];
-    announce(`Put "${p.title}" on the wall`);
+    setWall(next);
     const res = await patchArtwork(id, { on_wall: true });
-    if (res.error === 'timeout') return reconcileAfterTimeout();
+    if (res.timedOut) return reconcileAfterTimeout();
     if (!res.ok) {
       if (res.status === 404) dropStale(id, p.title);
       else {
         setPhoto(id, { on_wall: false });
-        setWallIds((ids) => ids.filter((x) => x !== id));
-        savedWallIds.current = savedWallIds.current.filter((x) => x !== id);
-        setActionErr(`Couldn't put "${p.title}" on the wall — please try again.`);
+        setWall((ids) => ids.filter((x) => x !== id));
+        fail(`Couldn't put "${p.title}" on the wall. Please try again.`);
       }
+      return settle();
     }
-    setBusy(false);
+    // Rewrite 1..N so the admin's order IS the public order.
+    const ord = await persistOrder(next);
+    if (ord.timedOut) return reconcileAfterTimeout();
+    if (!ord.ok) fail(`"${p.title}" is on the wall, but its position couldn't be saved.`);
+    else announce(`Put "${p.title}" on the wall`);
+    settle();
   }
+
   async function removeFromWall(id: number) {
     if (inFlight) return;
     const p = byId.get(id);
     if (!p || !p.on_wall) return;
-    // Capture the original positions so a failed remove restores exactly, not
-    // to the end (a post-failure reorder must diff against the true baseline).
-    const idx = wallIds.indexOf(id);
-    const savedIdx = savedWallIds.current.indexOf(id);
+    const idx = wallIdsRef.current.indexOf(id);
+    rememberFocus();
     setBusy(true);
     setActionErr(null);
     setConfirm(null);
     setPhoto(id, { on_wall: false });
-    setWallIds((ids) => ids.filter((x) => x !== id));
+    setWall((ids) => ids.filter((x) => x !== id));
     savedWallIds.current = savedWallIds.current.filter((x) => x !== id);
-    announce(`Removed "${p.title}" from the wall`);
     const res = await patchArtwork(id, { on_wall: false });
-    if (res.error === 'timeout') return reconcileAfterTimeout();
+    if (res.timedOut) return reconcileAfterTimeout();
     if (!res.ok) {
       if (res.status === 404) dropStale(id, p.title);
       else {
+        // Restore to its original position, not the end.
         setPhoto(id, { on_wall: true });
-        setWallIds((ids) => {
+        setWall((ids) => {
           if (ids.includes(id)) return ids;
-          const next = ids.slice();
-          next.splice(idx < 0 ? next.length : idx, 0, id);
-          return next;
+          const nextIds = ids.slice();
+          nextIds.splice(idx < 0 ? nextIds.length : idx, 0, id);
+          return nextIds;
         });
         if (!savedWallIds.current.includes(id)) {
-          const next = savedWallIds.current.slice();
-          next.splice(savedIdx < 0 ? next.length : savedIdx, 0, id);
-          savedWallIds.current = next;
+          const s = savedWallIds.current.slice();
+          s.splice(idx < 0 ? s.length : idx, 0, id);
+          savedWallIds.current = s;
         }
-        setActionErr(`Couldn't take "${p.title}" off the wall — please try again.`);
+        fail(`Couldn't take "${p.title}" off the wall. Please try again.`);
       }
+    } else {
+      announce(`Removed "${p.title}" from the wall`);
     }
-    setBusy(false);
+    settle();
   }
 
   // ── Shop placement (always confirmed; hd-gated) ──────────────────────
@@ -173,48 +271,53 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
     const p = byId.get(id);
     if (!p || isInShop(p)) return; // no-op re-placement
     if (!p.hd) {
-      setActionErr(`"${p.title}" needs a print file before it can be sold.`);
+      fail(`"${p.title}" needs a print file before it can be sold. Add one from its Edit page.`);
       return;
     }
     // eslint-disable-next-line no-alert
     if (!window.confirm(`Put "${p.title}" up for sale in the shop?`)) return;
+    rememberFocus();
     setBusy(true);
     setActionErr(null);
     setPhoto(id, { status: 'published' });
-    announce(`Put "${p.title}" up for sale`);
     const res = await patchArtwork(id, { status: 'published' });
-    if (res.error === 'timeout') return reconcileAfterTimeout();
+    if (res.timedOut) return reconcileAfterTimeout();
     if (!res.ok) {
       setPhoto(id, { status: p.status });
       if (res.status === 404) dropStale(id, p.title);
       else
-        setActionErr(
+        fail(
           res.status === 409
             ? res.error ?? `"${p.title}" needs a print file before it can be sold.`
-            : `Couldn't put "${p.title}" up for sale — please try again.`,
+            : `Couldn't put "${p.title}" up for sale. Please try again.`,
         );
+    } else {
+      announce(`Put "${p.title}" up for sale`);
     }
-    setBusy(false);
+    settle();
   }
+
   async function removeFromShop(id: number) {
     if (inFlight) return;
     const p = byId.get(id);
     if (!p || !isInShop(p)) return;
+    rememberFocus();
     setBusy(true);
     setActionErr(null);
     setConfirm(null);
     setPhoto(id, { status: 'retired' });
-    announce(`Stopped selling "${p.title}"`);
     const res = await patchArtwork(id, { status: 'retired' });
-    if (res.error === 'timeout') return reconcileAfterTimeout();
+    if (res.timedOut) return reconcileAfterTimeout();
     if (!res.ok) {
       if (res.status === 404) dropStale(id, p.title);
       else {
         setPhoto(id, { status: p.status });
-        setActionErr(`Couldn't stop selling "${p.title}" — please try again.`);
+        fail(`Couldn't stop selling "${p.title}". Please try again.`);
       }
+    } else {
+      announce(`Stopped selling "${p.title}"`);
     }
-    setBusy(false);
+    settle();
   }
 
   // ── Library delete (permanent; two-step + native confirm) ────────────
@@ -231,6 +334,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
       setConfirm(null);
       return;
     }
+    rememberFocus();
     setBusy(true);
     setActionErr(null);
     setConfirm(null);
@@ -246,50 +350,46 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
         error: r.ok ? undefined : ((await r.json().catch(() => ({}))) as { error?: string }).error,
       };
     } catch (err) {
-      res = { ok: false, status: 0, error: isTimeout(err) ? 'timeout' : 'network error' };
+      if (isTimeout(err)) res = { ok: false, status: 0, timedOut: true };
+      else res = { ok: false, status: 0, error: 'network error' };
     }
-    if (res.error === 'timeout') return reconcileAfterTimeout();
+    if (res.timedOut) return reconcileAfterTimeout();
     if (res.ok) {
       setPhotos((ps) => ps.filter((x) => x.id !== id));
-      setWallIds((ids) => ids.filter((x) => x !== id));
+      setWall((ids) => ids.filter((x) => x !== id));
       savedWallIds.current = savedWallIds.current.filter((x) => x !== id);
       announce(`Deleted "${p.title}"`);
+    } else if (res.status === 404) {
+      dropStale(id, p.title);
     } else {
-      setActionErr(
+      fail(
         res.error
           ? `Couldn't delete "${p.title}" — ${res.error}`
-          : `Couldn't delete "${p.title}" — please try again.`,
+          : `Couldn't delete "${p.title}". Please try again.`,
       );
     }
-    setBusy(false);
+    settle();
   }
 
   // ── Wall reorder (live on dragEnter, auto-save on dragEnd) ────────────
   function moveOver(overId: number) {
     if (!drag || drag.from !== 'wall') return;
-    setWallIds((ids) => reorder(ids, drag.id, overId));
+    setWall((ids) => reorder(ids, drag.id, overId));
   }
   async function commitOrder() {
-    if (inFlight) return; // matches the other mutators; guards any future non-drag caller
-    if (!orderChanged(wallIds, savedWallIds.current)) return;
-    setSavingOrder(true); // state (not a ref) so inFlight re-renders and disables controls
-    const attempt = wallIds.slice(); // rebuild payload from current order, never a drag-start snapshot
-    try {
-      const r = await fetch('/api/admin/wall', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: attempt }),
-        signal: mutationTimeout(),
-      });
-      if (!r.ok) throw new Error(String(r.status));
-      savedWallIds.current = attempt;
+    if (inFlight) return;
+    const attempt = wallIdsRef.current.slice(); // current, never a drag-start snapshot
+    if (!orderChanged(attempt, savedWallIds.current)) return;
+    setSavingOrder(true);
+    const res = await persistOrder(attempt);
+    if (res.timedOut) return reconcileAfterTimeout(); // leave disabled until reload
+    if (!res.ok) {
+      setWall(savedWallIds.current.slice());
+      fail("Couldn't save the new wall order. Please try again.");
+    } else {
       setSavedFlash(true);
       announce('Wall order saved');
       window.setTimeout(() => setSavedFlash(false), 2200);
-    } catch (err) {
-      if (isTimeout(err)) return reconcileAfterTimeout(); // leave savingOrder true → controls stay disabled until reload
-      setWallIds(savedWallIds.current); // revert to last-saved order
-      setActionErr("Couldn't save the new wall order — please try again.");
     }
     setSavingOrder(false);
   }
@@ -317,10 +417,10 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
     if (d?.from === 'lib') void placeInShop(d.id);
   };
 
-  const shopHot = dropTarget === 'shop' && !!drag && byId.get(drag.id)?.hd;
-  const shopBad = dropTarget === 'shop' && !!drag && !byId.get(drag.id)?.hd;
+  const dragHd = drag ? byId.get(drag.id)?.hd : undefined;
+  const shopHot = dropTarget === 'shop' && !!drag && !!dragHd;
+  const shopBad = dropTarget === 'shop' && !!drag && !dragHd;
 
-  // ── Render ───────────────────────────────────────────────────────────
   return (
     <div className="wl-adm-wall ws-fixed">
       <header className="wl-adm-wall-head">
@@ -328,15 +428,20 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
           <h1>Wall &amp; shop</h1>
         </div>
         <div className="actions">
+          {inFlight && <span className="wl-adm-ws-meta">saving…</span>}
           <a className="wl-adm-wall-add" href="/admin/artworks/bulk-upload">
             Add photos
           </a>
         </div>
       </header>
 
-      {actionErr && <p className="wl-adm-wall-err">{actionErr}</p>}
+      {actionErr && (
+        <p className="wl-adm-wall-err" role="alert">
+          {actionErr}
+        </p>
+      )}
 
-      <div className={`wl-adm-ws-shelves ${wallMin || shopMin ? 'stacked' : ''}`}>
+      <div className="wl-adm-ws-shelves">
         {/* THE WALL */}
         <section
           className={`wl-adm-ws-shelf ${dropTarget === 'wall' ? 'hot-ok' : ''}`}
@@ -350,15 +455,17 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
               type="button"
               className={`wl-adm-ws-min ${wallMin ? 'collapsed' : ''}`}
               aria-label={wallMin ? 'Expand the Wall' : 'Minimize the Wall'}
+              aria-expanded={!wallMin}
               onClick={() => setWallMin((v) => !v)}
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
             </button>
-            <h3>The Wall</h3>
+            <h2>The Wall</h2>
             <span className="wl-adm-ws-meta">homepage gallery · {wall.length}</span>
             <span style={{ flex: 1 }} />
             {savedFlash && <span className="wl-adm-ws-saved">order saved ✓</span>}
-            {!wallMin && <span className="wl-adm-ws-note">Drag to reorder — saves automatically</span>}
+            {dropTarget === 'wall' && <span className="wl-adm-ws-saved">drop to add ↓</span>}
+            {!wallMin && <span className="wl-adm-ws-note">Drag to reorder, saves automatically</span>}
           </div>
           {!wallMin &&
             (wall.length === 0 ? (
@@ -369,7 +476,6 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
                   <figure
                     key={p.id}
                     className={`wl-adm-ws-tile grab ${drag?.id === p.id && drag.from === 'wall' ? 'dragging' : ''}`}
-                    title={p.title}
                     draggable={!inFlight}
                     onDragStart={(e) => {
                       if (inFlight) return;
@@ -421,14 +527,23 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
               type="button"
               className={`wl-adm-ws-min ${shopMin ? 'collapsed' : ''}`}
               aria-label={shopMin ? 'Expand the Shop' : 'Minimize the Shop'}
+              aria-expanded={!shopMin}
               onClick={() => setShopMin((v) => !v)}
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
             </button>
-            <h3>The Shop</h3>
-            <span className="wl-adm-ws-meta">for sale · {shop.length}</span>
+            <h2>The Shop</h2>
+            <span className="wl-adm-ws-meta">in shop · {shop.length}</span>
             <span style={{ flex: 1 }} />
-            {!shopMin && <span className="wl-adm-ws-note">Exactly what customers can buy</span>}
+            {shopHot && <span className="wl-adm-ws-saved">drop to sell ↓</span>}
+            {shopBad && <span className="wl-adm-ws-blocked-note">needs a print file ✕</span>}
+            {!shopMin && !drag && (
+              <span className="wl-adm-ws-note">
+                {blockedCount > 0
+                  ? `${shop.length - blockedCount} buyable, ${blockedCount} hidden`
+                  : 'Exactly what customers can buy'}
+              </span>
+            )}
           </div>
           {!shopMin &&
             (shop.length === 0 ? (
@@ -436,10 +551,10 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
             ) : (
               <div className="wl-adm-ws-grid">
                 {shop.map((p) => (
-                  <figure key={p.id} className="wl-adm-ws-tile" title={p.title}>
-                    {isInShop(p) && !p.buyable && (
+                  <figure key={p.id} className="wl-adm-ws-tile">
+                    {!p.buyable && (
                       <div className="wl-adm-ws-badges">
-                        <span className="wl-adm-ws-badge blocked">hidden — sizes blocked</span>
+                        <span className="wl-adm-ws-badge blocked">hidden · no sizes available</span>
                       </div>
                     )}
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -468,12 +583,29 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
       {/* LIBRARY */}
       <section className="wl-adm-ws-library" aria-label="Library">
         <div className="wl-adm-ws-head open" style={{ flexWrap: 'wrap' }}>
-          <h3>Library</h3>
+          <h2 id="wl-library-heading" tabIndex={-1}>
+            Library
+          </h2>
           <span className="wl-adm-ws-meta">every photo · {counts.all}</span>
+          <span className="wl-adm-ws-note">Removing from a shelf keeps the photo here. ✕ deletes it forever.</span>
           <span style={{ flex: 1 }} />
+          <input
+            className="wl-adm-ws-search"
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search photos…"
+            aria-label="Search the Library by title"
+          />
           <div className="wl-adm-seg">
             {FILTERS.map((f) => (
-              <button key={f.key} className={filter === f.key ? 'on' : ''} onClick={() => setFilter(f.key)}>
+              <button
+                key={f.key}
+                type="button"
+                aria-pressed={filter === f.key}
+                className={filter === f.key ? 'on' : ''}
+                onClick={() => setFilter(f.key)}
+              >
                 {f.label} <span className="sub">{counts[f.key]}</span>
               </button>
             ))}
@@ -481,7 +613,11 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
         </div>
         {libList.length === 0 ? (
           <div className="wl-adm-ws-empty">
-            {counts.all === 0 ? 'No photos yet.' : 'No photos match this filter.'}
+            {counts.all === 0
+              ? 'No photos yet.'
+              : query.trim()
+                ? `No photos match "${query.trim()}".`
+                : 'No photos match this filter.'}
           </div>
         ) : (
           <div className="wl-adm-ws-grid">
@@ -493,7 +629,6 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
                 <div key={p.id} className={`wl-adm-ws-libitem ${drag?.id === p.id && drag.from === 'lib' ? 'dragging' : ''}`}>
                   <figure
                     className="wl-adm-ws-tile grab"
-                    title={p.title}
                     draggable={!inFlight}
                     onDragStart={(e) => {
                       if (inFlight) return;
@@ -509,10 +644,11 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
                   >
                     <div className="wl-adm-ws-badges">
                       {p.hd ? (
-                        <span className="wl-adm-ws-badge hd" title="Has a print file — can be sold">hd</span>
+                        <span className="wl-adm-ws-badge hd">hd</span>
                       ) : (
-                        <span className="wl-adm-ws-badge web" title="No print file yet — upload one to sell this photo">web only</span>
+                        <span className="wl-adm-ws-badge web">web only</span>
                       )}
+                      {p.status === 'retired' && <span className="wl-adm-ws-badge web">retired</span>}
                     </div>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={p.image_web_url} alt={p.title} draggable={false} />
@@ -531,7 +667,9 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
                     </button>
                   </figure>
                   <div className="wl-adm-ws-libctl">
-                    <span className="name">{p.title}</span>
+                    <span className="name" title={p.title}>
+                      {p.title}
+                    </span>
                     <button
                       type="button"
                       role="switch"
@@ -543,12 +681,16 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
                     >
                       Wall
                     </button>
+                    {/* aria-disabled, not disabled: a disabled button suppresses
+                        its tooltip and drops out of the tab order, so the reason
+                        it can't be sold became unreachable. Keep it focusable
+                        and explain on click. */}
                     <button
                       type="button"
                       role="switch"
                       aria-checked={inShop}
-                      className={`wl-adm-ws-pill ${inShop ? 'on-shop' : ''}`}
-                      disabled={inFlight || !p.hd}
+                      aria-disabled={!p.hd || inFlight}
+                      className={`wl-adm-ws-pill ${inShop ? 'on-shop' : ''} ${!p.hd ? 'nohd' : ''}`}
                       title={
                         !p.hd
                           ? 'Needs a print file before it can be sold'
