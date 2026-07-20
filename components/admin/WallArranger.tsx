@@ -101,6 +101,9 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
   const [wallMin, setWallMin] = useState(false);
   const [shopMin, setShopMin] = useState(false);
   const [editPos, setEditPos] = useState<number | null>(null);
+  const [selected, setSelected] = useState<Set<number>>(() => new Set());
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
+  const lastClickedRef = useRef<number | null>(null);
   const [actionErr, setActionErr] = useState<string | null>(null);
 
   const inFlight = busy || savingOrder;
@@ -170,6 +173,37 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
     return q ? base.filter((p) => p.title.toLowerCase().includes(q) || p.slug.includes(q)) : base;
   }, [photos, filter, query]);
 
+  // ── Selection (bulk) ─────────────────────────────────────────────────
+  function toggleSelect(id: number, shift: boolean) {
+    // Capture the anchor BEFORE overwriting the ref: the setSelected updater
+    // runs later (during render), so reading lastClickedRef inside it would see
+    // this very id and collapse the range to one tile.
+    const anchor = lastClickedRef.current;
+    lastClickedRef.current = id;
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const ids = libList.map((p) => p.id);
+      const a = anchor == null ? -1 : ids.indexOf(anchor);
+      const b = ids.indexOf(id);
+      if (shift && a !== -1 && b !== -1) {
+        const [lo, hi] = a < b ? [a, b] : [b, a];
+        for (let i = lo; i <= hi; i++) next.add(ids[i]); // range select adds
+      } else if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+  function selectAllShown() {
+    setSelected(new Set(libList.map((p) => p.id)));
+  }
+  function clearSelection() {
+    setSelected(new Set());
+    lastClickedRef.current = null;
+  }
+
   function setPhoto(id: number, patch: Partial<LibraryPhoto>) {
     setPhotos((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   }
@@ -209,6 +243,93 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
       if (isTimeout(err)) return { ok: false, status: 0, timedOut: true };
       return { ok: false, status: 0, error: 'network error' };
     }
+  }
+
+  // ── Bulk apply to the current selection ──────────────────────────────
+  // Reuses the same gated PATCH the single-photo paths use, one photo at a
+  // time (keeps the single-inFlight invariant + avoids a burst of concurrent
+  // writes to the same rows). Skips no-ops (already placed) and, for shop-add,
+  // non-hd photos; the wall order is re-persisted once at the end if membership
+  // changed. Shop-add is the money path: one batch confirm, not N.
+  type BulkAction = 'wallOn' | 'wallOff' | 'shopOn' | 'shopOff';
+  async function bulkApply(action: BulkAction) {
+    if (inFlight || selected.size === 0) return;
+    const chosen = [...selected].map((id) => byId.get(id)).filter((p): p is LibraryPhoto => !!p);
+    const targets = chosen.filter((p) =>
+      action === 'wallOn' ? !p.on_wall
+      : action === 'wallOff' ? p.on_wall
+      : action === 'shopOn' ? p.hd && !isInShop(p)
+      : isInShop(p),
+    );
+    const skippedNoHd = action === 'shopOn' ? chosen.filter((p) => !p.hd && !isInShop(p)).length : 0;
+    if (targets.length === 0) {
+      fail(
+        action === 'shopOn' && skippedNoHd > 0
+          ? `None of those can be sold yet — ${skippedNoHd} need a print file.`
+          : 'Nothing to change for that action in the current selection.',
+      );
+      return;
+    }
+    if (action === 'shopOn') {
+      // eslint-disable-next-line no-alert
+      if (!window.confirm(`Put ${targets.length} photo${targets.length === 1 ? '' : 's'} up for sale in the shop?`)) return;
+    }
+    setBusy(true);
+    setActionErr(null);
+    const touchesWall = action === 'wallOn' || action === 'wallOff';
+    let done = 0;
+    const failedTitles: string[] = [];
+    for (let i = 0; i < targets.length; i++) {
+      const p = targets[i];
+      setBulkProgress({ done: i, total: targets.length });
+      const body =
+        action === 'wallOn' ? { on_wall: true }
+        : action === 'wallOff' ? { on_wall: false }
+        : action === 'shopOn' ? { status: 'published' as const }
+        : { status: 'retired' as const };
+      const res = await patchArtwork(p.id, body);
+      if (res.timedOut) {
+        setBulkProgress(null);
+        return reconcileAfterTimeout();
+      }
+      if (res.ok) {
+        done++;
+        if (action === 'wallOn') {
+          setPhoto(p.id, { on_wall: true });
+          setWall((cur) => (cur.includes(p.id) ? cur : [...cur, p.id]));
+        } else if (action === 'wallOff') {
+          setPhoto(p.id, { on_wall: false });
+          setWall((cur) => cur.filter((x) => x !== p.id));
+          savedWallIds.current = savedWallIds.current.filter((x) => x !== p.id);
+        } else {
+          setPhoto(p.id, { status: action === 'shopOn' ? 'published' : 'retired' });
+        }
+      } else if (res.status === 404) {
+        dropStale(p.id, p.title);
+      } else {
+        failedTitles.push(p.title);
+      }
+    }
+    // Rewrite 1..N once so the admin order matches the public wall.
+    if (touchesWall) {
+      const ord = await persistOrder(wallIdsRef.current);
+      if (ord.timedOut) {
+        setBulkProgress(null);
+        return reconcileAfterTimeout();
+      }
+    }
+    setBulkProgress(null);
+    setBusy(false);
+    // Keep the selection if anything failed, so the user can retry (targets
+    // re-filters to just the still-unchanged ones); clear on a clean run.
+    if (!failedTitles.length) clearSelection();
+    const parts: string[] = [`${done} updated`];
+    if (skippedNoHd) parts.push(`${skippedNoHd} skipped (no print file)`);
+    if (failedTitles.length) parts.push(`${failedTitles.length} failed`);
+    const msg = parts.join(', ');
+    announce(msg);
+    if (failedTitles.length) fail(`Couldn't update ${failedTitles.length} photo${failedTitles.length === 1 ? '' : 's'}. Reload to see the current state.`);
+    else if (skippedNoHd) setActionErr(`${done} added to the shop. ${skippedNoHd} skipped — they need a print file first.`);
   }
 
   // ── Wall placement (no confirm; reversible) ──────────────────────────
@@ -728,6 +849,22 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
             ))}
           </div>
         </div>
+        {selected.size > 0 && (
+          <div className="wl-adm-ws-bulkbar" role="region" aria-label="Bulk actions">
+            <span className="count">
+              {bulkProgress
+                ? `Working… ${bulkProgress.done} of ${bulkProgress.total}`
+                : `${selected.size} selected`}
+            </span>
+            <button type="button" disabled={inFlight} onClick={() => void bulkApply('wallOn')}>Add to Wall</button>
+            <button type="button" disabled={inFlight} onClick={() => void bulkApply('shopOn')}>Add to Shop</button>
+            <button type="button" disabled={inFlight} onClick={() => void bulkApply('wallOff')}>Take off Wall</button>
+            <button type="button" disabled={inFlight} onClick={() => void bulkApply('shopOff')}>Remove from Shop</button>
+            <span style={{ flex: 1 }} />
+            <button type="button" className="ghost" disabled={inFlight} onClick={selectAllShown}>Select all {libList.length}</button>
+            <button type="button" className="ghost" disabled={inFlight} onClick={clearSelection}>Clear</button>
+          </div>
+        )}
         {libList.length === 0 ? (
           <div className="wl-adm-ws-empty">
             {counts.all === 0
@@ -743,7 +880,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
               const inShop = isInShop(p);
               const delConfirming = confirm?.kind === 'del' && confirm.id === p.id;
               return (
-                <div key={p.id} className={`wl-adm-ws-libitem ${drag?.id === p.id && drag.from === 'lib' ? 'dragging' : ''}`}>
+                <div key={p.id} className={`wl-adm-ws-libitem ${drag?.id === p.id && drag.from === 'lib' ? 'dragging' : ''} ${selected.has(p.id) ? 'selected' : ''}`}>
                   <figure
                     className="wl-adm-ws-tile grab"
                     draggable={!inFlight}
@@ -759,6 +896,20 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
                       setDropTarget(null);
                     }}
                   >
+                    <button
+                      type="button"
+                      role="checkbox"
+                      aria-checked={selected.has(p.id)}
+                      aria-label={`Select ${p.title}`}
+                      className={`wl-adm-ws-check ${selected.has(p.id) ? 'on' : ''}`}
+                      disabled={inFlight}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleSelect(p.id, e.shiftKey);
+                      }}
+                    >
+                      {selected.has(p.id) ? '✓' : ''}
+                    </button>
                     <div className="wl-adm-ws-badges">
                       {p.hd ? (
                         <span className="wl-adm-ws-badge hd">hd</span>

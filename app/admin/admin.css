@@ -3709,6 +3709,21 @@
 
 .wl-adm-ws-libitem { display: flex; flex-direction: column; }
 .wl-adm-ws-libitem.dragging { opacity: 0.4; }
+.wl-adm-ws-libitem.selected > .wl-adm-ws-tile { outline: 2px solid var(--adm-blue); outline-offset: 1px; }
+
+/* Bulk-select checkbox (top-right; hd/web badges are top-left, ✕ bottom-right). */
+.wl-adm-ws-check { position: absolute; top: 5px; right: 5px; z-index: 3; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; border-radius: 4px; border: 1.5px solid rgba(255,255,255,0.9); background: rgba(0,0,0,0.4); color: #fff; font-size: 12px; line-height: 1; cursor: pointer; }
+.wl-adm-ws-check.on { background: var(--adm-blue); border-color: var(--adm-blue); }
+.wl-adm-ws-check:focus-visible { outline: 2px solid var(--adm-blue); outline-offset: 2px; }
+.wl-adm-ws-check:disabled { cursor: default; opacity: 0.6; }
+
+.wl-adm-ws-bulkbar { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; padding: 8px 12px; background: var(--adm-card); border: 1px solid var(--adm-blue); border-radius: var(--adm-radius-md); }
+.wl-adm-ws-bulkbar .count { font-family: var(--f-mono), monospace; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--adm-ink); }
+.wl-adm-ws-bulkbar button { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--adm-rule); background: var(--adm-paper); color: var(--adm-ink); cursor: pointer; }
+.wl-adm-ws-bulkbar button:hover:not(:disabled) { border-color: var(--adm-ink); }
+.wl-adm-ws-bulkbar button:disabled { opacity: 0.5; cursor: default; }
+.wl-adm-ws-bulkbar button.ghost { border-color: transparent; background: transparent; color: var(--adm-ink-2); }
+.wl-adm-ws-bulkbar button:focus-visible { outline: 2px solid var(--adm-blue); outline-offset: 2px; }
 .wl-adm-ws-libctl { display: flex; align-items: center; gap: 6px; padding: 6px 2px 0; }
 .wl-adm-ws-libctl .name { flex: 1; font-size: 11px; color: var(--adm-ink-2); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .wl-adm-ws-pill { font-family: var(--f-mono), monospace; font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; cursor: pointer; line-height: 1; background: transparent; color: var(--adm-ink-2); border: 1px solid var(--adm-rule); }
