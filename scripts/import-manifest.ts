@@ -72,7 +72,7 @@ async function main() {
 
   // --- upsert collections (canonical slugs + hints) ---------------------
   const collectionDbId = new Map<string, number>();  // canonical slug -> db id
-  for (const [i, c] of manifest.collections.entries()) {
+  for (const c of manifest.collections) {
     const canon = canonicalSlug(c.slug) || canonicalSlug(c.title);
     const hint = COLLECTION_HINTS[canon];
     const title = hint?.title || titleize(canon);
@@ -83,15 +83,20 @@ async function main() {
     // display_order is NOT bumped on conflict any more. It is the arranged
     // collection order now (set from /admin/collections), and it drives the
     // admin filter tray and the /shop browse band, so a re-import must not
-    // reset it. A genuinely new collection still gets `i` as a starting order.
+    // reset it. A genuinely new collection appends instead (see below).
     const res = await pool.query(
+      // A NEW collection appends. `i` (the raw manifest index) would drop it
+      // among the already-arranged positions, and on the first import into a
+      // database that already has collections it would put every new one at
+      // the FRONT of /admin/collections and the /shop browse band.
       `INSERT INTO collections (slug, title, tagline, display_order)
-       VALUES ($1, $2, $3, $4)
+       VALUES ($1, $2, $3,
+               (SELECT COALESCE(MAX(display_order), 0) + 1 FROM collections))
        ON CONFLICT (slug) DO UPDATE SET
          title = EXCLUDED.title,
          tagline = COALESCE(collections.tagline, EXCLUDED.tagline)
        RETURNING id`,
-      [canon, title, hint?.tagline || null, i],
+      [canon, title, hint?.tagline || null],
     );
     collectionDbId.set(canon, res.rows[0].id);
     // eslint-disable-next-line no-console
@@ -156,16 +161,17 @@ async function main() {
       const titleGuess = a.title && a.title !== a.slug ? a.title : titleize(baseName);
 
       await withTransaction(async (client) => {
-        // Read the prior collection BEFORE the upsert overwrites it. Without
-        // this there is nothing left to compare against, and the re-file case
-        // below cannot tell a real move from a no-op re-import.
-        const prior = await client.query<{
-          id: number;
-          collection_id: number | null;
-          status: string;
-        }>(`SELECT id, collection_id, status FROM artworks WHERE slug = $1`, [slug]);
-        const priorRow = prior.rows[0] ?? null;
-
+        // NOTE: the ON CONFLICT (slug) path below is UNREACHABLE on a re-run.
+        // `takenSlugs` is seeded from every slug already in the database
+        // (see above), and `uniqueSlug` returns something not in that set, so
+        // the slug is new by construction and this always INSERTs. Two
+        // consequences worth knowing before editing this block:
+        //   1. There is no "re-file an existing artwork" path here to guard.
+        //   2. Re-running this script DUPLICATES the catalogue (slug-2, slug-3)
+        //      and re-uploads every image, because r2Key embeds the slug so the
+        //      existingByUrl skip misses too. The header's "idempotent" claim is
+        //      false. Not fixed here; see the fix list.
+        //
         // display_order is the curated All order now, arranged from /admin/wall.
         // Writing a manifest index here would silently overwrite it on every
         // re-import. New rows keep the column default of 0, the "never placed"
@@ -181,22 +187,6 @@ async function main() {
           [colId, slug, titleGuess, targetUrl],
         );
 
-        // A re-filed row that is ALREADY published never transitions, so the
-        // publish chokepoint never assigns it a chapter position and it would
-        // sort to the FRONT of its new chapter on /shop/collections/[slug],
-        // /portfolio/[slug] and the related rail. Only fires on a REAL change
-        // of collection, so a no-op re-import does not shuffle anything.
-        if (priorRow && priorRow.status === 'published' && priorRow.collection_id !== colId) {
-          await client.query(
-            `UPDATE artworks a
-                SET collection_order = COALESCE(
-                      (SELECT MAX(b.collection_order) FROM artworks b
-                        WHERE b.collection_id = a.collection_id
-                          AND b.status = 'published' AND b.id <> a.id), 0) + 1
-              WHERE a.id = $1 AND a.collection_id IS NOT NULL`,
-            [priorRow.id],
-          );
-        }
       });
       totalImported++;
       process.stdout.write('.');

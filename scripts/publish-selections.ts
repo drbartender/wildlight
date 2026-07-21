@@ -98,16 +98,33 @@ async function main() {
   // Blocks the dry run too, not just --apply: a dry run that prints a confident
   // and entirely wrong diff is worse than one that refuses.
   //
-  // A missing site_settings table (a fresh or pre-migrate database) means the
-  // backfill has not run, so proceed rather than surfacing a raw Postgres error.
-  let backfilled = false;
+  // A missing site_settings table (42P01, a fresh or pre-migrate database) means
+  // the backfill has not run, so proceed rather than surfacing a raw Postgres
+  // error.
+  //
+  // FAILS CLOSED on anything else. A bare `catch { backfilled = false }` would
+  // treat a connection timeout, a statement_timeout, an ECONNRESET or an auth
+  // failure as "not backfilled" and let the script run. This is the process's
+  // FIRST query, which is exactly where a Neon cold-start drop lands, so that
+  // is not a hypothetical: one blip and the converge step mass-unpublishes the
+  // shop, which is the entire thing this guard exists to prevent.
+  let backfilled = true;
   try {
     const marker = await pool.query(
       `SELECT 1 FROM site_settings WHERE key = 'shop_order_backfilled'`,
     );
     backfilled = (marker.rowCount ?? 0) > 0;
-  } catch {
-    backfilled = false;
+  } catch (err) {
+    if ((err as { code?: string }).code === '42P01') {
+      backfilled = false;
+    } else {
+      console.error(
+        'publish:selections could not read the shop-ordering marker, so it cannot ' +
+          'know whether display_order is still the manifest index. Refusing to run.',
+        err,
+      );
+      process.exit(1);
+    }
   }
   if (backfilled) {
     console.error(
