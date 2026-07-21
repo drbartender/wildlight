@@ -725,3 +725,44 @@ BEGIN
       ON CONFLICT (key) DO NOTHING;
   END IF;
 END $$;
+
+-- Plate numbers -----------------------------------------------------------
+-- A stored, permanent accession number, replacing the char-code hash of the
+-- slug that lib/plate-number.ts used to derive. Every artwork gets one,
+-- including wall-only pieces: the lightbox already renders a plate number for
+-- draft rows, because the homepage wall query filters on on_wall with no
+-- status filter.
+--
+-- SCATTERED, NOT SEQUENTIAL. The old hash spread numbers across the whole
+-- WL-0100..WL-9099 range, so a catalogue of a hundred reads like one of
+-- thousands. A plain sequence would print 0100, 0101, 0102 and announce both
+-- the size of the catalogue and the acquisition order of every piece.
+-- 2731 is prime and shares no factor with 9000 (2^3 * 3^2 * 5^3), so
+-- (n * 2731) % 9000 is a PERMUTATION of the range: draws 1..9000 give exactly
+-- 9000 distinct values, with no retry loop and no randomness.
+CREATE SEQUENCE IF NOT EXISTS artworks_plate_no_seq;
+ALTER TABLE artworks ADD COLUMN IF NOT EXISTS plate_no INT;
+ALTER TABLE artworks
+  ALTER COLUMN plate_no
+  SET DEFAULT ((nextval('artworks_plate_no_seq') * 2731) % 9000) + 100;
+
+-- Assign only where missing. The WHERE clause is the ENTIRE idempotency
+-- guard: this file re-runs on every build, and an unguarded assignment would
+-- renumber public plate numbers on every deploy.
+--
+-- NO setval, and adding one would be a bug. `SET col = DEFAULT` evaluates the
+-- column default PER ROW (nextval is VOLATILE, so it cannot be constant
+-- folded), which means the backfill draws from the sequence itself and leaves
+-- it correct by construction. Any hand-written setval would have to track how
+-- many numbers have been DRAWN, not the highest number STORED, because the
+-- permutation makes those unrelated; and a setval to MAX(plate_no) or to a row
+-- count REWINDS the sequence when the highest-numbered artwork is deleted, so
+-- the next upload reissues a number a customer has already seen.
+UPDATE artworks SET plate_no = DEFAULT WHERE plate_no IS NULL;
+
+-- CREATE UNIQUE INDEX IF NOT EXISTS, not ADD CONSTRAINT ... UNIQUE, which has
+-- no IF NOT EXISTS and would error on the second build, breaking every deploy.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_artworks_plate_no ON artworks(plate_no);
+-- No-op on an already-NOT-NULL column: Postgres checks attnotnull and skips
+-- both the change and the verification scan.
+ALTER TABLE artworks ALTER COLUMN plate_no SET NOT NULL;
