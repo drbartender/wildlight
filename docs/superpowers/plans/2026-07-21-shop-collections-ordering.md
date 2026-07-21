@@ -31,11 +31,15 @@
 Two orderings are load-bearing and are not free to rearrange:
 
 1. **Task 3 (script guards) comes before Task 4 (the migration).** The migration is what makes `scripts/publish-selections.ts` destructive; its guard must exist before the hazard, not ten tasks after it.
-2. **Tasks 4 through 13 are ONE push, not 4 through 7.** Two reasons, and the second was missed until the post-Task-7 review:
+2. **PUSH 1 IS TASKS 1 THROUGH 16. PUSH 2 IS TASK 17.** Decided 2026-07-21. The chain of couplings that forces it:
    - `0` sorts first under `ORDER BY display_order, id`, so the migration without the position rules puts every newly published artwork at the top of `/shop`.
-   - The position rules without the arrange UI are worse. Rule 2 appends, so a newly published piece lands past position 12, below the hardcoded `/shop` cut, **invisible, with no admin path to move it.** Append-to-end is the intended design, but it is only usable once Dan can rearrange, and that does not exist until Task 13 wires the shelf to the endpoint. Tasks 4 through 12 are individually correct and collectively a regression.
-3. **Tasks 14 and 16 must ship in the same deploy.** Task 14 gives the admin a working limit field; Task 16 is what makes `/shop` read it. Ship 14 alone and the field saves, the readout says "showing 30 of N buyable", the cut line moves, and `/shop` still returns exactly 12. A control that lies is worse than no control.
-4. **Task 17 widens Task 16's `Promise.all` in place**, so once 17 lands, 16 cannot be reverted alone without a conflict. Revert both or neither.
+   - Rule 2 appends, so the position rules without the arrange UI strand every newly published piece past position 12, below the hardcoded `/shop` cut, **invisible with no admin path to move it.** Append-to-end is the intended design; it is only usable once Dan can rearrange, which is Task 13.
+   - Stopping at 13 means arranging blind. The cut line (Task 14) counts BUYABLE tiles, which cannot be eyeballed from the shelf, so without it there is no way to know what is above the fold.
+   - Task 14's limit field is inert until Task 16 teaches `/shop` to read the setting. Shipping 14 without 16 puts a control on screen that saves, confirms, and changes nothing.
+   - Task 17 is an additive band with no coupling in either direction, so it ships separately and keeps push 1's public blast radius to: the heading rename, the count fix, the limit becoming live, and the chapter pages switching to `collection_order` (verified identical output post-backfill).
+
+   Tasks 1 through 3 ride push 1 as well. The `publish-selections` fence is keyed on the backfill marker, which only exists once Task 4 runs, so it is inert until then and safe to ship alongside.
+3. **Task 17 widens Task 16's `Promise.all` in place**, so once 17 lands, 16 cannot be reverted alone without a conflict. That is a revert constraint, not a push constraint: pushing 16 and then 17 later is fine.
 
 Tasks 1 through 10 are a safe stopping point **for committing**, not for pushing: schema, rules, and endpoints, with no UI and no public read changed. The first safe PUSH point is the end of Task 13.
 
