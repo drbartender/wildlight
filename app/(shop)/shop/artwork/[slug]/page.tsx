@@ -21,11 +21,8 @@ interface ArtworkRow {
   image_height: number | null;
   collection_slug: string | null;
   collection_title: string | null;
-  /** 1-based index among published artworks in the global catalog. */
-  plate_idx: number;
+  /** Stored accession number. Permanent, unlike the index it replaced. */
   plate_no: number;
-  /** Total published artworks in the catalog. */
-  plate_total: number;
   edition_size: number | null;
   signed: boolean;
   sold_count: number;
@@ -49,15 +46,13 @@ export default async function ArtworkPage({
     `WITH published AS (
        SELECT a.id, a.slug, a.title, a.artist_note, a.year_shot, a.location,
               a.image_web_url, a.image_width, a.image_height,
-              a.collection_id, a.edition_size, a.signed, a.plate_no,
-              ROW_NUMBER() OVER (ORDER BY a.display_order, a.id) AS plate_idx,
-              COUNT(*) OVER () AS plate_total
+              a.collection_id, a.edition_size, a.signed, a.plate_no
        FROM artworks a
        WHERE a.status = 'published'
      )
      SELECT p.id, p.slug, p.title, p.artist_note, p.year_shot, p.location,
             p.image_web_url, p.image_width, p.image_height,
-            p.plate_idx::int, p.plate_total::int, p.plate_no,
+            p.plate_no,
             p.edition_size, p.signed,
             COALESCE((
               SELECT COUNT(oi.id)::int
@@ -144,10 +139,11 @@ export default async function ArtworkPage({
             <Link href="/shop/collections">← Collections</Link>
           )}
         </span>
-        <span>
-          {plate} · Plate {String(art.plate_idx).padStart(3, '0')} of{' '}
-          {String(art.plate_total).padStart(3, '0')}
-        </span>
+        {/* No "of NN": a permanent number in a catalogue with gaps cannot
+            honestly claim a denominator. The index it replaced was computed
+            from display_order, which the admin now deliberately arranges, so
+            it moved on every reorder. */}
+        <span>{plate}</span>
       </div>
 
       <section className="wl-art">
