@@ -7,33 +7,14 @@ export const revalidate = 60;
 
 interface PlateRow extends GridItem {}
 
-interface CountsRow {
-  n: number;
-  latest: string | null;
-}
-
 interface ChapterRow {
   slug: string;
   title: string;
   n: number;
 }
 
-function seasonOf(date: Date): string {
-  const m = date.getUTCMonth(); // 0..11
-  const y = date.getUTCFullYear();
-  const yy = `'${String(y).slice(2)}`;
-  if (m === 11 || m <= 1) return `Winter ${m === 11 ? `'${String((y + 1)).slice(2)}` : yy}`;
-  if (m <= 4) return `Spring ${yy}`;
-  if (m <= 7) return `Summer ${yy}`;
-  return `Fall ${yy}`;
-}
-
 export default async function HomePage() {
-  const [countsRes, limit, chaptersRes] = await Promise.all([
-    pool.query<CountsRow>(
-      `SELECT COUNT(*)::int AS n, MAX(published_at)::text AS latest
-       FROM artworks WHERE status='published'`,
-    ),
+  const [limit, chaptersRes] = await Promise.all([
     getShopIndexLimit(),
     // Counts BUYABLE published works, not merely published, and the inner join
     // drops zero-count chapters. /shop/collections counts status='published'
@@ -80,47 +61,26 @@ export default async function HomePage() {
       [limit],
   );
 
-  const count = countsRes.rows[0]?.n ?? 0;
-  const latestRaw = countsRes.rows[0]?.latest ?? null;
-  const latestLabel = latestRaw ? seasonOf(new Date(latestRaw)) : '—';
   const plates = platesRes.rows;
 
   return (
     <>
+      {/* One band, not two. The headline and Dan's note used to be stacked
+          sections, which put the first photograph 939px down — a whole
+          viewport of type before any picture on a /shop landing. The stats
+          column that sat here (Est. / Plates on file / Latest) is gone: the
+          header lockup already reads "Est. 2017" two inches away, and the
+          note is the thing worth the space. */}
       <section className="wl-masthead">
         <div className="wl-masthead-intro">
           <span className="wl-eyebrow">Wildlight Imagery · Aurora, Colorado</span>
           <h1>
             Exploring <em>my light</em>
-            <br /> for as long as I<br /> can remember.
+            <br /> for as long as I can remember.
           </h1>
         </div>
-        <div className="wl-masthead-side">
-          <div>
-            <b>Est.</b> 2017
-          </div>
-          <div>
-            <b>Plates on file</b> {String(count).padStart(3, '0')}
-          </div>
-          <div>
-            <b>Latest</b> {latestLabel}
-          </div>
-          <div style={{ marginTop: 8 }}>
-            Printed to order ·<br />
-            shipped archival
-          </div>
-        </div>
-      </section>
-
-      <section className="wl-masthead-lede">
-        <div>
-          <div className="label">
-            A note from
-            <br />
-            the studio
-          </div>
-        </div>
-        <div>
+        <aside className="wl-masthead-note">
+          <div className="label">A note from the studio</div>
           <p>
             My father handed me a camera when I was a child and I never put it
             down. I'm a photographic rebel — I take the rules I learned at the
@@ -132,20 +92,18 @@ export default async function HomePage() {
             considered selection, added sparingly.
           </p>
           <div className="sig">— Dan</div>
-        </div>
+        </aside>
       </section>
 
       <section className="wl-sheet">
         <header className="wl-sheet-h">
           <h2>Selected works</h2>
           <div className="wl-rule"></div>
-          {/* Describes the GRID, not the archive. The old count was every
-              published work, so it read "24 works on file" above twelve
-              plates. The masthead's "Plates on file" keeps the total, which
-              is where a total belongs. */}
-          <span className="count">
-            {String(plates.length).padStart(2, '0')} shown
-          </span>
+          {/* Was "12 shown", which answered a question nobody asked — the
+              plates are right there to be counted. This slot is the last
+              thing read before the grid, so it holds the one fact a buyer
+              actually needs at that moment. */}
+          <span className="count">Printed to order · shipped archival</span>
         </header>
         {plates.length > 0 ? (
           <ArtworkGrid items={plates} />
