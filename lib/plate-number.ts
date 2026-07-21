@@ -1,10 +1,17 @@
-// Deterministic plate-number for an artwork slug.
+// Plate numbers. The number itself is `artworks.plate_no`, assigned once by a
+// column default and never rewritten; this module only renders and validates.
 //
-// Same slug in, same plate number out — stable for the lifetime of the slug.
-// If a slug is renamed, the plate number will change; since the slug is part
-// of the URL, renames are rare and intentional.
+// It used to be DERIVED here, as a char-code hash of the slug. That meant a
+// rename changed a piece's number, and the number recorded nothing about the
+// catalogue: it could not be looked up, referenced, or trusted to stay put.
+// See docs/superpowers/specs/2026-07-21-plate-numbers-design.md.
 //
-// Range: WL–0100 through WL–9099 (4 digits, en-dash separator).
+// Range: WL–0100 through WL–9099 (4 digits, en-dash separator), enforced in the
+// database by artworks_plate_no_chk rather than by convention.
+//
+// IMPORTS NOTHING, deliberately: reached from 'use client' components, and
+// anything pulling in lib/db.ts drags `pg` into the client bundle, which fails
+// only at `next build`.
 
 /**
  * Render a stored plate number. The number itself lives in
@@ -44,17 +51,4 @@ export function parsePlateParam(raw: string | null): number | null {
   const n = Number(raw);
   if (n < 100 || n > 9099) return null;
   return n;
-}
-
-/**
- * DEPRECATED. Derived from the slug, so it changes when a slug is renamed and
- * carries no record of when a piece entered the catalogue. Being replaced by
- * the stored `artworks.plate_no`; call sites migrate one at a time and this is
- * deleted once nothing imports it.
- */
-export function plateNumber(slug: string): string {
-  let sum = 0;
-  for (let i = 0; i < slug.length; i++) sum += slug.charCodeAt(i);
-  const n = (sum % 9000) + 100;
-  return `WL–${String(n).padStart(4, '0')}`;
 }
