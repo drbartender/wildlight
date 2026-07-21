@@ -65,6 +65,42 @@ const COLLECTION_HINTS: Record<string, { title: string; tagline: string }> = {
 };
 
 async function main() {
+  // DISABLED. This script is NOT idempotent, despite its own comments saying so,
+  // and a re-run is destructive in three ways.
+  //
+  // `takenSlugs` is seeded from every slug already in the database, and
+  // `uniqueSlug` returns something not in that set, so the deterministic
+  // `<collection>-<title>` slug is already taken on a second run and comes back
+  // as `...-2`. That is a NEW slug, so ON CONFLICT (slug) never fires and the
+  // row is INSERTed again. Because r2Key embeds the slug, the target URL
+  // differs too, so the existingByUrl upload-skip misses and every image is
+  // re-uploaded. A third run gives `...-3`. It also overwrites admin-edited
+  // titles via `title = EXCLUDED.title`.
+  //
+  // Fixing it properly needs a stable identity for "which row is this manifest
+  // entry", which slug cannot be — that is the bug. The alternative, seeding
+  // takenSlugs per-run, lets an import silently adopt and overwrite an
+  // admin-created artwork that happens to share a slug.
+  //
+  // It is fenced rather than repaired because its input is gone (there is no
+  // scraped/ directory; the catalogue was imported in April 2026) and its
+  // sibling scripts/publish-selections.ts is fenced for the same reason. If a
+  // re-import is ever genuinely needed, that is a redesign, not a re-run.
+  // The override is a string, not a boolean flag, so it cannot be set by
+  // accident and reads as an acknowledgement at the call site. It also keeps
+  // the body reachable for the type checker, which narrows everything after a
+  // bare process.exit() to `never`.
+  if (process.env.ALLOW_MANIFEST_IMPORT !== 'yes-i-know-this-duplicates') {
+    console.error(
+      'import:manifest is disabled. It is not idempotent: a re-run duplicates the ' +
+        'entire catalogue as <slug>-2, re-uploads every image to R2, and overwrites ' +
+        'admin-edited titles. See the comment in scripts/import-manifest.ts.\n' +
+        'If you have read that comment and still mean it, set ' +
+        'ALLOW_MANIFEST_IMPORT=yes-i-know-this-duplicates.',
+    );
+    process.exit(1);
+  }
+
   const manifestPath = resolve(process.cwd(), 'scraped/manifest.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Manifest;
   // eslint-disable-next-line no-console
