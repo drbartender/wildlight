@@ -3679,6 +3679,16 @@
 .wl-adm-ws-tileacts { position: absolute; right: 5px; bottom: 5px; z-index: 3; display: flex; gap: 4px; }
 
 .wl-adm-ws-badges { position: absolute; top: 5px; left: 5px; z-index: 2; display: flex; gap: 4px; }
+/* The Shop tile now carries a position badge (top left, like the Wall) AND
+   status badges, which the Wall tile never did, and both default to
+   top:5px/left:5px. Move the badges right rather than layering them on the
+   number. */
+.wl-adm-ws-shelf.shop .wl-adm-ws-badges { left: auto; right: 5px; }
+.wl-adm-ws-badge.chapter {
+  background: var(--adm-card);
+  color: var(--adm-muted);
+  border: 1px solid var(--adm-rule);
+}
 .wl-adm-ws-badge { font-family: var(--f-mono), monospace; font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; padding: 2px 6px; border-radius: 3px; background: var(--adm-scrim); }
 .wl-adm-ws-badge.hd { color: var(--adm-blue); border: 1px solid var(--adm-blue); }
 .wl-adm-ws-badge.web { color: var(--adm-ink-2); border: 1px solid var(--adm-rule); }

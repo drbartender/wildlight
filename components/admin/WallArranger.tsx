@@ -94,8 +94,12 @@ export function WallArranger({
   const resizeRef = useRef<{ startY: number; startH: number } | null>(null);
   const bandIntentRef = useRef<number | null>(null);
   const [actionErr, setActionErr] = useState<string | null>(null);
+  // The Shop shelf owns its own saving state; it reports up so the Wall and
+  // Library gate on it too. Kept separate from `savingOrder`, which is the
+  // Wall's, so neither shelf can disable the other's controls by accident.
+  const [shopBusy, setShopBusy] = useState(false);
 
-  const inFlight = busy || savingOrder;
+  const inFlight = busy || savingOrder || shopBusy;
 
   // Persisted band height (the resize handle). Read post-mount so SSR renders
   // the CSS default and there's no hydration mismatch.
@@ -995,7 +999,13 @@ export function WallArranger({
           photos={photos}
           collections={collections}
           initialLimit={shopIndexLimit}
-          parentInFlight={inFlight}
+          // Deliberately NOT `inFlight`: that includes shopBusy, so passing it
+          // would feed the shelf's own saving state back in as parent state.
+          parentInFlight={busy || savingOrder}
+          onBusyChange={setShopBusy}
+          announce={announce}
+          fail={fail}
+          onTimeout={reconcileAfterTimeout}
           minimized={shopMin}
           onMinimize={() => minimizePane('shop')}
           dropTarget={dropTarget}
