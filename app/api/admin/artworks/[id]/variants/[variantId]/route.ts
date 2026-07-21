@@ -5,6 +5,7 @@ import { pool, parsePathId } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 import { requireSameOrigin } from '@/lib/origin-check';
 import { logger } from '@/lib/logger';
+import { adminRoute } from '@/lib/admin-route';
 
 const Body = z
   .object({
@@ -15,7 +16,7 @@ const Body = z
     message: 'nothing to update',
   });
 
-export async function PATCH(
+async function PATCH_impl(
   req: Request,
   ctx: { params: Promise<{ id: string; variantId: string }> },
 ) {
@@ -79,3 +80,5 @@ export async function PATCH(
   });
   return NextResponse.json({ variant: r.rows[0] });
 }
+
+export const PATCH = adminRoute(PATCH_impl);

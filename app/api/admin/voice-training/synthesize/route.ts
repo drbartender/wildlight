@@ -10,6 +10,7 @@ import { pool } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { synthesizeProfile, type SynthesizeInput } from '@/lib/voice-trainer';
 import { recordAndCheckRateLimit } from '@/lib/rate-limit';
+import { adminRoute } from '@/lib/admin-route';
 
 // POST /api/admin/voice-training/synthesize
 //
@@ -37,7 +38,7 @@ interface AbRow {
   pick_reason: string | null;
 }
 
-export async function POST() {
+async function POST_impl() {
   const session = await requireAdmin();
   // Synthesize is the heaviest call in the trainer (~5k tokens). Cap at
   // 10/hr so a runaway loop or stolen cookie can't drain budget.
@@ -151,3 +152,5 @@ export async function POST() {
     );
   }
 }
+
+export const POST = adminRoute(POST_impl);

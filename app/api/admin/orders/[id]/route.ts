@@ -2,8 +2,9 @@ export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 import { pool, parsePathId } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
+import { adminRoute } from '@/lib/admin-route';
 
-export async function GET(
+async function GET_impl(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -29,3 +30,5 @@ export async function GET(
     events: events.rows,
   });
 }
+
+export const GET = adminRoute(GET_impl);

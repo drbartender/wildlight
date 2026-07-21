@@ -5,6 +5,7 @@ import { requireAdmin } from '@/lib/session';
 import { pool } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { INTERVIEW_QUESTIONS } from '@/lib/voice-trainer';
+import { adminRoute } from '@/lib/admin-route';
 
 // GET /api/admin/voice-training/state
 //
@@ -53,7 +54,7 @@ interface ProfileRow {
   created_by: string | null;
 }
 
-export async function GET() {
+async function GET_impl() {
   await requireAdmin();
   try {
     const [answers, samples, ab, profiles] = await Promise.all([
@@ -154,3 +155,5 @@ export async function GET() {
     return NextResponse.json({ error: 'load failed' }, { status: 500 });
   }
 }
+
+export const GET = adminRoute(GET_impl);

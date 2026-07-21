@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/session';
 import { pool, withTransaction, parsePathId } from '@/lib/db';
 import { logger } from '@/lib/logger';
+import { adminRoute } from '@/lib/admin-route';
 
 // POST /api/admin/voice-training/profile/[id]/activate
 //
@@ -27,7 +28,7 @@ import { logger } from '@/lib/logger';
 // returns rowCount=1, and we'd return 200 OK while silently dropping
 // the active profile.
 
-export async function POST(
+async function POST_impl(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -81,7 +82,7 @@ export async function POST(
 // than parsePathId() because parsePathId rejects 0 (it requires n > 0).
 // DO NOT refactor to `parsePathId(raw) === 0` — that returns null for
 // "0" input and the convention silently breaks.
-export async function DELETE(
+async function DELETE_impl(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -102,3 +103,6 @@ export async function DELETE(
     return NextResponse.json({ error: 'deactivate failed' }, { status: 500 });
   }
 }
+
+export const POST = adminRoute(POST_impl);
+export const DELETE = adminRoute(DELETE_impl);

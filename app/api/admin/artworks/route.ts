@@ -6,12 +6,13 @@ import { requireAdmin } from '@/lib/session';
 import { requireSameOrigin } from '@/lib/origin-check';
 import { publishArtworks } from '@/lib/publish-artworks';
 import { ConflictError } from '@/lib/errors';
+import { adminRoute } from '@/lib/admin-route';
 
 function isFkViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23503';
 }
 
-export async function GET(req: Request) {
+async function GET_impl(req: Request) {
   await requireAdmin();
   const url = new URL(req.url);
   const status = url.searchParams.get('status');
@@ -70,7 +71,7 @@ const BulkBody = z.object({
   collectionId: z.number().int().optional(),
 });
 
-export async function POST(req: Request) {
+async function POST_impl(req: Request) {
   await requireSameOrigin();
   await requireAdmin();
   const parsed = BulkBody.safeParse(await req.json().catch(() => null));
@@ -207,3 +208,6 @@ export async function POST(req: Request) {
   }
   return NextResponse.json({ ok: true });
 }
+
+export const GET = adminRoute(GET_impl);
+export const POST = adminRoute(POST_impl);

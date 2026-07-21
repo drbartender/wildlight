@@ -6,6 +6,7 @@ import { requireAdmin } from '@/lib/session';
 import { logger } from '@/lib/logger';
 import { signedPublicUploadUrl, publicUrlFor } from '@/lib/r2';
 import { recordAndCheckRateLimit } from '@/lib/rate-limit';
+import { adminRoute } from '@/lib/admin-route';
 
 // Studio composer image upload — presigned-URL path so 25-100MB images
 // bypass Vercel's function body limit. Client posts {filename, type,
@@ -39,7 +40,7 @@ const Body = z.object({
   size: z.number().int().min(1).max(MAX_BYTES),
 });
 
-export async function POST(req: Request) {
+async function POST_impl(req: Request) {
   const session = await requireAdmin();
 
   // 60 presigns per minute per admin email — caps R2 egress cost from
@@ -100,3 +101,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'presign failed' }, { status: 500 });
   }
 }
+
+export const POST = adminRoute(POST_impl);

@@ -6,6 +6,7 @@ import { requireAdmin } from '@/lib/session';
 import { requireSameOrigin } from '@/lib/origin-check';
 import { logger } from '@/lib/logger';
 import { isValidShopIndexLimit } from '@/lib/shop-limit';
+import { adminRoute } from '@/lib/admin-route';
 
 // The key is an ENUM, not a free-form string, so a generic key/value table can
 // never be written by a generic writer.
@@ -14,7 +15,7 @@ const Body = z.object({
   value: z.number().int().refine(isValidShopIndexLimit, 'out of range'),
 });
 
-export async function PATCH(req: Request) {
+async function PATCH_impl(req: Request) {
   await requireSameOrigin();
   await requireAdmin();
 
@@ -40,3 +41,5 @@ export async function PATCH(req: Request) {
 
   return NextResponse.json({ ok: true });
 }
+
+export const PATCH = adminRoute(PATCH_impl);

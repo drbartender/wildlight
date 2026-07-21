@@ -3,10 +3,11 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { pool, parsePathId } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
+import { adminRoute } from '@/lib/admin-route';
 
 const Body = z.object({ text: z.string().min(1).max(500) });
 
-export async function POST(
+async function POST_impl(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -55,3 +56,5 @@ export async function POST(
     { status: 201 },
   );
 }
+
+export const POST = adminRoute(POST_impl);

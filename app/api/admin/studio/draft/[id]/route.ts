@@ -13,6 +13,7 @@ import {
   deleteNewsletterDraft,
   type StudioKind,
 } from '@/lib/studio-drafts';
+import { adminRoute } from '@/lib/admin-route';
 
 function readKind(req: Request): StudioKind | null {
   const k = new URL(req.url).searchParams.get('kind');
@@ -21,7 +22,7 @@ function readKind(req: Request): StudioKind | null {
 
 // ─── GET ────────────────────────────────────────────────────────────
 
-export async function GET(
+async function GET_impl(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -82,7 +83,7 @@ const Patch = z.object({
   studioMeta: StudioMetaSchema.optional(),
 });
 
-export async function PATCH(
+async function PATCH_impl(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -121,7 +122,7 @@ export async function PATCH(
 
 // ─── DELETE ─────────────────────────────────────────────────────────
 
-export async function DELETE(
+async function DELETE_impl(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -143,3 +144,7 @@ export async function DELETE(
     return NextResponse.json({ error: 'delete failed' }, { status: 500 });
   }
 }
+
+export const GET = adminRoute(GET_impl);
+export const PATCH = adminRoute(PATCH_impl);
+export const DELETE = adminRoute(DELETE_impl);

@@ -6,6 +6,7 @@ import { requireAdmin } from '@/lib/session';
 import { pool } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { INTERVIEW_QUESTIONS } from '@/lib/voice-trainer';
+import { adminRoute } from '@/lib/admin-route';
 
 // PUT /api/admin/voice-training/interview
 //
@@ -19,7 +20,7 @@ const Body = z.object({
   answer: z.string().max(4000),
 });
 
-export async function PUT(req: Request) {
+async function PUT_impl(req: Request) {
   await requireAdmin();
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
@@ -57,3 +58,5 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: 'save failed' }, { status: 500 });
   }
 }
+
+export const PUT = adminRoute(PUT_impl);

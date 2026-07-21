@@ -6,6 +6,7 @@ import { logger } from '@/lib/logger';
 import { createJournalDraft, createNewsletterDraft } from '@/lib/studio-drafts';
 import { recordAndCheckRateLimit } from '@/lib/rate-limit';
 import { isTransientPgError, withConnRetry } from '@/lib/db';
+import { adminRoute } from '@/lib/admin-route';
 
 // POST /api/admin/studio/draft  body { kind } → { id, kind }
 //
@@ -17,7 +18,7 @@ const Body = z.object({
   kind: z.enum(['journal', 'newsletter']),
 });
 
-export async function POST(req: Request) {
+async function POST_impl(req: Request) {
   const session = await requireAdmin();
   try {
     // Cap blank-row creation. The composer auto-creates exactly one row
@@ -65,3 +66,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'create failed' }, { status: 500 });
   }
 }
+
+export const POST = adminRoute(POST_impl);

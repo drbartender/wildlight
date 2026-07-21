@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
 import { requireAdmin } from '@/lib/session';
 import { signedPrivateUploadUrl } from '@/lib/r2';
+import { adminRoute } from '@/lib/admin-route';
 
 const MAX_SIZE = 500 * 1024 * 1024;
 
@@ -19,7 +20,7 @@ const Body = z.object({
   size: z.number().int().positive(),
 });
 
-export async function POST(req: Request) {
+async function POST_impl(req: Request) {
   await requireAdmin();
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
@@ -48,3 +49,5 @@ export async function POST(req: Request) {
     expiresAt: new Date(Date.now() + 900_000).toISOString(),
   });
 }
+
+export const POST = adminRoute(POST_impl);

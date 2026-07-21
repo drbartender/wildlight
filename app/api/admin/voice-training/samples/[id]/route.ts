@@ -4,10 +4,11 @@ import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/session';
 import { pool, parsePathId } from '@/lib/db';
 import { logger } from '@/lib/logger';
+import { adminRoute } from '@/lib/admin-route';
 
 // DELETE /api/admin/voice-training/samples/[id]
 
-export async function DELETE(
+async function DELETE_impl(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -28,3 +29,5 @@ export async function DELETE(
     return NextResponse.json({ error: 'delete failed' }, { status: 500 });
   }
 }
+
+export const DELETE = adminRoute(DELETE_impl);

@@ -2,6 +2,7 @@ export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/session';
 import { getPrivateBucketCors, signedPrivateUploadUrl } from '@/lib/r2';
+import { adminRoute } from '@/lib/admin-route';
 
 // Read-only diagnostic for the bulk-upload presigned-PUT path. Returns
 // the bucket production is actually targeting + the CORS policy that's
@@ -12,7 +13,7 @@ import { getPrivateBucketCors, signedPrivateUploadUrl } from '@/lib/r2';
 // TEMPORARY — added to diagnose the 2026-04 bulk-upload CORS failure.
 // Remove (or rename + repurpose as a permanent ops endpoint) once the
 // upload path is confirmed working in production.
-export async function GET() {
+async function GET_impl() {
   await requireAdmin();
 
   const bucketPrivate = process.env.R2_BUCKET_PRIVATE ?? null;
@@ -58,3 +59,5 @@ export async function GET() {
     sampleError,
   });
 }
+
+export const GET = adminRoute(GET_impl);

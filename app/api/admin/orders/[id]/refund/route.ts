@@ -5,8 +5,9 @@ import { requireAdmin } from '@/lib/session';
 import { getStripe } from '@/lib/stripe';
 import { printful } from '@/lib/printful';
 import { logger } from '@/lib/logger';
+import { adminRoute } from '@/lib/admin-route';
 
-export async function POST(
+async function POST_impl(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -90,3 +91,5 @@ export async function POST(
     return NextResponse.json({ error: 'refund failed' }, { status: 500 });
   }
 }
+
+export const POST = adminRoute(POST_impl);

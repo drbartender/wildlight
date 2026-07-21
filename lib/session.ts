@@ -85,7 +85,13 @@ export async function requireAdminOrRedirect(): Promise<AdminTokenPayload> {
 }
 
 /**
- * Use in Route Handlers (API routes). Throws a 401-shaped Response when unauthenticated.
+ * Use in Route Handlers (API routes). Throws a 401 Response when unauthenticated.
+ *
+ * The throw only reaches the client as a 401 if the handler is wrapped in
+ * `adminRoute` (lib/admin-route.ts). Next does NOT surface a thrown Response
+ * from a route handler on its own: it rethrows, and the caller gets a bare 500
+ * with an empty body. Every handler under app/api/admin is wrapped; a new one
+ * must be too, or it will fail closed but lie about why.
  */
 export async function requireAdmin(): Promise<AdminTokenPayload> {
   const s = await getAdminSession();

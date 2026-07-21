@@ -6,6 +6,7 @@ import { requireAdmin } from '@/lib/session';
 import { sendBroadcast } from '@/lib/email';
 import { sanitizeJournalHtml } from '@/lib/journal-html';
 import { logger } from '@/lib/logger';
+import { adminRoute } from '@/lib/admin-route';
 
 const Body = z.object({
   subject: z.string().min(1).max(200),
@@ -14,7 +15,7 @@ const Body = z.object({
   idempotencyKey: z.string().uuid().optional(),
 });
 
-export async function POST(req: Request) {
+async function POST_impl(req: Request) {
   const session = await requireAdmin();
   const p = Body.safeParse(await req.json().catch(() => null));
   if (!p.success) {
@@ -91,3 +92,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'send failed' }, { status: 502 });
   }
 }
+
+export const POST = adminRoute(POST_impl);

@@ -2,8 +2,9 @@ export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
+import { adminRoute } from '@/lib/admin-route';
 
-export async function GET() {
+async function GET_impl() {
   await requireAdmin();
   const { rows } = await pool.query(
     `SELECT o.id, o.status, o.customer_email, o.customer_name, o.total_cents,
@@ -16,3 +17,5 @@ export async function GET() {
   );
   return NextResponse.json({ rows });
 }
+
+export const GET = adminRoute(GET_impl);

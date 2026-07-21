@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { requireAdmin } from '@/lib/session';
 import { uploadPublic } from '@/lib/r2';
 import { logger } from '@/lib/logger';
+import { adminRoute } from '@/lib/admin-route';
 
 const ALLOWED_TYPES = new Set([
   'image/jpeg',
@@ -20,7 +21,7 @@ const EXT_BY_TYPE: Record<string, string> = {
   'image/gif': 'gif',
 };
 
-export async function POST(req: Request) {
+async function POST_impl(req: Request) {
   await requireAdmin();
 
   const form = await req.formData().catch(() => null);
@@ -53,3 +54,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'upload failed' }, { status: 502 });
   }
 }
+
+export const POST = adminRoute(POST_impl);

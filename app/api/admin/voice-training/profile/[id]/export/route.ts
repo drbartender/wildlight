@@ -6,6 +6,7 @@ import { logger } from '@/lib/logger';
 import type { VoiceRule } from '@/lib/voice-profile';
 import { VOICE_LETTER, type VoiceNoteSample } from '@/lib/studio-voice';
 import { safeString } from '@/lib/voice-export';
+import { adminRoute } from '@/lib/admin-route';
 
 // GET /api/admin/voice-training/profile/[id]/export
 //
@@ -27,7 +28,7 @@ interface Row {
 }
 
 
-export async function GET(
+async function GET_impl(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -121,3 +122,5 @@ ${samplesSrc}
     return new Response('export failed', { status: 500 });
   }
 }
+
+export const GET = adminRoute(GET_impl);

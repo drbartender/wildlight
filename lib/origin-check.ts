@@ -10,6 +10,11 @@ import { headers } from 'next/headers';
  * Browsers send `sec-fetch-site` on every fetch. We require `same-origin`
  * or fall back to comparing Origin to Host. Server-to-server callers (no
  * Origin header) are allowed — auth still gates them.
+ *
+ * Denial is a THROWN 403 Response, which only reaches the client as a 403 if
+ * the handler is wrapped in `adminRoute` (lib/admin-route.ts). Next rethrows a
+ * thrown Response from a route handler, so unwrapped it becomes a bare 500 with
+ * an empty body.
  */
 export async function requireSameOrigin(): Promise<void> {
   const h = await headers();

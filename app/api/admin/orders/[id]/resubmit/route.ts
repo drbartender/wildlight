@@ -5,6 +5,7 @@ import { requireAdmin } from '@/lib/session';
 import { printful } from '@/lib/printful';
 import { signedPrivateUrl } from '@/lib/r2';
 import { logger } from '@/lib/logger';
+import { adminRoute } from '@/lib/admin-route';
 
 interface OrderRow {
   id: number;
@@ -21,7 +22,7 @@ interface ItemRow {
   quantity: number;
 }
 
-export async function POST(
+async function POST_impl(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -163,3 +164,5 @@ export async function POST(
     return NextResponse.json({ error: 'resubmit failed' }, { status: 500 });
   }
 }
+
+export const POST = adminRoute(POST_impl);

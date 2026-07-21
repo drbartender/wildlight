@@ -5,8 +5,9 @@ import { requireAdmin } from '@/lib/session';
 import { logger } from '@/lib/logger';
 import { researchSeoTrends } from '@/lib/studio';
 import { recordAndCheckRateLimit } from '@/lib/rate-limit';
+import { adminRoute } from '@/lib/admin-route';
 
-export async function POST() {
+async function POST_impl() {
   const session = await requireAdmin();
   // Same Anthropic-cost rationale as /generate. SEO research is the
   // smaller-but-still-expensive web_search call; 60/hour caps it.
@@ -38,3 +39,5 @@ export async function POST() {
     );
   }
 }
+
+export const POST = adminRoute(POST_impl);

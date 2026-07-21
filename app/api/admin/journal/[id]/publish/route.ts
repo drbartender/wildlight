@@ -4,10 +4,11 @@ import { z } from 'zod';
 import { pool, parsePathId } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 import { logger } from '@/lib/logger';
+import { adminRoute } from '@/lib/admin-route';
 
 const Body = z.object({ published: z.boolean() });
 
-export async function POST(
+async function POST_impl(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -44,3 +45,5 @@ export async function POST(
     return NextResponse.json({ error: 'publish failed' }, { status: 500 });
   }
 }
+
+export const POST = adminRoute(POST_impl);

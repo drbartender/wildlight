@@ -2,8 +2,9 @@ export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
+import { adminRoute } from '@/lib/admin-route';
 
-export async function GET() {
+async function GET_impl() {
   await requireAdmin();
   const r = await pool.query<{ id: number; slug: string; title: string }>(
     `SELECT id, slug, title FROM artworks
@@ -13,7 +14,7 @@ export async function GET() {
   return NextResponse.json({ count: r.rowCount, rows: r.rows });
 }
 
-export async function POST() {
+async function POST_impl() {
   await requireAdmin();
   const r = await pool.query<{ slug: string }>(
     `UPDATE artworks
@@ -26,3 +27,6 @@ export async function POST() {
     slugs: r.rows.map((row) => row.slug),
   });
 }
+
+export const GET = adminRoute(GET_impl);
+export const POST = adminRoute(POST_impl);

@@ -10,6 +10,7 @@ import { pool } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { generateAbPair } from '@/lib/voice-trainer';
 import { recordAndCheckRateLimit } from '@/lib/rate-limit';
+import { adminRoute } from '@/lib/admin-route';
 
 // POST /api/admin/voice-training/ab
 //
@@ -22,7 +23,7 @@ const Body = z.object({
   seed: z.string().max(800).optional(),
 });
 
-export async function POST(req: Request) {
+async function POST_impl(req: Request) {
   const session = await requireAdmin();
   // Same per-admin model-call cap as /studio/generate. Each pair burns
   // ~1k tokens; 30/hr leaves plenty of room for normal training rhythms.
@@ -68,3 +69,5 @@ export async function POST(req: Request) {
     );
   }
 }
+
+export const POST = adminRoute(POST_impl);

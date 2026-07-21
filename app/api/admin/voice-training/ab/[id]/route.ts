@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { requireAdmin } from '@/lib/session';
 import { pool, parsePathId } from '@/lib/db';
 import { logger } from '@/lib/logger';
+import { adminRoute } from '@/lib/admin-route';
 
 // PATCH /api/admin/voice-training/ab/[id]
 //
@@ -16,7 +17,7 @@ const Body = z.object({
   reason: z.string().max(1000).optional(),
 });
 
-export async function PATCH(
+async function PATCH_impl(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -49,7 +50,7 @@ export async function PATCH(
 
 // DELETE drops the pair entirely — useful when a generated pair is
 // degenerate (both variants near-identical, or the model went off-topic).
-export async function DELETE(
+async function DELETE_impl(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -70,3 +71,6 @@ export async function DELETE(
     return NextResponse.json({ error: 'delete failed' }, { status: 500 });
   }
 }
+
+export const PATCH = adminRoute(PATCH_impl);
+export const DELETE = adminRoute(DELETE_impl);

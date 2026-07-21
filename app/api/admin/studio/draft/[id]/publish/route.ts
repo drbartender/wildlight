@@ -25,6 +25,7 @@ import {
 } from '@/lib/email';
 import { recordAndCheckRateLimit } from '@/lib/rate-limit';
 import type { PoolClient } from 'pg';
+import { adminRoute } from '@/lib/admin-route';
 
 // POST /api/admin/studio/draft/[id]/publish?kind=journal|newsletter
 // body: { crossPublish?: boolean }
@@ -91,7 +92,7 @@ function uuidV5(seed: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
-export async function POST(
+async function POST_impl(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -494,3 +495,5 @@ async function insertMirrorBlogPost(
   }
   throw new Error('mirror_slug_collision_retries_exhausted');
 }
+
+export const POST = adminRoute(POST_impl);

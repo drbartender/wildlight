@@ -9,6 +9,7 @@ import { slugify, uniqueSlug } from '@/lib/slug';
 import { classifyPrintResolution } from '@/lib/print-resolution';
 import { deriveWebFromPrint } from '@/lib/image-derive';
 import { logger } from '@/lib/logger';
+import { adminRoute } from '@/lib/admin-route';
 
 // 25 MB matches the AI-fallback fetch cap in lib/anthropic-image.ts and
 // gives admins room to drop in print-quality JPEGs at the form. Sharp
@@ -23,7 +24,7 @@ const PRINT_ALLOWED_MIMES = new Set(['image/jpeg', 'image/png', 'image/tiff']);
 // images you may need to bump `experimental.serverActions.bodySizeLimit` in
 // next.config.ts. We already set 25mb.
 
-export async function POST(req: Request) {
+async function POST_impl(req: Request) {
   await requireAdmin();
   const form = await req.formData();
   const title = String(form.get('title') || '').trim();
@@ -147,3 +148,5 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ id, slug, resolution });
 }
+
+export const POST = adminRoute(POST_impl);

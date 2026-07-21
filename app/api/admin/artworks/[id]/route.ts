@@ -10,12 +10,13 @@ import { ConflictError, NotFoundError } from '@/lib/errors';
 import { refreshVariantResolution } from '@/lib/variant-resolution';
 import { measureMasterDims } from '@/lib/measure-master';
 import { logger } from '@/lib/logger';
+import { adminRoute } from '@/lib/admin-route';
 
 function isFkViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23503';
 }
 
-export async function GET(
+async function GET_impl(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -78,7 +79,7 @@ const Patch = z.object({
   applyTemplate: z.enum(['fine_art', 'canvas', 'full']).optional(),
 });
 
-export async function PATCH(
+async function PATCH_impl(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -279,7 +280,7 @@ export async function PATCH(
   );
 }
 
-export async function DELETE(
+async function DELETE_impl(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -334,3 +335,7 @@ export async function DELETE(
   }
   return NextResponse.json({ ok: true });
 }
+
+export const GET = adminRoute(GET_impl);
+export const PATCH = adminRoute(PATCH_impl);
+export const DELETE = adminRoute(DELETE_impl);

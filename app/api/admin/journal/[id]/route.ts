@@ -6,6 +6,7 @@ import { requireAdmin } from '@/lib/session';
 import { sanitizeJournalHtml } from '@/lib/journal-html';
 import { slugify, uniqueSlug } from '@/lib/slug';
 import { logger } from '@/lib/logger';
+import { adminRoute } from '@/lib/admin-route';
 
 interface Row {
   id: number;
@@ -20,7 +21,7 @@ interface Row {
   updated_at: string;
 }
 
-export async function GET(
+async function GET_impl(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -47,7 +48,7 @@ const Patch = z.object({
   cover_image_url: z.string().url().nullable().optional(),
 });
 
-export async function PATCH(
+async function PATCH_impl(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -119,7 +120,7 @@ export async function PATCH(
   }
 }
 
-export async function DELETE(
+async function DELETE_impl(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -132,3 +133,7 @@ export async function DELETE(
   if (!r.rowCount) return NextResponse.json({ error: 'not found' }, { status: 404 });
   return NextResponse.json({ ok: true });
 }
+
+export const GET = adminRoute(GET_impl);
+export const PATCH = adminRoute(PATCH_impl);
+export const DELETE = adminRoute(DELETE_impl);

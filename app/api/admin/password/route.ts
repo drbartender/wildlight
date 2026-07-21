@@ -4,13 +4,14 @@ import { z } from 'zod';
 import { pool } from '@/lib/db';
 import { requireAdmin, setAdminSession } from '@/lib/session';
 import { hashPassword, verifyPassword } from '@/lib/auth';
+import { adminRoute } from '@/lib/admin-route';
 
 const Body = z.object({
   currentPassword: z.string().min(1),
   newPassword: z.string().min(12).max(200),
 });
 
-export async function POST(req: Request) {
+async function POST_impl(req: Request) {
   const s = await requireAdmin();
   const p = Body.safeParse(await req.json().catch(() => null));
   if (!p.success) {
@@ -41,3 +42,5 @@ export async function POST(req: Request) {
   await setAdminSession({ id: s.id, email: s.email, v: u.rows[0].session_version });
   return NextResponse.json({ ok: true });
 }
+
+export const POST = adminRoute(POST_impl);

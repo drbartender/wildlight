@@ -4,8 +4,9 @@ import { z } from 'zod';
 import { pool } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 import { slugify } from '@/lib/slug';
+import { adminRoute } from '@/lib/admin-route';
 
-export async function GET() {
+async function GET_impl() {
   await requireAdmin();
   const { rows } = await pool.query(
     'SELECT * FROM collections ORDER BY display_order, id',
@@ -17,7 +18,7 @@ const Create = z.object({
   title: z.string().min(1).max(200),
   tagline: z.string().max(500).optional(),
 });
-export async function POST(req: Request) {
+async function POST_impl(req: Request) {
   await requireAdmin();
   const p = Create.safeParse(await req.json().catch(() => null));
   if (!p.success) return NextResponse.json({ error: 'invalid' }, { status: 400 });
@@ -48,7 +49,7 @@ const Reorder = z.object({
     .max(200)
     .refine((a) => new Set(a).size === a.length, 'duplicate ids'),
 });
-export async function PATCH(req: Request) {
+async function PATCH_impl(req: Request) {
   await requireAdmin();
   const body = await req.json().catch(() => null);
   const reorder = Reorder.safeParse(body);
@@ -80,10 +81,15 @@ export async function PATCH(req: Request) {
   return NextResponse.json({ ok: true });
 }
 
-export async function DELETE(req: Request) {
+async function DELETE_impl(req: Request) {
   await requireAdmin();
   const body = (await req.json().catch(() => ({}))) as { id?: number };
   if (!body.id) return NextResponse.json({ error: 'id required' }, { status: 400 });
   await pool.query('DELETE FROM collections WHERE id = $1', [body.id]);
   return NextResponse.json({ ok: true });
 }
+
+export const GET = adminRoute(GET_impl);
+export const POST = adminRoute(POST_impl);
+export const PATCH = adminRoute(PATCH_impl);
+export const DELETE = adminRoute(DELETE_impl);

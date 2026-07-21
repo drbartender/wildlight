@@ -11,6 +11,7 @@ import { logger } from '@/lib/logger';
 import { safeHttpUrl } from '@/lib/url';
 import { generateUnified } from '@/lib/studio';
 import { recordAndCheckRateLimit } from '@/lib/rate-limit';
+import { adminRoute } from '@/lib/admin-route';
 
 // POST /api/admin/studio/generate
 //
@@ -31,7 +32,7 @@ const Body = z.object({
   chooseForMe: z.boolean().optional(),
 });
 
-export async function POST(req: Request) {
+async function POST_impl(req: Request) {
   const session = await requireAdmin();
   // Each call burns Anthropic budget (~$0.05-0.20 of model time + web
   // search) — this is the cost-amplification surface a stolen cookie
@@ -91,3 +92,5 @@ export async function POST(req: Request) {
     );
   }
 }
+
+export const POST = adminRoute(POST_impl);

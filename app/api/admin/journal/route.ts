@@ -6,6 +6,7 @@ import { requireAdmin } from '@/lib/session';
 import { sanitizeJournalHtml } from '@/lib/journal-html';
 import { slugify, uniqueSlug } from '@/lib/slug';
 import { logger } from '@/lib/logger';
+import { adminRoute } from '@/lib/admin-route';
 
 interface ListRow {
   id: number;
@@ -18,7 +19,7 @@ interface ListRow {
   updated_at: string;
 }
 
-export async function GET() {
+async function GET_impl() {
   await requireAdmin();
   const r = await pool.query<ListRow>(
     `SELECT id, slug, title, excerpt, cover_image_url,
@@ -37,7 +38,7 @@ const Create = z.object({
   cover_image_url: z.string().url().nullable().optional(),
 });
 
-export async function POST(req: Request) {
+async function POST_impl(req: Request) {
   await requireAdmin();
   const parsed = Create.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
@@ -76,3 +77,6 @@ export async function POST(req: Request) {
     { status: 500 },
   );
 }
+
+export const GET = adminRoute(GET_impl);
+export const POST = adminRoute(POST_impl);

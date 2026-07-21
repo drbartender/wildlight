@@ -6,6 +6,7 @@ import {
   recentNewsletter,
   type StudioKind,
 } from '@/lib/studio-drafts';
+import { adminRoute } from '@/lib/admin-route';
 
 // GET /api/admin/studio/recent?kind=journal|newsletter&limit=5
 //
@@ -14,7 +15,7 @@ import {
 // newsletter side merges in-flight drafts with sent broadcasts so the
 // rail shows the editor's full pipeline.
 
-export async function GET(req: Request) {
+async function GET_impl(req: Request) {
   await requireAdmin();
   const url = new URL(req.url);
   const kindRaw = url.searchParams.get('kind');
@@ -33,3 +34,5 @@ export async function GET(req: Request) {
       : await recentNewsletter(limit);
   return NextResponse.json({ items });
 }
+
+export const GET = adminRoute(GET_impl);

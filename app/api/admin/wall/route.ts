@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { withTransaction } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 import { requireSameOrigin } from '@/lib/origin-check';
+import { adminRoute } from '@/lib/admin-route';
 
 // Persist the homepage "vintage wall" sequence. The body is the full,
 // ordered list of artwork ids; wall_order is set to each id's 1-based
@@ -21,7 +22,7 @@ const Body = z.object({
     .refine((a) => new Set(a).size === a.length, 'duplicate ids'),
 });
 
-export async function POST(req: Request) {
+async function POST_impl(req: Request) {
   await requireSameOrigin();
   await requireAdmin();
 
@@ -61,3 +62,5 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ ok: true });
 }
+
+export const POST = adminRoute(POST_impl);

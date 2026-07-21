@@ -20,6 +20,7 @@ import { slugify } from '@/lib/slug';
 import { draftArtworkMetadata } from '@/lib/ai-draft';
 import { readExifFromBuffer } from '@/lib/exif';
 import { logger } from '@/lib/logger';
+import { adminRoute } from '@/lib/admin-route';
 
 const STAGED_RX = /^incoming\/[0-9a-f-]{36}\.(jpg|jpeg|png|tif|tiff)$/i;
 const PRINT_ALLOWED_MIMES = new Set(['image/jpeg', 'image/png', 'image/tiff']);
@@ -69,7 +70,7 @@ function printExtFromMime(mime: string): string {
   return 'jpg';
 }
 
-export async function POST(req: Request) {
+async function POST_impl(req: Request) {
   await requireAdmin();
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
@@ -293,3 +294,5 @@ export async function POST(req: Request) {
     resolution,
   });
 }
+
+export const POST = adminRoute(POST_impl);

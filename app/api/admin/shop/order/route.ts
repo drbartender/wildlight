@@ -5,6 +5,7 @@ import { withTransaction } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 import { requireSameOrigin } from '@/lib/origin-check';
 import { logger } from '@/lib/logger';
+import { adminRoute } from '@/lib/admin-route';
 
 // Persist one SHOP scope's sequence. Scope 'all' writes display_order (the /shop
 // order); scope 'collection' writes collection_order for that collection only.
@@ -36,7 +37,7 @@ const Body = z.discriminatedUnion('scope', [
 /** Thrown inside the transaction to force a ROLLBACK, then mapped to 409. */
 class StaleScopeError extends Error {}
 
-export async function POST(req: Request) {
+async function POST_impl(req: Request) {
   await requireSameOrigin();
   await requireAdmin();
 
@@ -148,3 +149,5 @@ export async function POST(req: Request) {
   if (stale) return NextResponse.json({ error: 'stale' }, { status: 409 });
   return NextResponse.json({ ok: true });
 }
+
+export const POST = adminRoute(POST_impl);

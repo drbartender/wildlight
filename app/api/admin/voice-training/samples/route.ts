@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { requireAdmin } from '@/lib/session';
 import { pool } from '@/lib/db';
 import { logger } from '@/lib/logger';
+import { adminRoute } from '@/lib/admin-route';
 
 // POST /api/admin/voice-training/samples
 //
@@ -20,7 +21,7 @@ const Body = z.object({
   source: z.string().max(80).optional(),
 });
 
-export async function POST(req: Request) {
+async function POST_impl(req: Request) {
   await requireAdmin();
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
@@ -46,3 +47,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'save failed' }, { status: 500 });
   }
 }
+
+export const POST = adminRoute(POST_impl);

@@ -8,6 +8,7 @@ import { readExifFromBuffer } from '@/lib/exif';
 import { draftArtworkMetadata } from '@/lib/ai-draft';
 import { isRetryableAnthropicError } from '@/lib/anthropic-image';
 import { logger } from '@/lib/logger';
+import { adminRoute } from '@/lib/admin-route';
 
 function isAllowedImageHost(url: string): boolean {
   const base = process.env.R2_PUBLIC_BASE_URL;
@@ -34,7 +35,7 @@ async function fetchForExif(url: string): Promise<Buffer | null> {
   }
 }
 
-export async function POST(
+async function POST_impl(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
@@ -106,3 +107,5 @@ export async function POST(
     return NextResponse.json(body, { status });
   }
 }
+
+export const POST = adminRoute(POST_impl);
