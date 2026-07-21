@@ -25,17 +25,20 @@
 
 ## Push grouping
 
-**Push 1 = Task 1 only.** The migration is additive and nothing reads the column, so it is invisible: zero rendered change. Ship it alone, confirm it landed, then continue. This deliberately isolates the irreversible schema step from the irreversible *visible* step.
+**Push 1 = Tasks 1, 2 and 7.** All three are invisible on the storefront. Task 1's column is additive and unread; Task 2 only adds unused exports; Task 7 is admin-only. Together they buy a **rendered** checkpoint before any public number moves: Dan can open the artwork Edit page and see the assigned plate numbers while the storefront still shows the old hash. That is worth having, because it is the last look before the one-way step.
 
-**Push 2 = Tasks 2 through 9.** The display swap. Every number changes at once, which is the intended behaviour: a half-swapped state would show one number on the grid tile and a different one in the cart for the same piece.
+**Push 2 = Tasks 3 through 6, then 8.** The display swap. Every number changes at once, which is the intended behaviour: a half-swapped state would show one number on the grid tile and a different one in the cart for the same piece.
 
-Within push 2, Task 2 **adds** `formatPlate` while keeping `plateNumber`, so every intermediate commit typechecks and the call sites can migrate one at a time. Task 8 removes `plateNumber` once nothing imports it.
+**Do not push between Tasks 3 and 8.** Each commit in that range leaves the tree compiling but mid-swap, with two different numbers live for the same piece. Every task in the range restates this, because under subagent-driven execution each task is read in a fresh session that never sees this section.
+
+Task 2 **adds** `formatPlate` while keeping `plateNumber`, which is what lets the six call sites migrate one at a time with every intermediate commit green. Task 8 removes `plateNumber` and is therefore the commit that makes push 2 coherent.
 
 ## Review cadence
 
 - After **Task 1**: SQL review before pushing. The sequence, the permutation, and the idempotency guards are the whole risk.
-- After **Task 6**: a review of the client-side surfaces (cart persistence, the attacker-controllable contact param).
-- After **Task 9**: a copy and consistency pass over the rendered result.
+- After **Task 4**: the public renumbering. Tasks 3 and 4 together *are* the visible change, and a `plate_no` missing from a SELECT list renders `WL–NaN` or 500s with nothing in the gates to catch it. This is the gate that matters most and the plan originally lacked it.
+- After **Task 6**: the client-side surfaces (cart persistence, the attacker-controllable contact param).
+- Before the push, not after: the copy and consistency pass, as Task 9 Steps 2 and 3 on the scratch branch.
 
 ---
 
@@ -148,8 +151,21 @@ SELECT COUNT(*) AS artworks FROM artworks;
 
 Expected: far below 9000. It was 107 on 2026-07-21. Draw 9001 collides with
 draw 1 and, with a unique index and no retry loop, becomes a permanent
-unique-violation 500 on every upload. The horizon counts *draws*, not live
-rows, so deletes and failed inserts burn it faster.
+unique-violation 500 on every upload.
+
+The horizon counts *draws*, not live rows, so deletes and failed inserts burn it
+faster. The specific burner is
+`app/api/admin/artworks/bulk-upload/finalize/route.ts`, whose
+`ON CONFLICT (slug) DO NOTHING` retry loop takes up to ten attempts per create
+and burns a sequence value on each. `scripts/import-manifest.ts` would burn one
+per existing row on a re-import, since the tuple is evaluated before the
+conflict is detected, but that script is fenced off and cannot run.
+
+Also confirm the ordering backfill is not mid-flight: the spec's conditional
+pre-ship snapshot applies only if this ships in the same window as that
+migration. It shipped 2026-07-21 and its `DO $$` block is already in
+`lib/schema.sql` with its marker set, so the condition is satisfied and no extra
+snapshot is needed. Re-check if that is no longer true.
 
 - [ ] **Step 4: Run it for real, twice, on a throwaway branch**
 
@@ -278,8 +294,17 @@ describe('parsePlateParam', () => {
     expect(parsePlateParam('-4312')).toBeNull();
   });
 
+  // Each of these is an integer in range once Number() is through with it, so
+  // they are rejected only by the digit-shape check. This is the test that
+  // fails if someone "simplifies" the implementation back to Number.isInteger.
+  it('rejects numeric forms that are not plain digits', () => {
+    for (const bad of ['4e3', '0x1F4', '+500', ' 4312 ']) {
+      expect(parsePlateParam(bad)).toBeNull();
+    }
+  });
+
   it('rejects non-integers and junk', () => {
-    for (const bad of ['abc', '43.5', '4e3', '', '  ', null]) {
+    for (const bad of ['abc', '43.5', '', '  ', null]) {
       expect(parsePlateParam(bad)).toBeNull();
     }
   });
@@ -352,9 +377,14 @@ export function formatPlate(n: number): string {
  * check.
  */
 export function parsePlateParam(raw: string | null): number | null {
-  if (raw == null || raw.trim() === '') return null;
+  // Digit-shape FIRST, before Number(). `Number.isInteger(Number(x))` is not a
+  // digit check: Number('4e3') is 4000, Number('0x1F4') is 500, Number('+500')
+  // is 500 and Number(' 4312 ') is 4312, all integers, all in range. Every one
+  // of those would render a plate number from a URL that does not look like
+  // one. Verified by running this exact predicate both ways.
+  if (raw == null || !/^\d{1,4}$/.test(raw)) return null;
   const n = Number(raw);
-  if (!Number.isInteger(n) || n < 100 || n > 9099) return null;
+  if (n < 100 || n > 9099) return null;
   return n;
 }
 ```
@@ -373,7 +403,7 @@ Leave `plateNumber` in place and mark it:
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run tests/lib/plate-number.test.ts`
-Expected: PASS, 8 tests
+Expected: PASS, 9 tests
 
 - [ ] **Step 5: Commit**
 
@@ -428,7 +458,13 @@ feeds `WallItem`.
 2. `app/(shop)/portfolio/[slug]/page.tsx`: the chapter grid. Add `a.plate_no,` after `a.location,`.
 3. `app/(shop)/shop/collections/[slug]/page.tsx`: the chapter grid. Add `a.plate_no,` after `a.location,`.
 4. `app/(shop)/shop/artwork/[slug]/page.tsx`: **the related rail only** (the `LIMIT 4` query). Add `a.plate_no,` after `a.location,`.
-5. `app/(shop)/page.tsx`: the homepage wall query. Add `a.plate_no,` after `a.location,`.
+5. `app/(shop)/page.tsx`: the homepage wall query. Add `a.plate_no,` after `a.location,`, **and add `plate_no: number;` to the local `interface WallRow`** (around line 15). That interface is separate from `WallItem`, and line ~59 assigns `items = res.rows`, so a required field on `WallItem` without the matching field on `WallRow` fails typecheck. This is the ONE query of the five where the compiler helps; the other four launder through `pool.query<T>` and are unchecked.
+
+Note on anchors: `a.location,` is unique in files 1, 2, 3 and 5, but appears
+**twice** in `app/(shop)/shop/artwork/[slug]/page.tsx` (the gating `published`
+CTE around line 49, and the related rail around line 104). Both need it, with
+different prefixes downstream (`a.` inside the CTE, `p.` in the outer select),
+so edit them as two deliberate changes rather than one match.
 
 The artwork page's *gating* query also needs it, for the page's own heading:
 add `a.plate_no,` to the `published` CTE's select list and `p.plate_no,` to the
@@ -438,17 +474,27 @@ outer select, plus `plate_no: number;` on its `ArtworkRow` interface.
 
 Typecheck cannot do this, so grep can:
 
+Grep for `a.plate_no` specifically, not bare `plate_no`: an interface line or a
+prop name satisfies the loose pattern while the SELECT list stays empty, which
+is exactly the failure being guarded against.
+
 Run:
 ```bash
 for f in "app/(shop)/shop/page.tsx" "app/(shop)/portfolio/[slug]/page.tsx" \
          "app/(shop)/shop/collections/[slug]/page.tsx" \
          "app/(shop)/shop/artwork/[slug]/page.tsx" "app/(shop)/page.tsx"; do
-  printf '%-52s %s\n' "$f" "$(grep -c 'plate_no' "$f")"
+  printf '%-52s %s\n' "$f" "$(grep -c 'a\.plate_no' "$f")"
 done
 ```
 
-Expected: every file `>= 1`, and `app/(shop)/shop/artwork/[slug]/page.tsx` `>= 4`
-(gating CTE, outer select, interface, related rail).
+Expected: `1` for every file except `app/(shop)/shop/artwork/[slug]/page.tsx`,
+which is `2` (gating CTE + related rail).
+
+Then confirm the artwork page also threads it through the outer select and its
+interface, neither of which matches `a.plate_no`:
+
+Run: `grep -n 'p\.plate_no\|plate_no: number' "app/(shop)/shop/artwork/[slug]/page.tsx"`
+Expected: two lines, the outer select and the `ArtworkRow` field.
 
 - [ ] **Step 4: Typecheck, test, commit**
 
@@ -537,14 +583,68 @@ something the admin deliberately arranges: it moved on every reorder.
 `OrderCard`'s `plateNo` prop still receives the formatted string here, so it is
 unchanged by this step. Task 5 changes it to a number.
 
-- [ ] **Step 5: Typecheck, test, commit**
+- [ ] **Step 5: LOOK AT IT. Typecheck cannot see this.**
+
+This is the first task that changes rendered output, and `npm run typecheck` is
+provably blind to the failure mode: four of the five queries go through
+`pool.query<T>`, an unchecked generic, so a `plate_no` missing from a SELECT
+list compiles green and then renders `WL–NaN` at runtime, or 500s outright if
+the artwork page's outer select references a column its CTE never produced.
+
+Reuse the throwaway Neon branch from Task 1 Step 4 rather than a real database:
+
+```bash
+export DATABASE_URL='<the scratch branch connection string from Task 1>'
+npm run dev
+```
+
+Check each of these and confirm a well-formed `WL–NNNN`, never `WL–NaN`:
+
+| URL | surface |
+|---|---|
+| `/shop` | grid tiles (Selected works) |
+| `/shop/collections/<slug>` | chapter grid |
+| `/portfolio/<slug>` | portfolio chapter grid, a **separate** query from the line above |
+| `/shop/artwork/<slug>` | the heading, and the related rail at the bottom |
+| `/` | hover a wall tile for the caption; click one to open the lightbox |
+
+The artwork page heading must now read just `WL–NNNN`, with no "Plate 007 of
+024" after it.
+
+**On the lightbox:** the plate renders only in the `item.available === false`
+branch (`components/site/Lightbox.tsx`, the "· from the archive" line). A
+published, buyable piece shows "See print options →" instead and has no plate
+there. That is existing behaviour and correct. **Do not add the plate to the
+available branch** to make it appear: new public display surfaces are a Non-goal
+of the spec, and the wall hover caption is the only one this change adds.
+
+- [ ] **Step 6: Commit the swap**
 
 ```bash
 npm run typecheck && npm test
 git add components/site/PlateCard.tsx components/site/Lightbox.tsx \
         components/site/VintageWall.tsx "app/(shop)/shop/artwork/[slug]/page.tsx"
-git commit -m "feat(plate): render the stored number, drop plate_idx"
+git commit -m "feat(plate): render the stored number on every server surface"
 ```
+
+**Do not push.** The tree is mid-swap: these surfaces now show the stored
+number while the cart, checkout and contact page still derive the old hash, so
+the same piece has two different numbers. That is expected and only resolves at
+Task 8.
+
+- [ ] **Step 7: Commit the `plate_idx` removal separately**
+
+The removal in Step 4 is a copy deletion (`WL–4312 · Plate 007 of 024` becomes
+`WL–4312`) and is independently revertible, so it does not belong buried under a
+commit message about rendering a stored number.
+
+```bash
+git add "app/(shop)/shop/artwork/[slug]/page.tsx"
+git commit -m "refactor(plate): drop the plate_idx counter and its of-NN denominator"
+```
+
+If Step 4 was done as one edit, split it here with `git add -p`, or reorder:
+land the three surface swaps first, then the removal.
 
 ---
 
@@ -682,6 +782,13 @@ remove the `plateNumber` import. The validation itself is tested in
 
 - [ ] **Step 3: The seeded message**
 
+Change only the body. **Keep the effect's first line `if (!piece || message) return;`
+and its `}, []);` one-shot deps, including the `eslint-disable-next-line
+react-hooks/exhaustive-deps` above it.** The guard is what stops the effect
+overwriting text the user has already typed, and the empty deps are what make it
+seed once on mount rather than on every render. Neither is shown in the snippet
+below, and both must survive.
+
 ```tsx
     const plate = plateNo != null ? formatPlate(plateNo) : null;
     const verb =
@@ -711,7 +818,14 @@ remove the `plateNumber` import. The validation itself is tested in
 ```
 
 Falling back to the slug rather than dropping the reference keeps the subject
-useful on a legacy link, where the piece is known but its number is not.
+useful on a legacy link, where the piece is known but its number is not. That
+fallback is a decision this plan makes; the spec only required the *pill* to
+degrade cleanly, so flag it if you disagree.
+
+The `—` in that template is an em dash, which the Global Constraints forbid in
+user-facing copy. It is **pre-existing** copy being preserved through a
+mechanical edit, not new text, so it stays. Changing it is a separate copy
+decision.
 
 - [ ] **Step 5: The ref pill**
 
@@ -733,13 +847,37 @@ rather than the pill:
           )}
 ```
 
-- [ ] **Step 6: Typecheck, test, commit**
+- [ ] **Step 6: LOOK AT IT. The client surfaces have no test harness at all.**
+
+vitest is node-only here with no jsdom and no component harness, so nothing
+automated renders these. With the dev server still on the scratch branch:
+
+| URL | expect |
+|---|---|
+| `/shop/artwork/<slug>`, then Add to cart, then `/shop/cart` | the plate, then ` · ` , then type/size. No stray leading separator. |
+| `/shop/checkout` | same line, plus `· ×1` |
+| `/contact?reason=commission&piece=<slug>&plate=4312` | pill shows `Re: WL–4312 · <slug>`; message seeded with the plate |
+| `/contact?reason=commission&piece=<slug>` | pill shows `Re: <slug>` with no bold gap and no stray `·`; message names the slug |
+| `/contact?reason=commission&piece=<slug>&plate=abc` | identical to the line above. Never `WL–NaN`. |
+| `/contact?reason=commission&piece=<slug>&plate=4e3` | identical again. This is the case the digit-shape check exists for. |
+| `/contact?license=<slug>` | legacy path still works, reason preselects License |
+
+Then the case only a returning visitor sees: with an item already in the cart,
+open devtools and delete `plateNo` from the `wl_cart_v1` entry in
+localStorage, reload `/shop/cart`, and confirm the line renders `type · size`
+with no leading separator. That is exactly the state every pre-existing cart is
+in on the day this ships.
+
+- [ ] **Step 7: Typecheck, test, commit**
 
 ```bash
 npm run typecheck && npm test
 git add components/shop/OrderCard.tsx "app/(shop)/contact/page.tsx"
 git commit -m "feat(plate): validated plate param on the contact form"
 ```
+
+**Do not push.** The contact page now matches the rest; only Task 8's deletion
+remains before the swap is coherent.
 
 ---
 
@@ -809,7 +947,9 @@ same piece than every other surface.
 
 - [ ] **Step 2: Remove the function**
 
-Delete `plateNumber` entirely, leaving `formatPlate` and a header comment:
+Delete `plateNumber` **only**. `formatPlate` and `parsePlateParam` both stay:
+the contact page imports the latter as of Task 6, and a literal reading of
+"leave only the formatter" would break it.
 
 ```ts
 // Plate numbers. The number itself is `artworks.plate_no`, assigned once by a
@@ -842,34 +982,52 @@ catches a server module reaching the client bundle.
 - [ ] **Step 1: Gates**
 
 ```bash
+export DATABASE_URL='<the scratch branch connection string from Task 1>'
 npm run typecheck && npm test && npm run build
 ```
 
+`npm run build` is `tsx lib/migrate.ts && next build`, so it **applies the
+migration to whatever `DATABASE_URL` resolves to** before bundling. Point it at
+the scratch branch, or use `npm run build:skip-migrate` if you only want the
+client-bundle check. Do NOT run it with a bare environment and let
+`lib/load-env.ts` pick up `.env.local`.
+
 Do NOT run `npm run lint`.
 
-- [ ] **Step 2: Confirm one piece shows one number everywhere**
+- [ ] **Step 2: PRE-PUSH. Confirm one piece shows one number everywhere**
 
-The whole point of the change is that a piece has *one* number. Pick a
-published, buyable artwork and check every surface renders the same `WL–NNNN`:
+This runs on the **scratch branch**, before the push, because the change is
+one-way: after the push, "the number is wrong on the portfolio page" is not a
+bug you fix, it is a second renumbering.
+
+The whole point is that a piece has *one* number. Pick a published, buyable
+artwork that is **also `on_wall`** (needed for surfaces 5 and 6) and confirm all
+of these render the same `WL–NNNN`:
 
 1. its tile on `/shop`
-2. its tile on its chapter page
-3. the artwork page heading
-4. the related rail on a sibling artwork's page
-5. the wall hover caption on `/`
-6. the lightbox on `/`
+2. its tile on `/shop/collections/<slug>`
+3. its tile on `/portfolio/<slug>` — a **separate query** from 2, and the one most likely to be missed
+4. the artwork page heading, now with no "of NN" after it
+5. the related rail on a sibling artwork's page
+6. the wall hover caption on `/`
 7. the cart, after adding it
 8. the checkout summary
 
-- [ ] **Step 3: The cases only a browser can show**
+Not on the list, deliberately: **the lightbox for this piece.** It renders the
+plate only in the not-available branch, so a buyable piece correctly shows
+"See print options →" instead. See Step 3.
 
-1. **A wall-only (unpublished) piece** shows a number on hover and in the lightbox. This is why the column covers every artwork and not just published ones.
-2. **A pre-existing cart line**, added before this shipped, renders with no stray leading separator.
-3. **`/contact?reason=commission&piece=<slug>`** with `&plate=` present, with it absent, and with `&plate=abc`: the first shows the number, the other two omit it cleanly and never render `WL–NaN`.
-4. **The legacy `/contact?license=<slug>`** path still works and falls back to the slug in the subject.
-5. **Upload a new artwork** and confirm it receives a number in range, distinct from every existing one.
+- [ ] **Step 3: PRE-PUSH. The cases only a browser can show**
 
-- [ ] **Step 4: Confirm the numbers actually changed**
+Still on the scratch branch:
+
+1. **A wall-only (unpublished) piece**: number on hover, and in the lightbox. This is the branch the lightbox actually renders, and the reason the column covers every artwork rather than only published ones.
+2. **A cart line with no `plateNo`** (delete the field from `wl_cart_v1` in devtools): renders `type · size` with no leading separator. Every pre-existing cart is in this state on launch day.
+3. **`/contact?...&plate=4312`, `&plate=abc`, `&plate=4e3`, and no `&plate=`**: the first shows the number, the other three omit it cleanly. Never `WL–NaN`.
+4. **The legacy `/contact?license=<slug>`**: still works, falls back to the slug in the subject.
+5. **A new artwork gets a number**: already proven on the scratch branch by Task 1 Step 4 assertion 3. Do not repeat it against production by uploading a real row.
+
+- [ ] **Step 4: POST-PUSH. Confirm the numbers actually changed**
 
 ```sql
 SELECT COUNT(*) AS rows, COUNT(DISTINCT plate_no) AS distinct_no FROM artworks;
@@ -884,9 +1042,18 @@ renumbering, not a bug.
 - **The visible change is one-way.** Reverting the display swap restores
   `plateNumber(slug)` and flips every public number a second time. Treat a
   rollback as a decision to renumber again, not a neutral undo.
-- **Task 1 alone is safely revertible**, because nothing reads the column. If
-  the migration lands and the swap is abandoned, the column sits unused and
-  costs nothing.
+- **Task 1 is abandonable, not revertible.** `lib/schema.sql` is applied
+  additively at build time, so reverting the hunk does not drop the column, the
+  sequence, or the assigned numbers: it just stops re-applying. If the swap is
+  never shipped, the column sits unused and costs nothing. Do not reach for
+  `git revert` expecting a clean database.
+- **After Task 8, Tasks 3 through 6 are no longer individually revertible.**
+  Reverting one alone restores calls to `plateNumber`, which no longer exists,
+  and the tree stops compiling. A revert of the display swap must include Task 8
+  or start from it.
+- **Renames stop moving the number.** The old hash changed whenever a slug was
+  renamed; the stored value does not. A strict improvement, and the reason a
+  slug rename is no longer a customer-visible event.
 - **`nextval` is exempt from transaction rollback**, so a failed and retried
   migration permanently burns numbers. Consistent with "gaps are permanent and
   correct", but worth knowing when the sequence looks ahead of the row count.
