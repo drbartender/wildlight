@@ -868,6 +868,24 @@
 .wl-adm-seg button:last-child {
   border-right: 0;
 }
+/* Wrapping variant, for the Shop shelf's collection tray. The base .wl-adm-seg
+   is inline-flex + overflow:hidden with white-space:nowrap buttons, so an
+   overflowing row is CLIPPED, not wrapped. Kept as a modifier because the base
+   is shared with the artworks-list status tabs and the Library filters.
+   The :last-child border rule only clears the divider on the FINAL button,
+   which leaves a stray divider at the end of every wrapped row, so use a
+   per-button inset shadow instead. */
+.wl-adm-seg.wrap {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+.wl-adm-seg.wrap button {
+  border-right: 0;
+  box-shadow: inset -1px 0 0 var(--adm-rule);
+}
+.wl-adm-seg.wrap button:last-child {
+  box-shadow: none;
+}
 .wl-adm-seg button.on {
   background: var(--adm-paper-alt);
   color: var(--adm-ink);
@@ -3608,7 +3626,10 @@
    height-constrained so there's nothing to resize). */
 .wl-adm-ws-resize { display: none; }
 
-.wl-adm-ws-head { display: flex; align-items: center; gap: 10px; }
+/* flex-wrap so the Shop head can carry the collection tray (and later the limit
+   field) without overflowing. Shared with the Wall and Library heads, both of
+   which are single-row and unaffected. */
+.wl-adm-ws-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .wl-adm-ws-head.open { margin-bottom: 12px; }
 .wl-adm-ws-head h2 { margin: 0; font-size: 1rem; }
 .wl-adm-ws-head h2:focus-visible { outline: 2px solid var(--adm-blue); outline-offset: 2px; }

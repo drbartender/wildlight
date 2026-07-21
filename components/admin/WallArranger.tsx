@@ -134,8 +134,14 @@ export function WallArranger({
       const pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
       const gap = parseFloat(cs.rowGap) || 14;
       const errH = wall.querySelector('.wl-adm-wall-err')?.getBoundingClientRect().height ?? 0;
+      // The Shop head can now wrap to several rows: it carries the collection
+      // tray, and later the limit field. Measure it rather than assuming one
+      // row, or a maxed band leaves the Shop grid no tile area at all.
+      const shopHead = wall.querySelector<HTMLElement>('.wl-adm-ws-shelf.shop .wl-adm-ws-head');
+      const shopHeadExtra = Math.max(0, (shopHead?.getBoundingClientRect().height ?? 0) - 32);
       // Column children: [error?] + band + handle + library.
-      max = wall.clientHeight - pad - errH - HANDLE - LIB_FLOOR - gap * (errH ? 3 : 2);
+      max =
+        wall.clientHeight - pad - errH - HANDLE - LIB_FLOOR - shopHeadExtra - gap * (errH ? 3 : 2);
     }
     return Math.round(Math.max(120, Math.min(Math.max(160, max), h)));
   }
@@ -160,6 +166,18 @@ export function WallArranger({
     return () => window.removeEventListener('resize', reclamp);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // The Shop head's height also changes on a scope switch (chip labels differ in
+  // width, and the limit field mounts only in the All view). That is
+  // ShopShelf-internal state the parent cannot observe, so watch the element
+  // rather than trying to depend on it.
+  useEffect(() => {
+    const head = document.querySelector('.wl-adm-ws-shelf.shop .wl-adm-ws-head');
+    if (!head || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => reclamp());
+    ro.observe(head);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shopMin]);
   function onResizeDown(e: React.PointerEvent) {
     const band = document.querySelector<HTMLElement>('.wl-adm-ws-shelves');
     if (!band) return;
