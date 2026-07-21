@@ -59,7 +59,10 @@ const Patch = z.object({
   location: z.string().max(200).nullable().optional(),
   status: z.enum(['draft', 'published', 'retired']).optional(),
   collection_id: z.number().int().nullable().optional(),
-  display_order: z.number().int().optional(),
+  // display_order is deliberately NOT patchable. Shop ordering has a dedicated
+  // endpoint (POST /api/admin/shop/order) that densifies a whole scope
+  // atomically; a direct write here would bypass that and leave colliding
+  // positions behind. No admin UI ever sent this field.
   on_wall: z.boolean().optional(),
   edition_size: z.number().int().positive().nullable().optional(),
   signed: z.boolean().optional(),
@@ -138,6 +141,41 @@ export async function PATCH(
       // param; column names come from the fixed Zod schema, never user keys.
       if (d.on_wall !== undefined) {
         updateCols.push('wall_order = 0');
+      }
+      // Rule 1: leaving 'published' zeroes both shop orders, exactly as toggling
+      // on_wall clears wall_order directly above. Without this a retired piece
+      // keeps a live-looking position, and re-publishing drops it back into the
+      // middle of the grid instead of appending.
+      const demoting = d.status === 'retired' || d.status === 'draft';
+      if (demoting) {
+        updateCols.push('display_order = 0', 'collection_order = 0');
+      }
+      // Rule 3: a REAL collection change appends to the end of the new chapter.
+      // In an UPDATE the right-hand side sees the OLD column values, so
+      // `collection_id IS DISTINCT FROM $n` compares the prior collection to the
+      // incoming one in the same statement that overwrites it.
+      //
+      // The DISTINCT check is not optional: ArtworkRowMenu lets an admin click
+      // the chapter a piece is already in, and without it that no-op would
+      // re-append the piece to the end of its own chapter.
+      //
+      // Guarded on !demoting: Postgres rejects two assignments to the same
+      // column in one UPDATE with 42601, and a PATCH of
+      // {status:'retired', collection_id:N} would otherwise push both
+      // `collection_order = 0` and this CASE. Demotion wins, which is right: a
+      // row leaving the shop has no position in any chapter.
+      if (d.collection_id !== undefined && !demoting) {
+        const p = vals.length + 1;
+        vals.push(d.collection_id);
+        updateCols.push(
+          `collection_order = CASE
+             WHEN collection_id IS NOT DISTINCT FROM $${p}::int THEN collection_order
+             WHEN $${p}::int IS NULL THEN 0
+             ELSE COALESCE((SELECT MAX(b.collection_order) FROM artworks b
+                             WHERE b.collection_id = $${p}::int
+                               AND b.status = 'published'), 0) + 1
+           END`,
+        );
       }
       if (updateCols.length) {
         vals.push(id);
