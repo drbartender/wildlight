@@ -18,6 +18,14 @@ export interface LibraryPhoto {
   buyable: boolean;
   /** Homepage wall position (1-based), computed in SQL; null when off-wall. */
   wall_rank: number | null;
+  /** Collection assignment, or null when unfiled. */
+  collection_id: number | null;
+  /** Collection title, for the read-only tile label. Null when unfiled. */
+  collection_title: string | null;
+  /** Position within its collection. 0 = never placed. */
+  collection_order: number;
+  /** Position in the All order (the /shop sequence). 0 = never placed. */
+  display_order: number;
 }
 
 export type FilterKey = 'all' | 'wall' | 'shop' | 'unplaced' | 'nohd';

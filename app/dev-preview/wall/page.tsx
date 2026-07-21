@@ -51,6 +51,18 @@ function mockPhotos(n: number): LibraryPhoto[] {
       hd,
       buyable,
       wall_rank: onWall ? i : null,
+      // Two chapters so the filter tray has something to show, plus a
+      // deliberate handful left unfiled so that chip is exercised too.
+      //
+      // The ids here MUST match the `collections` array passed to WallArranger
+      // below. `i % 3` yields 1 and 2 for the filed cases, so the chips and the
+      // tiles agree; `(i % 3) + 1` would yield 2 and 3 and leave one chapter
+      // permanently empty and one set of photos with no chip at all.
+      collection_id: published ? (i % 3 === 0 ? null : i % 3) : null,
+      collection_title:
+        published && i % 3 !== 0 ? (i % 3 === 1 ? 'The Front Range' : 'Night Work') : null,
+      collection_order: i,
+      display_order: i,
     });
   }
   return out;

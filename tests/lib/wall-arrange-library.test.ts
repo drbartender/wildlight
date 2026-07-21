@@ -21,6 +21,10 @@ function photo(over: Partial<LibraryPhoto> & { id: number }): LibraryPhoto {
     hd: over.hd ?? false,
     buyable: over.buyable ?? false,
     wall_rank: over.wall_rank ?? null,
+    collection_id: over.collection_id ?? null,
+    collection_title: over.collection_title ?? null,
+    collection_order: over.collection_order ?? 0,
+    display_order: over.display_order ?? 0,
   };
 }
 
