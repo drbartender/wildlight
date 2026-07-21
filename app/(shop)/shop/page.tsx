@@ -1,4 +1,5 @@
 import { pool } from '@/lib/db';
+import { getShopIndexLimit } from '@/lib/site-settings';
 import { ArtworkGrid, type GridItem } from '@/components/site/ArtworkGrid';
 
 export const revalidate = 60;
@@ -21,12 +22,23 @@ function seasonOf(date: Date): string {
 }
 
 export default async function HomePage() {
-  const [countsRes, platesRes] = await Promise.all([
+  const [countsRes, limit] = await Promise.all([
     pool.query<CountsRow>(
       `SELECT COUNT(*)::int AS n, MAX(published_at)::text AS latest
        FROM artworks WHERE status='published'`,
     ),
-    pool.query<PlateRow>(
+    getShopIndexLimit(),
+  ]);
+
+  // Serial by necessity: the limit has to be known before this query runs.
+  // Folding it in as a LIMIT (SELECT ...) subquery would avoid the extra hop
+  // but put the settings read inside the grid query, so one throw would take
+  // the grid down with it. getShopIndexLimit never throws, and this shape is
+  // what preserves that.
+  //
+  // NULLIF is load-bearing: in Postgres LIMIT 0 returns ZERO ROWS, and 0 means
+  // "no limit" here. LIMIT NULL is the unlimited form.
+  const platesRes = await pool.query<PlateRow>(
       `SELECT a.slug,
               a.title,
               a.image_web_url,
@@ -41,9 +53,9 @@ export default async function HomePage() {
          AND EXISTS (SELECT 1 FROM artwork_variants v
                        WHERE v.artwork_id = a.id AND v.buyable)
        ORDER BY a.display_order, a.id
-       LIMIT 12`,
-    ),
-  ]);
+       LIMIT NULLIF($1::int, 0)`,
+      [limit],
+  );
 
   const count = countsRes.rows[0]?.n ?? 0;
   const latestRaw = countsRes.rows[0]?.latest ?? null;
@@ -102,10 +114,14 @@ export default async function HomePage() {
 
       <section className="wl-sheet">
         <header className="wl-sheet-h">
-          <h2>Index of plates</h2>
+          <h2>Selected works</h2>
           <div className="wl-rule"></div>
+          {/* Describes the GRID, not the archive. The old count was every
+              published work, so it read "24 works on file" above twelve
+              plates. The masthead's "Plates on file" keeps the total, which
+              is where a total belongs. */}
           <span className="count">
-            {String(count).padStart(2, '0')} works on file
+            {String(plates.length).padStart(2, '0')} shown
           </span>
         </header>
         {plates.length > 0 ? (

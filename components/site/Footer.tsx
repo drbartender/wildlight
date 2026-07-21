@@ -28,7 +28,7 @@ export function Footer() {
             Collections
           </Link>
           <Link className="link" href="/shop">
-            Index of plates
+            Selected works
           </Link>
           <Link className="link" href="/contact?reason=corporate-gift">
             Gift a print
