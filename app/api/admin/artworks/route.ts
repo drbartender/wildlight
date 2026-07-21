@@ -91,8 +91,15 @@ export async function POST(req: Request) {
       skipped: out.skipped,
     });
   } else if (action === 'retire') {
+    // Rule 1: zero both shop orders on the way out, so a piece that comes back
+    // later appends rather than resurfacing on a stale position. Same reset the
+    // per-artwork PATCH does, and what makes the publish path's unconditional
+    // assignment safe.
     await pool.query(
-      `UPDATE artworks SET status='retired', updated_at=NOW() WHERE id = ANY($1)`,
+      `UPDATE artworks
+          SET status='retired', display_order = 0, collection_order = 0,
+              updated_at=NOW()
+        WHERE id = ANY($1)`,
       [ids],
     );
   } else if (action === 'delete') {
@@ -148,8 +155,30 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'collectionId required' }, { status: 400 });
     }
     try {
+      // Rule 3, batch-safe. This endpoint takes an ids[] and does one UPDATE,
+      // so MAX + 1 would give every moved row the identical collection_order
+      // and sort them as a clump at the FRONT of the target chapter. And
+      // IS DISTINCT FROM in the t CTE means rows already in the target are not
+      // touched at all: an empty t cross-joins to zero rows, the intended
+      // no-op.
       await pool.query(
-        `UPDATE artworks SET collection_id=$2, updated_at=NOW() WHERE id = ANY($1)`,
+        `WITH t AS (
+           SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS rn
+             FROM artworks
+            WHERE id = ANY($1::int[])
+              AND collection_id IS DISTINCT FROM $2::int
+         ),
+         m AS (
+           SELECT COALESCE(MAX(collection_order), 0) AS mx
+             FROM artworks
+            WHERE collection_id = $2::int AND status = 'published'
+         )
+         UPDATE artworks a
+            SET collection_id = $2::int,
+                collection_order = m.mx + t.rn,
+                updated_at = NOW()
+           FROM t, m
+          WHERE a.id = t.id`,
         [ids, collectionId],
       );
     } catch (err) {
