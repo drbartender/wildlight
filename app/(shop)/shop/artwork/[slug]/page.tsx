@@ -23,6 +23,7 @@ interface ArtworkRow {
   collection_title: string | null;
   /** 1-based index among published artworks in the global catalog. */
   plate_idx: number;
+  plate_no: number;
   /** Total published artworks in the catalog. */
   plate_total: number;
   edition_size: number | null;
@@ -48,7 +49,7 @@ export default async function ArtworkPage({
     `WITH published AS (
        SELECT a.id, a.slug, a.title, a.artist_note, a.year_shot, a.location,
               a.image_web_url, a.image_width, a.image_height,
-              a.collection_id, a.edition_size, a.signed,
+              a.collection_id, a.edition_size, a.signed, a.plate_no,
               ROW_NUMBER() OVER (ORDER BY a.display_order, a.id) AS plate_idx,
               COUNT(*) OVER () AS plate_total
        FROM artworks a
@@ -56,7 +57,7 @@ export default async function ArtworkPage({
      )
      SELECT p.id, p.slug, p.title, p.artist_note, p.year_shot, p.location,
             p.image_web_url, p.image_width, p.image_height,
-            p.plate_idx::int, p.plate_total::int,
+            p.plate_idx::int, p.plate_total::int, p.plate_no,
             p.edition_size, p.signed,
             COALESCE((
               SELECT COUNT(oi.id)::int
@@ -101,7 +102,7 @@ export default async function ArtworkPage({
     ),
     art.collection_slug
       ? pool.query<PlateCardData>(
-          `SELECT a.slug, a.title, a.image_web_url, a.year_shot, a.location,
+          `SELECT a.slug, a.title, a.image_web_url, a.year_shot, a.location, a.plate_no,
                   (SELECT MIN(price_cents) FROM artwork_variants v
                      WHERE v.artwork_id = a.id AND v.buyable) AS min_price_cents
            FROM artworks a

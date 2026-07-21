@@ -66,6 +66,7 @@ export default async function HomePage() {
               a.image_web_url,
               a.year_shot,
               a.location,
+              a.plate_no,
               c.title AS collection_title,
               (SELECT MIN(price_cents) FROM artwork_variants v
                  WHERE v.artwork_id = a.id AND v.buyable) AS min_price_cents

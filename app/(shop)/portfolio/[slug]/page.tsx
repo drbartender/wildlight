@@ -55,6 +55,7 @@ export default async function PortfolioDetail({
               a.image_web_url,
               a.year_shot,
               a.location,
+              a.plate_no,
               c.title AS collection_title
        FROM artworks a
        LEFT JOIN collections c ON c.id = a.collection_id

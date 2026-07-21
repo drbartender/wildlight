@@ -13,6 +13,8 @@ export interface WallItem {
   collection_title?: string | null;
   /** True when status='published' — i.e. actually available as a print. */
   available: boolean;
+  /** Stored accession number. Required: a missing one renders "WL–NaN". */
+  plate_no: number;
 }
 
 /**

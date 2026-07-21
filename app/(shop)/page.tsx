@@ -20,6 +20,10 @@ interface WallRow {
   location: string | null;
   collection_title: string | null;
   available: boolean;
+  // Required, because `items = res.rows` assigns WallRow[] into WallItem[].
+  // This is the ONE of the five feeding queries where the compiler actually
+  // enforces the column; the other four launder through pool.query<T>.
+  plate_no: number;
 }
 
 export default async function MarketingHome() {
@@ -40,7 +44,7 @@ export default async function MarketingHome() {
   let items: WallItem[] = [];
   try {
     const res = await pool.query<WallRow>(
-      `SELECT a.slug, a.title, a.image_web_url, a.year_shot, a.location,
+      `SELECT a.slug, a.title, a.image_web_url, a.year_shot, a.location, a.plate_no,
               -- "available" = genuinely buyable (published AND has a buyable
               -- variant), matching the resolution-gated shop so the wall dot +
               -- lightbox "See print options" link never point at a piece the

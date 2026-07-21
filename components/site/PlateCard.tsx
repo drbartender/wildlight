@@ -11,6 +11,13 @@ export interface PlateCardData {
   collection_title?: string | null;
   /** Minimum variant price in cents. Omit to hide the "from" line. */
   min_price_cents?: number | null;
+  /**
+   * Stored accession number. REQUIRED, not optional: a missing one renders
+   * "WL–NaN". Note that typecheck cannot enforce this for the four feeding
+   * queries, which go through `pool.query<T>` (an unchecked generic), so the
+   * SELECT lists are verified by grep in the plan instead.
+   */
+  plate_no: number;
 }
 
 export interface PlateCardProps {
