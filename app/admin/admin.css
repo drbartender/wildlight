@@ -3648,8 +3648,15 @@
 .wl-adm-ws-saving { font-family: var(--f-mono), monospace; font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--adm-ink-2); min-width: 5.5em; text-align: right; }
 .wl-adm-ws-cap { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 12px 6px 5px 7px; background: linear-gradient(to top, rgba(0,0,0,0.72), rgba(0,0,0,0)); color: #fff; font-size: 10.5px; }
 .wl-adm-ws-cap .price { margin-right: auto; font-family: var(--f-mono), monospace; font-size: 10px; }
-.wl-adm-ws-rm { font-family: var(--f-mono), monospace; font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.5); background: rgba(0,0,0,0.35); color: #fff; cursor: pointer; flex-shrink: 0; }
-.wl-adm-ws-rm.confirming { background: var(--adm-red); border-color: var(--adm-red); }
+/* Shared on-tile action button (edit / remove / delete). Same shape and size
+   everywhere; COLOUR carries the meaning — neutral = reversible, red = gone
+   forever. Never make the shelf remove look like the Library delete. */
+.wl-adm-ws-act { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 5px; gap: 4px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.55); background: rgba(0,0,0,0.5); color: #fff; cursor: pointer; text-decoration: none; flex-shrink: 0; font-family: var(--f-mono), monospace; font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; }
+.wl-adm-ws-act:hover { background: rgba(0,0,0,0.8); border-color: #fff; }
+.wl-adm-ws-act:disabled { opacity: 0.5; cursor: default; }
+.wl-adm-ws-act.confirming { background: var(--adm-red); border-color: var(--adm-red); color: #fff; }
+/* Both on-tile action buttons sit bottom-right of a Library tile. */
+.wl-adm-ws-tileacts { position: absolute; right: 5px; bottom: 5px; z-index: 3; display: flex; gap: 4px; }
 
 .wl-adm-ws-badges { position: absolute; top: 5px; left: 5px; z-index: 2; display: flex; gap: 4px; }
 .wl-adm-ws-badge { font-family: var(--f-mono), monospace; font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; padding: 2px 6px; border-radius: 3px; background: var(--adm-scrim); }
@@ -3660,7 +3667,10 @@
 
 /* Red-outlined so it never reads as a "close" affordance — this is the only
    permanent action on the screen. */
-.wl-adm-ws-del { position: absolute; bottom: 5px; right: 5px; z-index: 2; font-family: var(--f-mono), monospace; font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; padding: 3px 7px; border-radius: 3px; cursor: pointer; border: 1px solid var(--adm-red); background: var(--adm-scrim); color: var(--adm-red); }
+/* Delete forever: the ONLY red action. Same shape as the neutral remove, but
+   red-on-scrim so "gone forever" never reads the same as "off this shelf". */
+.wl-adm-ws-del { border-color: var(--adm-red); background: var(--adm-scrim); color: var(--adm-red); }
+.wl-adm-ws-del:hover { background: var(--adm-scrim); border-color: var(--adm-red); }
 .wl-adm-ws-del.confirming { border-color: var(--adm-red); background: var(--adm-red); color: #fff; }
 
 .wl-adm-ws-libitem { display: flex; flex-direction: column; }
@@ -3683,7 +3693,6 @@
 .wl-adm-ws-bulkbar button.ghost { border-color: transparent; background: transparent; color: var(--adm-ink-2); }
 .wl-adm-ws-bulkbar button:focus-visible { outline: 2px solid var(--adm-blue); outline-offset: 2px; }
 .wl-adm-ws-libctl { display: flex; align-items: center; gap: 6px; padding: 6px 2px 0; }
-.wl-adm-ws-libctl .wl-adm-ws-edit { margin-left: auto; }
 .wl-adm-ws-pill { font-family: var(--f-mono), monospace; font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; cursor: pointer; line-height: 1; background: transparent; color: var(--adm-ink-2); border: 1px solid var(--adm-rule); }
 .wl-adm-ws-pill.on-wall { background: var(--adm-ink); color: var(--adm-paper); border-color: var(--adm-ink); }
 .wl-adm-ws-pill.on-shop { background: var(--adm-green); color: #fff; border-color: var(--adm-green); }
@@ -3694,8 +3703,6 @@
 /* Shop pill on a photo with no print file: looks unavailable but stays
    focusable and clickable so it can explain itself (see aria-disabled note). */
 .wl-adm-ws-pill.nohd { color: var(--adm-ink-2); border-style: dashed; cursor: help; }
-.wl-adm-ws-edit { font-size: 11px; color: var(--adm-muted); text-decoration: none; white-space: nowrap; }
-.wl-adm-ws-edit:hover { color: var(--adm-ink); }
 /* Fixed panes: Wall/Shop as a capped band on top, Library filling the rest.
    Each pane scrolls internally so all three stay on screen at once — the drag
    gesture needs the source (Library) and the target (a shelf) both visible.
@@ -3788,7 +3795,7 @@
 .wl-adm-ws-rm:focus-visible,
 .wl-adm-ws-del:focus-visible,
 .wl-adm-ws-min:focus-visible,
-.wl-adm-ws-edit:focus-visible,
+.wl-adm-ws-act:focus-visible,
 .wl-adm-ws-pos:focus-visible {
   outline: 2px solid var(--adm-blue);
   outline-offset: 2px;

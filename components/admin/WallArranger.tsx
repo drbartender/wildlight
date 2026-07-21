@@ -947,6 +947,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={p.image_web_url} alt={p.title} draggable={false} />
                     <figcaption className="wl-adm-ws-cap">
+                      <EditLink id={p.id} title={p.title} />
                       <RemoveButton
                         confirming={confirm?.kind === 'wallRemove' && confirm.id === p.id}
                         disabled={inFlight}
@@ -1014,6 +1015,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
                     <img src={p.image_web_url} alt={p.title} draggable={false} />
                     <figcaption className="wl-adm-ws-cap">
                       <span className="price">{p.price_from_cents != null ? formatUSD(p.price_from_cents) : '—'}</span>
+                      <EditLink id={p.id} title={p.title} />
                       <RemoveButton
                         confirming={confirm?.kind === 'shopRemove' && confirm.id === p.id}
                         disabled={inFlight}
@@ -1173,19 +1175,29 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
                     </div>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={p.image_web_url} alt={p.title} draggable={false} />
-                    <button
-                      type="button"
-                      className={`wl-adm-ws-del ${delConfirming ? 'confirming' : ''}`}
-                      aria-label={`Delete ${p.title} forever`}
-                      disabled={inFlight}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (delConfirming) void deletePhoto(p.id);
-                        else setConfirm({ kind: 'del', id: p.id });
-                      }}
-                    >
-                      {delConfirming ? 'Delete forever?' : '✕'}
-                    </button>
+                    <div className="wl-adm-ws-tileacts">
+                      <EditLink id={p.id} title={p.title} />
+                      <button
+                        type="button"
+                        className={`wl-adm-ws-act wl-adm-ws-del ${delConfirming ? 'confirming' : ''}`}
+                        aria-label={`Delete ${p.title} forever`}
+                        title={`Delete ${p.title} forever`}
+                        disabled={inFlight}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (delConfirming) void deletePhoto(p.id);
+                          else setConfirm({ kind: 'del', id: p.id });
+                        }}
+                      >
+                        {delConfirming ? (
+                          'Delete forever?'
+                        ) : (
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+                            <path d="M18 6L6 18M6 6l12 12" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
                   </figure>
                   <div className="wl-adm-ws-libctl">
                     <button
@@ -1220,9 +1232,6 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
                     >
                       Shop
                     </button>
-                    <Link className="wl-adm-ws-edit" href={`/admin/artworks/${p.id}`} title={`Edit ${p.title} details`}>
-                      Edit ↗
-                    </Link>
                   </div>
                 </div>
               );
@@ -1273,7 +1282,30 @@ function PaneChip({
   );
 }
 
-// Module scope (avoids react/no-unstable-nested-components). Props only.
+// Jump to the artwork's detail page. Available on EVERY thumbnail (wall, shop
+// and library), styled like the other on-tile actions. Module scope.
+function EditLink({ id, title }: { id: number; title: string }) {
+  return (
+    <Link
+      href={`/admin/artworks/${id}`}
+      className="wl-adm-ws-act"
+      aria-label={`Edit ${title} details`}
+      title={`Edit ${title} details`}
+      draggable={false}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M12 20h9" />
+        <path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4z" />
+      </svg>
+    </Link>
+  );
+}
+
+// Take a photo OFF a shelf. Deliberately NEUTRAL-coloured, unlike the red
+// Library delete: same shape, but this one is reversible and must not read as
+// "destroy". Expands to a word on the confirm step so an icon-only control
+// never commits on a single click. Module scope.
 function RemoveButton({
   confirming,
   disabled,
@@ -1288,15 +1320,22 @@ function RemoveButton({
   return (
     <button
       type="button"
-      className={`wl-adm-ws-rm ${confirming ? 'confirming' : ''}`}
-      aria-label={label}
+      className={`wl-adm-ws-act wl-adm-ws-rm ${confirming ? 'confirming' : ''}`}
+      aria-label={confirming ? `${label} — activate again to confirm` : label}
+      title={label}
       disabled={disabled}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
       }}
     >
-      {confirming ? 'Sure — remove?' : 'Remove'}
+      {confirming ? (
+        'Remove?'
+      ) : (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+          <path d="M18 6L6 18M6 6l12 12" />
+        </svg>
+      )}
     </button>
   );
 }
