@@ -4,68 +4,75 @@
 
 **Goal:** Make the admin Shop shelf filterable by collection and drag-arrangeable, with an independent All order and per-collection orders that drive the public storefront, plus an editable `/shop` cap.
 
-**Architecture:** `artworks.display_order` is repurposed as the All order and a new `artworks.collection_order` holds position within a collection. Both are densified once by a marker-guarded migration. Positions are assigned server-side at the publish chokepoint (`lib/publish-artworks.ts`) and at every `collection_id` writer, never trusted from a stored value on a row entering the shop. Pure ordering/filtering logic lives in `lib/shop-arrange.ts` so vitest can reach it; the React shelf wires state to it.
+**Architecture:** `artworks.display_order` is repurposed as the All order and a new `artworks.collection_order` holds position within a collection. Both are densified once by a marker-guarded migration. Positions are assigned server-side and never trusted from a stored value on a row entering the shop. Pure logic lives in `lib/shop-arrange.ts` and `lib/shop-limit.ts` so vitest can reach it; the Shop shelf is extracted from `WallArranger` into its own component so its state cannot entangle with the Wall's.
 
 **Tech Stack:** Next.js 16 App Router, Postgres (Neon) via raw `pg`, Zod, vitest.
 
 **Spec:** `docs/superpowers/specs/2026-07-20-shop-collections-ordering-design.md`
+
+**Revision:** rewritten 2026-07-21 after the plan review fleet found 8 blockers in the first draft.
 
 ## Global Constraints
 
 - **No ORM, no query builder.** Raw SQL via `lib/db.ts`, parameterized (`$1`, `$2`) always. Never concatenate a value into SQL.
 - **Multi-statement writes use `withTransaction`** from `lib/db.ts`.
 - **`lib/schema.sql` re-runs on every build** (`npm run build` is `tsx lib/migrate.ts && next build`). Every statement must be idempotent.
-- **Never add `BEGIN`/`COMMIT` or a non-transactional statement** (`CREATE INDEX CONCURRENTLY`, `VACUUM`) to `lib/schema.sql`. `lib/migrate.ts` sends the whole file through one `pool.query`, and that implicit transaction is what makes the backfill marker atomic.
-- **`statement_timeout` is 15s** (`lib/db.ts`). Any single query needing longer is a bug.
-- **Gates: `npm run typecheck` and `npm test`.** NOT `npm run lint`. `next lint` was removed in Next 16 and there is no flat ESLint config, so it fails for unrelated reasons.
-- **No local database.** The app cannot boot against a real DB on this box. SQL and route changes are verified by typecheck plus review here, and by the manual pass on the live deploy listed at the end.
+- **Never add a statement-level `BEGIN`/`COMMIT` or a non-transactional statement** (`CREATE INDEX CONCURRENTLY`, `VACUUM`) to `lib/schema.sql`. `lib/migrate.ts` sends the whole file through one `pool.query`, and that implicit transaction is what makes the backfill marker atomic. (The `BEGIN` inside a `DO $$ … $$` PL/pgSQL body is block syntax, not transaction control, and is fine.)
+- **NOTHING a `'use client'` component imports may reach `lib/db.ts`.** `lib/db.ts:33` calls `createPool()` at module scope, so a value import drags `pg` into the client bundle. This fails only at `next build`, after typecheck and tests have both passed. Client-reachable constants live in `lib/shop-limit.ts`, which imports nothing.
+- **`statement_timeout` is 15s** (`lib/db.ts`), and on PostgreSQL 16 and earlier it covers the whole multi-statement migration message.
+- **Gates: `npm run typecheck`, `npm test`, and `npm run build`.** NOT `npm run lint`. `next lint` was removed in Next 16 and there is no flat ESLint config, so it fails for unrelated reasons.
+- **No local database and no component-test harness.** SQL is verified by the throwaway-branch migration run in Task 4 and the manual deploy pass. React changes are verified in `/dev-preview/wall`, a DB-free, auth-free harness that renders the real component against mock data. It is gated off when `NODE_ENV === 'production'`, so it is a local-only checkpoint.
+- **The reorder payload cap (1000) and the admin loader's `LIMIT 1000` stay in lockstep.** Note the loader's limit applies across ALL statuses while the reorder guard counts published rows. If total artworks approach 1000, both must be raised together or reordering 409s permanently.
 - **API JSON keys are snake_case; JS variables are camelCase.**
-- **Copy rule: no em dashes** in any user-facing string. Use commas, periods, colons, or parentheses.
+- **Copy rule: no em dashes** in any user-facing string.
+
+## Task order and deploy grouping
+
+Two orderings are load-bearing and are not free to rearrange:
+
+1. **Task 3 (script guards) comes before Task 4 (the migration).** The migration is what makes `scripts/publish-selections.ts` destructive; its guard must exist before the hazard, not ten tasks after it.
+2. **Tasks 4 through 7 must ship in the SAME deploy.** `0` sorts first under `ORDER BY display_order, id`, so with the migration live and the position rules not, every newly published artwork jumps to the top of `/shop`.
+
+Tasks 1 through 10 are a safe stopping point: schema, rules, and endpoints, with no UI and no public read changed.
+
+## Review cadence
+
+- After **Task 3**: a script-safety review. Both scripts can destroy a curated order.
+- After **Task 4**: a SQL/migration review before any push. This is the one irreversible task.
+- After **Task 10**: an auth and injection review of the two new endpoints.
+- After **Task 17**: a public-facing query and copy review.
 
 ---
 
 ## File Structure
 
 **Created:**
-- `lib/site-settings.ts`: reads/validates `shop_index_limit`. One shared validator for client and server.
-- `lib/shop-arrange.ts`: pure scope/order/cut-line logic for the Shop shelf. Mirrors `lib/wall-arrange.ts`'s role for the Wall.
-- `app/api/admin/shop/order/route.ts`: the scoped reorder endpoint.
-- `app/api/admin/settings/route.ts`: writes `shop_index_limit`.
-- `tests/lib/site-settings.test.ts`, `tests/lib/shop-arrange.test.ts`
+- `lib/shop-limit.ts`: limit constants and validators. Pure, imports nothing, safe for client components.
+- `lib/site-settings.ts`: `getShopIndexLimit()`. Server-only, imports `pool`.
+- `lib/shop-arrange.ts`: scope, order derivation, cut line, below-cut set.
+- `components/admin/ShopShelf.tsx`: the Shop shelf, extracted from `WallArranger`.
+- `components/admin/ShopLimitField.tsx`: the `/shop` cap control.
+- `components/admin/TileActions.tsx`: `EditLink` and `RemoveButton`, shared by both shelves.
+- `app/api/admin/shop/order/route.ts`, `app/api/admin/settings/route.ts`
+- `tests/lib/shop-limit.test.ts`, `tests/lib/shop-arrange.test.ts`, `tests/lib/site-settings.test.ts`, `tests/lib/publish-artworks-order.test.ts`
 
-**Modified:**
-- `lib/schema.sql`: `collection_order`, `site_settings`, the one-time backfill.
-- `lib/wall-arrange.ts`: four new fields on `LibraryPhoto`.
-- `lib/publish-artworks.ts`: Rule 2 (entering published assigns a fresh position).
-- `app/api/admin/artworks/[id]/route.ts`: Rules 1 and 3, drop `display_order` from the Zod schema.
-- `app/api/admin/artworks/route.ts`: Rule 1 on bulk retire, Rule 3 on bulk move.
-- `app/admin/wall/page.tsx`: three-query loader.
-- `components/admin/WallArranger.tsx`: filter tray, scoped reorder, cut line, limit control.
-- `app/admin/admin.css`: wrapping seg + head, cut-line treatment.
-- `app/dev-preview/wall/page.tsx`, `tests/lib/wall-arrange-library.test.ts` : the two other `LibraryPhoto` construction sites.
-- `app/(shop)/shop/page.tsx`, `app/(shop)/shop/collections/[slug]/page.tsx`, `app/(shop)/portfolio/[slug]/page.tsx`, `app/(shop)/shop/artwork/[slug]/page.tsx` : public queries.
-- `components/site/Footer.tsx`: the "Index of plates" label.
-- `scripts/import-manifest.ts`, `scripts/publish-selections.ts`, `README.md`.
+**Modified:** `lib/schema.sql`, `lib/wall-arrange.ts`, `lib/publish-artworks.ts`, `app/api/admin/artworks/[id]/route.ts`, `app/api/admin/artworks/route.ts`, `app/admin/wall/page.tsx`, `components/admin/WallArranger.tsx`, `app/dev-preview/wall/page.tsx`, `app/admin/admin.css`, `tests/lib/wall-arrange-library.test.ts`, the four public pages, `components/site/Footer.tsx`, `scripts/import-manifest.ts`, `scripts/publish-selections.ts`, `README.md`.
 
 ---
 
-### Task 1: The limit validator and reader (`lib/site-settings.ts`)
+### Task 1: Limit constants and validators (`lib/shop-limit.ts`)
 
 **Files:**
-- Create: `lib/site-settings.ts`
-- Test: `tests/lib/site-settings.test.ts`
+- Create: `lib/shop-limit.ts`
+- Test: `tests/lib/shop-limit.test.ts`
 
 **Interfaces:**
-- Consumes: `pool` from `@/lib/db`
-- Produces:
-  - `SHOP_INDEX_LIMIT_MAX = 500`, `SHOP_INDEX_LIMIT_DEFAULT = 12`
-  - `parseShopIndexLimit(raw: unknown): number`
-  - `isValidShopIndexLimit(n: unknown): boolean`
-  - `getShopIndexLimit(): Promise<number>`
+- Consumes: nothing. This module imports nothing, deliberately.
+- Produces: `SHOP_INDEX_LIMIT_MAX = 500`, `SHOP_INDEX_LIMIT_DEFAULT = 12`, `isValidShopIndexLimit(n: unknown): boolean`, `parseShopIndexLimit(raw: unknown): number`
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/lib/site-settings.test.ts`:
+Create `tests/lib/shop-limit.test.ts`:
 
 ```ts
 import { describe, it, expect } from 'vitest';
@@ -74,7 +81,7 @@ import {
   isValidShopIndexLimit,
   SHOP_INDEX_LIMIT_DEFAULT,
   SHOP_INDEX_LIMIT_MAX,
-} from '@/lib/site-settings';
+} from '@/lib/shop-limit';
 
 describe('parseShopIndexLimit', () => {
   it('accepts a normal stored value', () => {
@@ -89,8 +96,8 @@ describe('parseShopIndexLimit', () => {
     expect(parseShopIndexLimit(String(SHOP_INDEX_LIMIT_MAX))).toBe(SHOP_INDEX_LIMIT_MAX);
   });
 
-  // Number('') === 0, which would silently mean "no limit" and dump the whole
-  // catalogue onto /shop. An empty value is missing data, not a choice.
+  // Number('') === 0, and 0 means "no limit" here, so without an explicit guard
+  // a blank row would silently publish the entire catalogue to /shop.
   it('does NOT read an empty string as 0', () => {
     expect(parseShopIndexLimit('')).toBe(SHOP_INDEX_LIMIT_DEFAULT);
     expect(parseShopIndexLimit('   ')).toBe(SHOP_INDEX_LIMIT_DEFAULT);
@@ -120,44 +127,40 @@ describe('isValidShopIndexLimit', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npx vitest run tests/lib/site-settings.test.ts`
-Expected: FAIL, `Failed to resolve import "@/lib/site-settings"`
+Run: `npx vitest run tests/lib/shop-limit.test.ts`
+Expected: FAIL, `Failed to resolve import "@/lib/shop-limit"`
 
 - [ ] **Step 3: Write the implementation**
 
-Create `lib/site-settings.ts`:
+Create `lib/shop-limit.ts`:
 
 ```ts
-import { pool } from '@/lib/db';
+// Limit constants and validators for the /shop cap.
+//
+// THIS MODULE IMPORTS NOTHING, ON PURPOSE. It is imported by a 'use client'
+// component (ShopLimitField), and lib/db.ts calls createPool() at module scope,
+// so anything reaching lib/db.ts from a client component drags `pg` into the
+// client bundle. That failure appears only at `next build`, after typecheck and
+// tests have both passed. The DB-backed reader lives in lib/site-settings.ts.
 
-/** Upper bound on shop_index_limit. A typo must not ask the page for 50,000 rows. */
+/** Upper bound. A typo must not ask the storefront index for 50,000 rows. */
 export const SHOP_INDEX_LIMIT_MAX = 500;
-/** Current hardcoded /shop cap. Seeded into site_settings, and the fallback. */
+/** The previous hardcoded /shop cap. Seeded into site_settings, and the fallback. */
 export const SHOP_INDEX_LIMIT_DEFAULT = 12;
 
 /**
- * Is this an acceptable admin input? The SAME rule runs on the client (inline
- * validation) and the server (Zod refinement), from this one function, so the
- * two cannot drift.
+ * Is this an acceptable admin input? The SAME predicate runs on the client
+ * (inline validation) and the server (Zod refinement), from this one function,
+ * so the two cannot drift.
  */
 export function isValidShopIndexLimit(n: unknown): boolean {
-  return (
-    typeof n === 'number' &&
-    Number.isInteger(n) &&
-    n >= 0 &&
-    n <= SHOP_INDEX_LIMIT_MAX
-  );
+  return typeof n === 'number' && Number.isInteger(n) && n >= 0 && n <= SHOP_INDEX_LIMIT_MAX;
 }
 
 /**
- * Coerce a stored value into a usable limit. 0 means "no limit".
- *
- * Anything unusable returns the default rather than throwing: this value gates
- * the storefront index, so a bad row must never blank or 500 the page.
- *
- * The empty-string guard is load-bearing. Number('') is 0, and 0 means
- * unlimited here, so without it a blank row would silently publish the entire
- * catalogue.
+ * Coerce a stored value into a usable limit. 0 means "no limit". Anything
+ * unusable returns the default rather than throwing: this value gates the
+ * storefront index, so a bad row must never blank or 500 the page.
  */
 export function parseShopIndexLimit(raw: unknown): number {
   if (typeof raw === 'string' && raw.trim() === '') return SHOP_INDEX_LIMIT_DEFAULT;
@@ -165,38 +168,24 @@ export function parseShopIndexLimit(raw: unknown): number {
   const n = Number(raw);
   return isValidShopIndexLimit(n) ? n : SHOP_INDEX_LIMIT_DEFAULT;
 }
-
-/**
- * Read the limit for the public /shop grid. NEVER throws.
- *
- * app/(shop)/shop/page.tsx has no try/catch of its own, and a missing
- * site_settings table (42P01 on a fresh, preview, or restored Neon branch) or a
- * cold-start blip would otherwise take the storefront index down.
- */
-export async function getShopIndexLimit(): Promise<number> {
-  try {
-    const { rows } = await pool.query<{ value: string }>(
-      `SELECT value FROM site_settings WHERE key = 'shop_index_limit'`,
-    );
-    if (!rows.length) return SHOP_INDEX_LIMIT_DEFAULT;
-    return parseShopIndexLimit(rows[0].value);
-  } catch {
-    return SHOP_INDEX_LIMIT_DEFAULT;
-  }
-}
 ```
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `npx vitest run tests/lib/site-settings.test.ts`
-Expected: PASS, 5 tests
+Run: `npx vitest run tests/lib/shop-limit.test.ts`
+Expected: PASS, 7 tests
 
-- [ ] **Step 5: Typecheck and commit**
+- [ ] **Step 5: Confirm the module has no imports**
+
+Run: `grep -c '^import' lib/shop-limit.ts`
+Expected: `0`
+
+- [ ] **Step 6: Typecheck and commit**
 
 ```bash
 npm run typecheck
-git add lib/site-settings.ts tests/lib/site-settings.test.ts
-git commit -m "feat(shop): shop_index_limit reader and shared validator"
+git add lib/shop-limit.ts tests/lib/shop-limit.test.ts
+git commit -m "feat(shop): client-safe limit constants and validators"
 ```
 
 ---
@@ -205,19 +194,12 @@ git commit -m "feat(shop): shop_index_limit reader and shared validator"
 
 **Files:**
 - Create: `lib/shop-arrange.ts`
-- Modify: `lib/wall-arrange.ts` (add four fields to `LibraryPhoto`)
-- Modify: `app/dev-preview/wall/page.tsx`, `tests/lib/wall-arrange-library.test.ts` (the two other construction sites)
+- Modify: `lib/wall-arrange.ts`, `tests/lib/wall-arrange-library.test.ts`, `app/dev-preview/wall/page.tsx`
 - Test: `tests/lib/shop-arrange.test.ts`
 
 **Interfaces:**
 - Consumes: `isInShop`, `LibraryPhoto` from `@/lib/wall-arrange`
-- Produces:
-  - `type ShopScope = { kind: 'all' } | { kind: 'unfiled' } | { kind: 'collection'; id: number }`
-  - `scopeKey(s: ShopScope): string`, `parseScopeKey(raw: string | null): ShopScope`
-  - `isArrangeable(s: ShopScope): boolean`
-  - `deriveShopIds(photos: LibraryPhoto[], scope: ShopScope): number[]`
-  - `shopScopeCounts(photos: LibraryPhoto[]): { all: number; unfiled: number; byCollection: Map<number, number> }`
-  - `cutLineAfter(ordered: LibraryPhoto[], limit: number): number | null`
+- Produces: `ShopScope`, `scopeKey`, `parseScopeKey`, `isArrangeable`, `deriveShopIds`, `shopScopeCounts`, `cutLineAfter`, `belowCutIds`
 
 - [ ] **Step 1: Add the four fields to `LibraryPhoto`**
 
@@ -226,13 +208,18 @@ In `lib/wall-arrange.ts`, inside `export interface LibraryPhoto`, after `wall_ra
 ```ts
   /** Collection assignment, or null when unfiled. */
   collection_id: number | null;
-  /** Collection title for the read-only tile label. Null when unfiled. */
+  /** Collection title, for the read-only tile label. Null when unfiled. */
   collection_title: string | null;
   /** Position within its collection. 0 = never placed. */
   collection_order: number;
   /** Position in the All order (the /shop sequence). 0 = never placed. */
   display_order: number;
 ```
+
+Note for the implementer: `pool.query<LibraryPhoto>` is an unchecked generic, so
+these four fields are a promise the loader does not keep until Task 12. Nothing
+reads them before then, so it is safe, but do not assume they are populated in
+Tasks 3 through 11.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -248,6 +235,7 @@ import {
   deriveShopIds,
   shopScopeCounts,
   cutLineAfter,
+  belowCutIds,
 } from '@/lib/shop-arrange';
 
 function photo(over: Partial<LibraryPhoto> & { id: number }): LibraryPhoto {
@@ -300,8 +288,8 @@ describe('deriveShopIds', () => {
     photo({ id: 1, display_order: 2, collection_id: 10, collection_order: 2 }),
     photo({ id: 2, display_order: 1, collection_id: 10, collection_order: 1 }),
     photo({ id: 3, display_order: 3, collection_id: null }),
-    photo({ id: 4, status: 'draft', display_order: 0 }), // not in the shop
-    photo({ id: 5, status: 'retired', display_order: 0 }), // not in the shop
+    photo({ id: 4, status: 'draft' }),
+    photo({ id: 5, status: 'retired' }),
   ];
 
   it('All is every shop member by display_order', () => {
@@ -322,7 +310,7 @@ describe('deriveShopIds', () => {
     expect(all).not.toContain(5);
   });
 
-  // The tiebreak MUST match the public queries' `, a.id`, or the admin order
+  // This tiebreak MUST match the public queries' `, a.id`, or the admin order
   // and the live order disagree whenever two rows share a position.
   it('breaks ties on id, matching the public ORDER BY', () => {
     const tied = [
@@ -350,22 +338,23 @@ describe('shopScopeCounts', () => {
 });
 
 describe('cutLineAfter', () => {
-  // The public query filters unbuyable rows out BEFORE applying LIMIT, so the
-  // line has to count buyable tiles only. Counting every tile is the off-by-N.
-  it('counts buyable tiles only, skipping unbuyable ones', () => {
+  // The public /shop query filters unbuyable rows out BEFORE applying its
+  // LIMIT, so the line has to count buyable tiles only. Counting every tile is
+  // the off-by-N this function exists to prevent.
+  it('counts buyable tiles only, with unbuyable ones above AND below the cut', () => {
     const ordered = [
       photo({ id: 1, buyable: true }),
       photo({ id: 2, buyable: false }),
       photo({ id: 3, buyable: true }),
-      photo({ id: 4, buyable: true }),
+      photo({ id: 4, buyable: false }),
+      photo({ id: 5, buyable: true }),
     ];
     // limit 2 -> after the 2nd BUYABLE tile, which is index 2 (id 3)
     expect(cutLineAfter(ordered, 2)).toBe(2);
   });
 
   it('returns null for limit 0, which means no limit', () => {
-    const ordered = [photo({ id: 1 }), photo({ id: 2 })];
-    expect(cutLineAfter(ordered, 0)).toBeNull();
+    expect(cutLineAfter([photo({ id: 1 }), photo({ id: 2 })], 0)).toBeNull();
   });
 
   it('returns null when the limit exceeds the buyable count', () => {
@@ -383,6 +372,31 @@ describe('cutLineAfter', () => {
     expect(cutLineAfter(ordered, 2)).toBeNull();
   });
 });
+
+describe('belowCutIds', () => {
+  // The cut is a property of the ALL order, but it has to be readable from any
+  // scope: a piece that is both unfiled and below the cut is reachable from
+  // nowhere on the site except the sitemap, and the Unfiled view is where that
+  // gets flagged. Computing it from the visible subset would be wrong, because
+  // that subset is not the All order.
+  it('is computed from the All order, not from the visible subset', () => {
+    const photos = [
+      photo({ id: 1, display_order: 1, collection_id: 10 }),
+      photo({ id: 2, display_order: 2, collection_id: null }),
+      photo({ id: 3, display_order: 3, collection_id: null }),
+    ];
+    const below = belowCutIds(photos, 2);
+    expect(below.has(3)).toBe(true);
+    expect(below.has(1)).toBe(false);
+    expect(below.has(2)).toBe(false);
+  });
+
+  it('is empty when there is no cut', () => {
+    const photos = [photo({ id: 1, display_order: 1 })];
+    expect(belowCutIds(photos, 0).size).toBe(0);
+    expect(belowCutIds(photos, 99).size).toBe(0);
+  });
+});
 ```
 
 - [ ] **Step 3: Run the test to verify it fails**
@@ -395,10 +409,9 @@ Expected: FAIL, `Failed to resolve import "@/lib/shop-arrange"`
 Create `lib/shop-arrange.ts`:
 
 ```ts
-// Pure helpers for the Shop shelf on the Wall & Shop admin tool. No React, no
-// DB. Mirrors lib/wall-arrange.ts's role for the Wall: keeping order/filter
-// logic here is what makes it unit-testable, since this repo has no
-// component-test harness.
+// Pure helpers for the Shop shelf. No React, no DB. Mirrors lib/wall-arrange.ts's
+// role for the Wall: keeping order/filter logic here is what makes it testable,
+// since this repo has no component-test harness.
 
 import { isInShop, type LibraryPhoto } from '@/lib/wall-arrange';
 
@@ -412,7 +425,7 @@ export type ShopScope =
   | { kind: 'unfiled' }
   | { kind: 'collection'; id: number };
 
-/** Stable string form, for localStorage and for React keys. */
+/** Stable string form, for localStorage and React keys. */
 export function scopeKey(s: ShopScope): string {
   return s.kind === 'collection' ? `c:${s.id}` : s.kind;
 }
@@ -482,15 +495,14 @@ export function shopScopeCounts(photos: LibraryPhoto[]): {
 }
 
 /**
- * Index in `ordered` AFTER which the cut line is drawn, or null when no line
- * should render.
+ * Index in `ordered` AFTER which the cut line is drawn, or null for no line.
  *
- * Counts BUYABLE tiles only. The public /shop query filters unbuyable rows out
- * before it applies the LIMIT, so counting every tile would put the line in the
- * wrong place and the admin would arrange twelve and see nine.
+ * Counts BUYABLE tiles only: the public query filters unbuyable rows out before
+ * applying its LIMIT, so counting every tile would put the line in the wrong
+ * place and the admin would arrange twelve and see nine.
  *
  * Null cases, all deliberate: limit 0 (unlimited), fewer buyable tiles than the
- * limit, and a cut that lands on the last tile (nothing is below it to mark).
+ * limit, and a cut landing on the last tile (nothing below it to mark).
  */
 export function cutLineAfter(ordered: LibraryPhoto[], limit: number): number | null {
   if (limit <= 0) return null;
@@ -502,16 +514,33 @@ export function cutLineAfter(ordered: LibraryPhoto[], limit: number): number | n
   }
   return null;
 }
+
+/**
+ * Ids that fall BELOW the cut in the All order, readable from any scope.
+ *
+ * Always computed from the full All order, never from the visible subset: the
+ * cut is a property of /shop, and a filtered view is not the /shop sequence.
+ * Used by the Unfiled view to flag a piece that is both unfiled and below the
+ * cut, which is reachable from nowhere on the site except the sitemap.
+ */
+export function belowCutIds(photos: LibraryPhoto[], limit: number): Set<number> {
+  const allIds = deriveShopIds(photos, { kind: 'all' });
+  const byId = new Map(photos.map((p) => [p.id, p]));
+  const ordered = allIds.map((id) => byId.get(id)).filter((p): p is LibraryPhoto => !!p);
+  const cut = cutLineAfter(ordered, limit);
+  if (cut == null) return new Set();
+  return new Set(ordered.slice(cut + 1).map((p) => p.id));
+}
 ```
 
 - [ ] **Step 5: Run the test to verify it passes**
 
 Run: `npx vitest run tests/lib/shop-arrange.test.ts`
-Expected: PASS, 13 tests
+Expected: PASS, 16 tests
 
 - [ ] **Step 6: Fix the two other `LibraryPhoto` construction sites**
 
-Typecheck will now fail in two places. In `tests/lib/wall-arrange-library.test.ts`, inside `photo()`, after `wall_rank`:
+Typecheck now fails in two places. In `tests/lib/wall-arrange-library.test.ts`, inside `photo()`, after `wall_rank`:
 
 ```ts
     collection_id: over.collection_id ?? null,
@@ -520,10 +549,10 @@ Typecheck will now fail in two places. In `tests/lib/wall-arrange-library.test.t
     display_order: over.display_order ?? 0,
 ```
 
-In `app/dev-preview/wall/page.tsx`, inside the `out.push({...})` in `mockPhotos`, after `wall_rank`:
+In `app/dev-preview/wall/page.tsx`, inside the `out.push({…})` in `mockPhotos`, after `wall_rank`:
 
 ```ts
-      // A few chapters so the filter tray has something to show, and a
+      // A few chapters so the filter tray has something to show, plus a
       // deliberate handful left unfiled so that chip is exercised too.
       collection_id: published ? (i % 3 === 0 ? null : (i % 3) + 1) : null,
       collection_title: published && i % 3 !== 0 ? `Chapter ${(i % 3) + 1}` : null,
@@ -531,12 +560,10 @@ In `app/dev-preview/wall/page.tsx`, inside the `out.push({...})` in `mockPhotos`
       display_order: i,
 ```
 
-- [ ] **Step 7: Run the full suite and typecheck**
+- [ ] **Step 7: Run the full suite and typecheck, then commit**
 
 Run: `npm test && npm run typecheck`
 Expected: all tests PASS, typecheck clean
-
-- [ ] **Step 8: Commit**
 
 ```bash
 git add lib/shop-arrange.ts lib/wall-arrange.ts tests/lib/shop-arrange.test.ts \
@@ -546,32 +573,192 @@ git commit -m "feat(shop): scope, order derivation and cut-line logic"
 
 ---
 
-### Task 3: Migration (`collection_order`, `site_settings`, the one-time backfill)
+### Task 3: Script guards (BEFORE the migration that makes them necessary)
 
 **Files:**
-- Modify: `lib/schema.sql` (append at the end of the file)
+- Modify: `scripts/import-manifest.ts`, `scripts/publish-selections.ts`, `README.md`
 
-**Interfaces:**
-- Produces: `artworks.collection_order`, `site_settings(key, value, updated_at)`, the `shop_order_backfilled` marker row.
+This task comes first among the server changes deliberately. Task 4's backfill is
+what makes `publish-selections.ts` destructive, so its guard has to exist before
+the hazard, not ten tasks after it.
 
-There is no unit test for this task. It is verified by review here and by the manual deploy pass at the end of the plan.
+- [ ] **Step 1: Stop `import-manifest` writing display order on BOTH tables**
+
+The `collections` upsert currently ends:
+
+```
+         tagline = COALESCE(collections.tagline, EXCLUDED.tagline),
+         display_order = EXCLUDED.display_order
+       RETURNING id`,
+```
+
+`display_order = EXCLUDED.display_order` is the LAST item, so deleting that line
+alone leaves a dangling comma on the `tagline` line. Delete the line **and** the
+trailing comma above it:
+
+```
+         tagline = COALESCE(collections.tagline, EXCLUDED.tagline)
+       RETURNING id`,
+```
+
+This ordering is load-bearing now: it drives the admin filter tray and the new
+browse band, so a re-import must not reset it.
+
+For the `artworks` upsert, remove `display_order` from the INSERT column list,
+drop the matching `$n` from `VALUES`, remove the `display_order =
+EXCLUDED.display_order,` line from `DO UPDATE SET` (that one DOES carry a
+trailing comma, so removing the line alone is correct there), and drop `idx` from
+the parameter array. Add above it:
+
+```ts
+        // display_order is the curated All order now, arranged from /admin/wall.
+        // Writing a manifest index here would silently overwrite it on every
+        // re-import. New rows keep the column default of 0, the "never placed"
+        // sentinel the publish rules append from.
+```
+
+- [ ] **Step 2: Handle the re-file case**
+
+`ON CONFLICT (slug) DO UPDATE SET collection_id = EXCLUDED.collection_id` re-files
+rows that may already be published. Those never transition into `published`, so
+the publish chokepoint never assigns them a chapter position.
+
+The prior `collection_id` must be read **before** the upsert overwrites it, or
+there is nothing left to compare against. Inside the same `withTransaction`,
+before the upsert:
+
+```ts
+        const prior = await client.query<{ id: number; collection_id: number | null; status: string }>(
+          `SELECT id, collection_id, status FROM artworks WHERE slug = $1`,
+          [slug],
+        );
+        const priorRow = prior.rows[0] ?? null;
+```
+
+and after the upsert:
+
+```ts
+        // A re-filed row that is ALREADY published never transitions, so nothing
+        // assigns it a chapter position and it would sort to the FRONT of its
+        // new chapter on /shop/collections/[slug], /portfolio/[slug] and the
+        // related rail. Only fires on a REAL change of collection, so a no-op
+        // re-import does not shuffle anything.
+        if (priorRow && priorRow.status === 'published' && priorRow.collection_id !== colId) {
+          await client.query(
+            `UPDATE artworks a
+                SET collection_order = COALESCE(
+                      (SELECT MAX(b.collection_order) FROM artworks b
+                        WHERE b.collection_id = a.collection_id
+                          AND b.status = 'published' AND b.id <> a.id), 0) + 1
+              WHERE a.id = $1 AND a.collection_id IS NOT NULL`,
+            [priorRow.id],
+          );
+        }
+```
+
+- [ ] **Step 3: Fence off `publish-selections`**
+
+At the top of `main()` in `scripts/publish-selections.ts`, before reading the
+selections file:
+
+```ts
+  // This script resolves artworks by (collection_id, display_order), expecting
+  // display_order to be the manifest's per-collection index. The shop-ordering
+  // backfill turned display_order into a global curated sequence, so that lookup
+  // now matches the WRONG rows, and the converge step below demotes every
+  // published row it did not match. A post-backfill run could mass-unpublish
+  // the shop.
+  //
+  // Blocks the dry run too, not just --apply: a dry run that prints a confident
+  // and entirely wrong diff is worse than one that refuses.
+  //
+  // A missing site_settings table (a fresh or pre-migrate database) means the
+  // backfill has not run, so proceed rather than surfacing a raw Postgres error.
+  let backfilled = false;
+  try {
+    const marker = await pool.query(
+      `SELECT 1 FROM site_settings WHERE key = 'shop_order_backfilled'`,
+    );
+    backfilled = (marker.rowCount ?? 0) > 0;
+  } catch {
+    backfilled = false;
+  }
+  if (backfilled) {
+    console.error(
+      'publish:selections is disabled. display_order is now the curated /shop order, ' +
+        'not the manifest index this script looks rows up by. See ' +
+        'docs/superpowers/specs/2026-07-20-shop-collections-ordering-design.md',
+    );
+    process.exit(1);
+  }
+```
+
+- [ ] **Step 4: Update the README**
+
+On the `npm run publish:selections` row, append:
+`(disabled after the shop-ordering backfill; display_order is the curated /shop order now)`
+
+- [ ] **Step 5: Verify the SQL strings still parse**
+
+Both edits removed lines from multi-line SQL template literals, which typecheck
+cannot validate.
+
+Run: `grep -n -A10 'INSERT INTO collections' scripts/import-manifest.ts && grep -n -A12 'INSERT INTO artworks' scripts/import-manifest.ts`
+
+Expected: the `collections` `DO UPDATE SET` ends with `tagline = COALESCE(...)`
+and no trailing comma; the `artworks` INSERT column list and `VALUES` have equal
+counts, and the parameter array length matches the highest `$n`.
+
+- [ ] **Step 6: Typecheck and commit**
+
+```bash
+npm run typecheck && npm test
+git add scripts/import-manifest.ts scripts/publish-selections.ts README.md
+git commit -m "fix(scripts): stop clobbering curated order, fence off publish-selections"
+```
+
+---
+
+### Task 4: Migration (`collection_order`, `site_settings`, the one-time backfill)
+
+**Files:**
+- Modify: `lib/schema.sql` (append at the end)
+
+This is the one irreversible task in the plan. It gets a real run, not a re-read.
+
+**Deploy grouping: Tasks 4 through 7 must ship together.**
+
+- [ ] **Step 0: Snapshot production BEFORE this can reach any build**
+
+`npm run build` runs `tsx lib/migrate.ts` first, so the densify fires on the
+first build after this lands, including a Vercel preview build if Preview shares
+the production `DATABASE_URL`. **Confirm whether it does** before continuing.
+
+Against production:
+
+```sql
+CREATE TABLE artworks_order_backup_20260721 AS
+  SELECT id, display_order, collection_id, collection_order FROM artworks;
+
+-- Shape of the data going in. Expect many nonzero values: import-manifest wrote
+-- per-collection indices into display_order.
+SELECT COUNT(*) FILTER (WHERE display_order <> 0) AS arranged, COUNT(*) AS total
+  FROM artworks;
+
+-- Both counts matter. The reorder guard counts published rows, but the admin
+-- loader's LIMIT 1000 applies across ALL statuses, so the total is what can
+-- truncate the All scope and 409 every reorder.
+SELECT COUNT(*) FILTER (WHERE status = 'published') AS published, COUNT(*) AS total
+  FROM artworks;
+```
 
 - [ ] **Step 1: Append the DDL**
 
-Append to `lib/schema.sql`. Order within this block matters: `site_settings`
-must exist before the `DO` block reads it.
+Order inside this block matters: `site_settings` must exist before the `DO` block
+reads it.
 
 ```sql
 -- Shop ordering ------------------------------------------------------------
--- collection_order: position within the row's OWN collection. Meaningful only
--- relative to collection_id. One column suffices because an artwork belongs to
--- exactly one collection; a join table would model a many-to-many that does
--- not exist. 0 = never placed (the sentinel the publish rules depend on).
-ALTER TABLE artworks
-  ADD COLUMN IF NOT EXISTS collection_order INT NOT NULL DEFAULT 0;
-CREATE INDEX IF NOT EXISTS idx_artworks_collection_order
-  ON artworks(collection_id, collection_order);
-
 -- Generic key/value settings. There was no settings store before this; the
 -- admin Settings page is account, env masks, and integration health only.
 CREATE TABLE IF NOT EXISTS site_settings (
@@ -584,27 +771,41 @@ CREATE TABLE IF NOT EXISTS site_settings (
 INSERT INTO site_settings (key, value) VALUES ('shop_index_limit', '12')
   ON CONFLICT (key) DO NOTHING;
 
+-- collection_order: position within the row's OWN collection. Meaningful only
+-- relative to collection_id. One column suffices because an artwork belongs to
+-- exactly one collection; a join table would model a many-to-many that does not
+-- exist. 0 = never placed (the sentinel the publish rules depend on).
+ALTER TABLE artworks
+  ADD COLUMN IF NOT EXISTS collection_order INT NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_artworks_collection_order
+  ON artworks(collection_id, collection_order);
+
 -- One-time densify of BOTH orders, from the sort key visitors already see, so
 -- nothing reshuffles on deploy.
 --
 -- PUBLISHED ROWS ONLY. Every public consumer of both orders filters to
 -- status='published', so only published rows have a position that means
 -- anything. Ranking all rows would hand existing drafts positions interleaved
--- among the published ones, and publishing such a draft later would drop it
--- into the MIDDLE of the sequence (possibly above the cut line, displacing
--- something) instead of appending it. Leaving non-published rows at 0 is what
--- makes append-on-entry work.
+-- among the published ones, and publishing such a draft later would drop it into
+-- the MIDDLE of the sequence (possibly above the cut line, displacing
+-- something) instead of appending. Leaving non-published rows at 0 is what makes
+-- append-on-entry work.
 --
 -- MARKER-GUARDED. lib/schema.sql re-runs on every build, and a densify that
--- re-ran every deploy would fight the append rules: a piece published at
--- MAX+1 would be silently re-ranked on the next deploy.
+-- re-ran every deploy would fight the append rules: a piece published at MAX+1
+-- would be silently re-ranked on the next deploy.
 --
 -- lib/migrate.ts sends this whole file through ONE pool.query with no explicit
 -- BEGIN/COMMIT, so Postgres runs it as a single implicit transaction: the DO
 -- block cannot half-run, and a failure later in the file rolls the marker back
 -- too, so the backfill retries on the next build instead of being skipped.
--- Do not split the migration, and never add BEGIN/COMMIT or a
+-- Do not split the migration, and never add a statement-level BEGIN/COMMIT or a
 -- non-transactional statement (CREATE INDEX CONCURRENTLY, VACUUM) to this file.
+--
+-- THE MARKER IS DATA, NOT SCHEMA. If collection_order or display_order is ever
+-- dropped and re-added, this row survives and the backfill silently skips,
+-- leaving every collection page sorted by id. Delete the
+-- 'shop_order_backfilled' row in the same breath as any such drop.
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM site_settings WHERE key = 'shop_order_backfilled')
@@ -625,8 +826,8 @@ BEGIN
     UPDATE artworks a SET display_order = r.ord FROM ranked r WHERE a.id = r.id;
 
     -- ON CONFLICT DO NOTHING is required, not decorative: two concurrent builds
-    -- (preview + prod, or a redeploy) both see no marker and both densify, and
-    -- a bare INSERT raises 23505 on the second, aborting the whole implicit
+    -- (preview + prod, or a redeploy) both see no marker and both densify, and a
+    -- bare INSERT raises 23505 on the second, aborting the whole implicit
     -- transaction and failing that deploy.
     INSERT INTO site_settings (key, value) VALUES ('shop_order_backfilled', '1')
       ON CONFLICT (key) DO NOTHING;
@@ -634,14 +835,58 @@ BEGIN
 END $$;
 ```
 
-- [ ] **Step 2: Verify every statement is re-run safe**
+- [ ] **Step 2: Verify no statement-level transaction control was introduced**
 
-Read the block back and confirm each statement individually: `ADD COLUMN IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `CREATE TABLE IF NOT EXISTS`, `INSERT … ON CONFLICT DO NOTHING`, and the `DO` block's own `IF NOT EXISTS` marker check. Confirm no `BEGIN`, `COMMIT`, `CREATE INDEX CONCURRENTLY`, or `VACUUM` was introduced anywhere in the file:
+The `BEGIN` inside the `DO $$` body is PL/pgSQL block syntax, not transaction
+control, so the pattern must anchor at column 0 and not match it:
 
-Run: `grep -nE '^\s*(BEGIN|COMMIT|VACUUM)|CONCURRENTLY' lib/schema.sql`
-Expected: no output
+Run: `grep -nE '^(BEGIN|COMMIT|VACUUM)\b|CONCURRENTLY' lib/schema.sql`
+Expected: no output (the `DO` block's `BEGIN` is indented, so it does not match)
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Run the migration for real, twice, against a throwaway branch**
+
+Re-reading SQL cannot detect a wrong `PARTITION BY`, a wrong join, or a marker
+check that never fires. Create a scratch Neon branch from production, point
+`DATABASE_URL` at it, and:
+
+```bash
+npm run migrate   # first run: performs the backfill
+npm run migrate   # second run: must be a no-op
+```
+
+Then assert against the scratch branch:
+
+```sql
+-- 1. Dense 1..N over published rows, no gaps, no duplicates.
+SELECT COUNT(*) AS published, MIN(display_order) AS lo, MAX(display_order) AS hi,
+       COUNT(DISTINCT display_order) AS distinct_positions
+  FROM artworks WHERE status = 'published';
+-- Expect: lo = 1, hi = published, distinct_positions = published
+
+-- 2. Non-published rows left at 0.
+SELECT COUNT(*) FROM artworks WHERE status <> 'published' AND collection_order <> 0;
+-- Expect: 0
+
+-- 3. Dense 1..N within each collection, over published rows.
+SELECT collection_id, COUNT(*) AS n, MAX(collection_order) AS hi
+  FROM artworks WHERE status = 'published' AND collection_id IS NOT NULL
+ GROUP BY collection_id;
+-- Expect: n = hi for every row
+
+-- 4. Order preserved. Compare against the Step 0 snapshot: the RELATIVE order
+--    must be identical, only the values densify.
+SELECT a.id, b.display_order AS before, a.display_order AS after
+  FROM artworks a JOIN artworks_order_backup_20260721 b ON b.id = a.id
+ WHERE a.status = 'published'
+ ORDER BY b.display_order, a.id;
+-- Expect: the `after` column strictly increasing down the result
+
+-- 5. The second run changed nothing.
+SELECT value FROM site_settings WHERE key = 'shop_order_backfilled';
+-- Expect: exactly one row, value '1'
+```
+
+- [ ] **Step 4: Delete the scratch branch and commit**
 
 ```bash
 git add lib/schema.sql
@@ -650,26 +895,106 @@ git commit -m "feat(shop): collection_order, site_settings, one-time order backf
 
 ---
 
-### Task 4: Rule 2 (entering `published` always assigns a fresh position)
+### Task 5: Rule 2 (entering `published` always assigns a fresh position)
 
 **Files:**
 - Modify: `lib/publish-artworks.ts`
+- Test: `tests/lib/publish-artworks-order.test.ts`
 
 **Interfaces:**
 - Consumes: the existing `transitioning` id list already computed in this file.
-- Produces: no signature change. `publishArtworks(client, ids)` keeps returning `PublishResult`.
+- Produces: no signature change.
 
-- [ ] **Step 1: Add the position assignment**
+`publishArtworks` takes an injectable `PoolClient`, so unlike the route changes
+this one IS reachable by vitest with a recording fake. Use that.
 
-In `lib/publish-artworks.ts`, after the existing `if (eligible.length) { … }` block and before the `return`, insert:
+- [ ] **Step 1: Write the failing test**
+
+Create `tests/lib/publish-artworks-order.test.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest';
+import type { PoolClient } from 'pg';
+import { publishArtworks } from '@/lib/publish-artworks';
+
+/** Records every SQL string and param set, and replays canned SELECT results. */
+function fakeClient(rows: { id: number; status: string }[]) {
+  const calls: { sql: string; params: unknown[] }[] = [];
+  const client = {
+    query: async (sql: string, params: unknown[] = []) => {
+      calls.push({ sql, params });
+      if (sql.includes('SELECT id, status')) return { rows, rowCount: rows.length };
+      return { rows: [], rowCount: 0 };
+    },
+  } as unknown as PoolClient;
+  return { client, calls };
+}
+
+const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
+
+describe('publishArtworks position assignment', () => {
+  it('assigns positions with ROW_NUMBER, never MAX + 1', async () => {
+    // MAX + 1 would hand an entire batch the identical position. This helper
+    // takes an ids[], so the batch case is the normal case, not an edge case.
+    const { client, calls } = fakeClient([
+      { id: 1, status: 'draft' },
+      { id: 2, status: 'draft' },
+    ]);
+    await publishArtworks(client, [1, 2]);
+    const orderSql = calls.filter((c) => c.sql.includes('display_order'));
+    expect(orderSql.length).toBeGreaterThan(0);
+    expect(norm(orderSql[0].sql)).toContain('ROW_NUMBER() OVER (ORDER BY id)');
+  });
+
+  it('excludes the transitioning rows from the MAX it appends after', async () => {
+    // The status UPDATE runs FIRST, so those rows are already status='published'
+    // by the time the MAX is read. Without the exclusion the MAX reads their own
+    // stale manifest indices back in and the batch lands mid-grid.
+    const { client, calls } = fakeClient([{ id: 1, status: 'draft' }]);
+    await publishArtworks(client, [1]);
+    const maxSql = calls.find((c) => c.sql.includes('MAX(display_order)'));
+    expect(maxSql).toBeDefined();
+    expect(norm(maxSql!.sql)).toContain('id <> ALL($1::int[])');
+    expect(norm(maxSql!.sql)).toContain("status = 'published'");
+  });
+
+  it('passes only the transitioning ids, not every eligible id', async () => {
+    // Already-published rows must not be repositioned: re-publishing one would
+    // otherwise kick it to the end of /shop.
+    const { client, calls } = fakeClient([
+      { id: 1, status: 'draft' },
+      { id: 2, status: 'published' },
+    ]);
+    await publishArtworks(client, [1, 2]);
+    const orderSql = calls.find((c) => c.sql.includes('display_order'));
+    expect(orderSql!.params[0]).toEqual([1]);
+  });
+
+  it('does no position work when nothing is transitioning', async () => {
+    const { client, calls } = fakeClient([{ id: 1, status: 'published' }]);
+    await publishArtworks(client, [1]);
+    expect(calls.some((c) => c.sql.includes('display_order'))).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `npx vitest run tests/lib/publish-artworks-order.test.ts`
+Expected: FAIL on the first assertion, no query containing `display_order`
+
+- [ ] **Step 3: Add the position assignment**
+
+In `lib/publish-artworks.ts`, after the existing `if (eligible.length) { … }`
+block and before the `return`:
 
 ```ts
   // Position assignment. A row entering the shop NEVER keeps its stored
   // position: production guarantees duplicate display_order values (
-  // scripts/import-manifest.ts wrote per-collection manifest indices into it),
-  // so any "is this position already taken" test would be wrong on the first
-  // bulk publish. Assign unconditionally instead, and let the retire path zero
-  // the columns on the way out.
+  // scripts/import-manifest.ts historically wrote per-collection manifest
+  // indices into it), so any "is this position already taken" test would be
+  // wrong on the first bulk publish. Assign unconditionally instead, and let
+  // the demote paths zero the columns on the way out (Rule 1, Tasks 6 and 7).
   if (transitioning.length) {
     // MAX + ROW_NUMBER, never MAX + 1: this helper takes an ids[], so MAX + 1
     // would hand an entire batch of twenty drafts the identical position.
@@ -722,71 +1047,79 @@ In `lib/publish-artworks.ts`, after the existing `if (eligible.length) { … }` 
   }
 ```
 
-- [ ] **Step 2: Update the file's docstring**
+- [ ] **Step 4: Extend the file's docstring**
 
-In the block comment above `publishArtworks`, add a fourth bullet after the `published_at` one:
+Add a fourth bullet after the `published_at` one:
 
 ```
- * - Rows TRANSITIONING into 'published' are assigned a fresh display_order
- *   (and collection_order, when filed) at the end of their scope. Stored
- *   positions are never trusted here; scripts/import-manifest.ts historically
- *   wrote manifest indices into display_order, so duplicates are normal. The
- *   retire path zeroes both columns, so a returning piece appends.
+ * - Rows TRANSITIONING into 'published' are assigned a fresh display_order (and
+ *   collection_order, when filed) at the end of their scope. Stored positions
+ *   are never trusted here; import-manifest historically wrote manifest indices
+ *   into display_order, so duplicates are normal. The demote paths zero both
+ *   columns, so a returning piece appends.
 ```
 
-- [ ] **Step 3: Typecheck and commit**
+- [ ] **Step 5: Run the test, typecheck, commit**
+
+Run: `npx vitest run tests/lib/publish-artworks-order.test.ts && npm run typecheck`
+Expected: PASS, 4 tests; typecheck clean
 
 ```bash
-npm run typecheck
-git add lib/publish-artworks.ts
+git add lib/publish-artworks.ts tests/lib/publish-artworks-order.test.ts
 git commit -m "feat(shop): assign shop positions at the publish chokepoint"
 ```
 
 ---
 
-### Task 5: Rules 1 and 3 in the per-artwork PATCH
+### Task 6: Rules 1 and 3 in the per-artwork PATCH
 
 **Files:**
 - Modify: `app/api/admin/artworks/[id]/route.ts`
 
-**Interfaces:**
-- Consumes: nothing new.
-- Produces: `display_order` is removed from the PATCH Zod schema and can no longer be written through this route.
+**Note on Rule 1's placement.** The spec says Rules 1 and 2 live inside
+`lib/publish-artworks.ts`. Rule 2 does (Task 5). Rule 1 cannot: that helper has
+no demote path, it only publishes. Rule 1 therefore lives at the two demote
+sites, this route and the bulk `retire` action. The third potential demoter,
+`scripts/publish-selections.ts`'s converge step, is fenced off entirely in Task 3,
+so it cannot bypass this. Recorded here so the divergence from the spec is
+deliberate and visible rather than an oversight.
 
 - [ ] **Step 1: Remove `display_order` from the Zod schema**
 
-In the `Patch` object, delete this line:
+Delete `display_order: z.number().int().optional(),` from the `Patch` object.
+Ordering has a dedicated endpoint now, and no admin UI sends this field, so a
+direct write path that bypasses densification is a trap.
+
+- [ ] **Step 2: Add Rules 1 and 3 beside the existing `wall_order` reset**
+
+Immediately after the existing
+`if (d.on_wall !== undefined) { updateCols.push('wall_order = 0'); }` block:
 
 ```ts
-  display_order: z.number().int().optional(),
-```
-
-Ordering has a dedicated endpoint now (Task 7) and no admin UI sends this field, so leaving a direct write path that bypasses densification is a trap.
-
-- [ ] **Step 2: Add Rule 1 and Rule 3 beside the existing `wall_order` reset**
-
-In the `withTransaction` callback, immediately after the existing
-`if (d.on_wall !== undefined) { updateCols.push('wall_order = 0'); }` block, insert:
-
-```ts
-      // Rule 1: leaving 'published' zeroes both shop orders, exactly as
-      // toggling on_wall clears wall_order directly above. Without this a
-      // retired piece keeps a live-looking position and re-publishing drops it
-      // back into the middle of the grid instead of appending. Constant 0, no
-      // param; the column names are literals, never user keys.
-      if (d.status === 'retired' || d.status === 'draft') {
+      // Rule 1: leaving 'published' zeroes both shop orders, exactly as toggling
+      // on_wall clears wall_order directly above. Without this a retired piece
+      // keeps a live-looking position, and re-publishing drops it back into the
+      // middle of the grid instead of appending.
+      const demoting = d.status === 'retired' || d.status === 'draft';
+      if (demoting) {
         updateCols.push('display_order = 0', 'collection_order = 0');
       }
 
-      // Rule 3: a REAL collection change appends to the end of the new
-      // chapter. In an UPDATE the right-hand side sees the OLD column values,
-      // so `collection_id IS DISTINCT FROM $n` compares the prior collection to
-      // the incoming one in the same statement that overwrites it.
+      // Rule 3: a REAL collection change appends to the end of the new chapter.
+      // In an UPDATE the right-hand side sees the OLD column values, so
+      // `collection_id IS DISTINCT FROM $n` compares the prior collection to the
+      // incoming one in the same statement that overwrites it.
       //
       // The DISTINCT check is not optional: ArtworkRowMenu lets an admin click
       // the chapter a piece is already in, and without it that no-op would
       // re-append the piece to the end of its own chapter.
-      if (d.collection_id !== undefined) {
+      //
+      // Guarded on !demoting: Postgres rejects two assignments to the same
+      // column in one UPDATE with 42601, and a PATCH of
+      // {status:'retired', collection_id:N} would otherwise push both
+      // `collection_order = 0` and this CASE. Demotion wins, which is right: a
+      // row leaving the shop has no position in any chapter.
+      if (d.collection_id !== undefined && !demoting) {
         const p = vals.length + 1;
         vals.push(d.collection_id);
         updateCols.push(
@@ -801,26 +1134,35 @@ In the `withTransaction` callback, immediately after the existing
       }
 ```
 
-Note the ordering: this must come **after** the generic `for (const [k, v] of Object.entries(d))` loop that pushes `collection_id = $k`, so both parameters exist. It already does, because the `on_wall` block it follows is after that loop.
+This must sit **after** the generic `for (const [k, v] of Object.entries(d))`
+loop that pushes `collection_id = $k`, so both parameters exist, and before
+`vals.push(id)`. It already does: the `on_wall` block it follows is after that
+loop and before the id push.
 
-- [ ] **Step 3: Typecheck and commit**
+- [ ] **Step 3: Verify the parameter arithmetic by reading it back**
+
+Typecheck cannot catch an off-by-one in a `$n` placeholder; the SQL compiles and
+writes the wrong value. Read the assembled statement back and confirm every `$n`
+in `updateCols` corresponds to the right entry in `vals`, and that `id` is the
+last parameter, matching `WHERE id = $${vals.length}`.
+
+This task's real checkpoint is manual steps 6, 7 and 8 in the final verification.
+It is not verifiable at commit time.
+
+- [ ] **Step 4: Typecheck and commit**
 
 ```bash
-npm run typecheck
+npm run typecheck && npm test
 git add "app/api/admin/artworks/[id]/route.ts"
-git commit -m "feat(shop): zero orders on retire, append on collection change"
+git commit -m "feat(shop): zero orders on demote, append on collection change"
 ```
 
 ---
 
-### Task 6: Rules 1 and 3 in the bulk artworks route
+### Task 7: Rules 1 and 3 in the bulk artworks route
 
 **Files:**
 - Modify: `app/api/admin/artworks/route.ts`
-
-**Interfaces:**
-- Consumes: nothing new.
-- Produces: no signature change.
 
 - [ ] **Step 1: Rule 1 on bulk retire**
 
@@ -828,8 +1170,8 @@ Replace the `action === 'retire'` query:
 
 ```ts
   } else if (action === 'retire') {
-    // Zero both shop orders on the way out (Rule 1), so a piece that comes
-    // back later appends rather than resurfacing on a stale position.
+    // Rule 1: zero both shop orders on the way out, so a piece that comes back
+    // later appends rather than resurfacing on a stale position.
     await pool.query(
       `UPDATE artworks
           SET status='retired', display_order = 0, collection_order = 0,
@@ -866,37 +1208,136 @@ Replace the `pool.query` inside `action === 'move'`:
       );
 ```
 
-Two things this fixes over the bare `UPDATE … SET collection_id` it replaces.
+Two fixes over the bare `UPDATE … SET collection_id` this replaces.
 `ROW_NUMBER()` because this endpoint is inherently a batch, so `MAX + 1` would
-give every moved row the identical position and sort them as a clump at the
-front. And `IS DISTINCT FROM` in the `t` CTE, so rows already in the target
-collection are not touched at all.
+give every moved row the identical position and sort them as a clump at the front
+of the target chapter. And `IS DISTINCT FROM` in the `t` CTE, so rows already in
+the target are not touched. An empty `t` CTE cross-joins to zero rows, which is
+the intended no-op.
 
 - [ ] **Step 3: Typecheck and commit**
 
 ```bash
-npm run typecheck
+npm run typecheck && npm test
 git add app/api/admin/artworks/route.ts
 git commit -m "feat(shop): batch-safe order handling on bulk retire and move"
 ```
 
 ---
 
-### Task 7: The reorder and settings endpoints
+### Task 8: The settings reader (`lib/site-settings.ts`)
+
+**Files:**
+- Create: `lib/site-settings.ts`
+- Test: `tests/lib/site-settings.test.ts`
+
+**Server-only.** This module imports `pool`, so no `'use client'` component may
+import it. Client-side needs go to `lib/shop-limit.ts`.
+
+- [ ] **Step 1: Write the failing test**
+
+The spec calls the never-throws property load-bearing, so it gets tested rather
+than asserted. Create `tests/lib/site-settings.test.ts`:
+
+```ts
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { SHOP_INDEX_LIMIT_DEFAULT } from '@/lib/shop-limit';
+
+const query = vi.fn();
+vi.mock('@/lib/db', () => ({ pool: { query: (...a: unknown[]) => query(...a) } }));
+
+const { getShopIndexLimit } = await import('@/lib/site-settings');
+
+beforeEach(() => query.mockReset());
+
+describe('getShopIndexLimit', () => {
+  it('returns the stored value', async () => {
+    query.mockResolvedValue({ rows: [{ value: '25' }] });
+    expect(await getShopIndexLimit()).toBe(25);
+  });
+
+  it('returns 0 for an explicit no-limit', async () => {
+    query.mockResolvedValue({ rows: [{ value: '0' }] });
+    expect(await getShopIndexLimit()).toBe(0);
+  });
+
+  it('falls back when the row is absent', async () => {
+    query.mockResolvedValue({ rows: [] });
+    expect(await getShopIndexLimit()).toBe(SHOP_INDEX_LIMIT_DEFAULT);
+  });
+
+  it('falls back when the value is unparseable or out of range', async () => {
+    for (const v of ['abc', '', '-3', '99999']) {
+      query.mockResolvedValue({ rows: [{ value: v }] });
+      expect(await getShopIndexLimit()).toBe(SHOP_INDEX_LIMIT_DEFAULT);
+    }
+  });
+
+  // The realistic case: a fresh, preview, or restored Neon branch with no
+  // site_settings table (42P01). app/(shop)/shop/page.tsx has no try/catch of
+  // its own, so a throw here takes the storefront index down.
+  it('NEVER throws, even when the query rejects', async () => {
+    query.mockRejectedValue(Object.assign(new Error('relation does not exist'), { code: '42P01' }));
+    await expect(getShopIndexLimit()).resolves.toBe(SHOP_INDEX_LIMIT_DEFAULT);
+  });
+});
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `npx vitest run tests/lib/site-settings.test.ts`
+Expected: FAIL, `Failed to resolve import "@/lib/site-settings"`
+
+- [ ] **Step 3: Write the implementation**
+
+Create `lib/site-settings.ts`:
+
+```ts
+import { pool } from '@/lib/db';
+import { parseShopIndexLimit, SHOP_INDEX_LIMIT_DEFAULT } from '@/lib/shop-limit';
+
+/**
+ * Read the limit for the public /shop grid. NEVER throws.
+ *
+ * SERVER ONLY: this imports `pool`, which creates a connection pool at module
+ * scope. A 'use client' component importing this would pull `pg` into the client
+ * bundle and fail at `next build`. Client code imports lib/shop-limit.ts.
+ *
+ * app/(shop)/shop/page.tsx has no try/catch of its own, and a missing
+ * site_settings table (42P01, on a fresh, preview, or restored Neon branch) or a
+ * cold-start blip would otherwise take the storefront index down.
+ */
+export async function getShopIndexLimit(): Promise<number> {
+  try {
+    const { rows } = await pool.query<{ value: string }>(
+      `SELECT value FROM site_settings WHERE key = 'shop_index_limit'`,
+    );
+    if (!rows.length) return SHOP_INDEX_LIMIT_DEFAULT;
+    return parseShopIndexLimit(rows[0].value);
+  } catch {
+    return SHOP_INDEX_LIMIT_DEFAULT;
+  }
+}
+```
+
+- [ ] **Step 4: Run the test, typecheck, commit**
+
+Run: `npx vitest run tests/lib/site-settings.test.ts && npm run typecheck`
+Expected: PASS, 5 tests
+
+```bash
+git add lib/site-settings.ts tests/lib/site-settings.test.ts
+git commit -m "feat(shop): never-throwing shop_index_limit reader"
+```
+
+---
+
+### Task 9: The reorder endpoint
 
 **Files:**
 - Create: `app/api/admin/shop/order/route.ts`
-- Create: `app/api/admin/settings/route.ts`
 
-**Interfaces:**
-- Consumes: `withTransaction` from `@/lib/db`, `requireAdmin` from `@/lib/session`, `requireSameOrigin` from `@/lib/origin-check`, `logger` from `@/lib/logger`, `isValidShopIndexLimit`/`SHOP_INDEX_LIMIT_MAX` from `@/lib/site-settings`.
-- Produces:
-  - `POST /api/admin/shop/order` accepting `{scope:'all', ids}` or `{scope:'collection', collectionId, ids}`; returns `{ok:true}`, `409 {error:'stale'}`, or `400`.
-  - `PATCH /api/admin/settings` accepting `{key:'shop_index_limit', value:number}`; returns `{ok:true}`.
-
-- [ ] **Step 1: Write the reorder route**
-
-Create `app/api/admin/shop/order/route.ts`:
+- [ ] **Step 1: Write the route**
 
 ```ts
 export const runtime = 'nodejs';
@@ -907,30 +1348,27 @@ import { requireAdmin } from '@/lib/session';
 import { requireSameOrigin } from '@/lib/origin-check';
 import { logger } from '@/lib/logger';
 
-// Persist one SHOP scope's sequence. Scope 'all' writes display_order (the
-// /shop order); scope 'collection' writes collection_order for that collection
-// only. The two never write each other.
+// Persist one SHOP scope's sequence. Scope 'all' writes display_order (the /shop
+// order); scope 'collection' writes collection_order for that collection only.
+// The two never write each other.
 //
 // The cap must stay >= the admin loader's LIMIT (app/admin/wall/page.tsx), or a
 // large catalogue would POST more ids than Zod accepts and reordering would 400
-// with no way to recover. Same invariant /api/admin/wall documents.
+// with no way to recover. Same invariant /api/admin/wall documents. Note the
+// loader's LIMIT applies across ALL statuses while Guard B below counts
+// published rows, so both must be raised together as the catalogue grows.
+const Ids = z
+  .array(z.number().int().positive())
+  .min(1)
+  .max(1000)
+  .refine((a) => new Set(a).size === a.length, 'duplicate ids');
+
 const Body = z.discriminatedUnion('scope', [
-  z.object({
-    scope: z.literal('all'),
-    ids: z
-      .array(z.number().int().positive())
-      .min(1)
-      .max(1000)
-      .refine((a) => new Set(a).size === a.length, 'duplicate ids'),
-  }),
+  z.object({ scope: z.literal('all'), ids: Ids }),
   z.object({
     scope: z.literal('collection'),
     collectionId: z.number().int().positive(),
-    ids: z
-      .array(z.number().int().positive())
-      .min(1)
-      .max(1000)
-      .refine((a) => new Set(a).size === a.length, 'duplicate ids'),
+    ids: Ids,
   }),
 ]);
 
@@ -949,15 +1387,22 @@ export async function POST(req: Request) {
   const ids = body.ids;
 
   let stale = false;
+  let matched = -1;
   try {
     await withTransaction(async (client) => {
       // Two literal statements rather than one built from `scope`. Deriving a
-      // SET column name from request data is an identifier-interpolation trap
-      // in a repo with no ORM.
+      // SET column name from request data is an identifier-interpolation trap in
+      // a repo with no ORM.
       //
       // status='published' on BOTH scopes: without it a stale tab stamps a
       // nonzero position onto a draft and destroys the 0 sentinel that
       // append-on-publish depends on.
+      //
+      // Deliberately NOT setting updated_at, even though /api/admin/wall does.
+      // The admin Library sorts ORDER BY a.updated_at DESC, so every drag would
+      // reshuffle the Library under the user, and app/sitemap.ts uses updated_at
+      // as lastModified, so every reorder would re-stamp every published artwork
+      // in the sitemap.
       const res =
         body.scope === 'all'
           ? await client.query(
@@ -979,12 +1424,13 @@ export async function POST(req: Request) {
                   AND a.collection_id = $2`,
               [ids, body.collectionId],
             );
+      matched = res.rowCount ?? 0;
 
       // Guard A: every posted id matched. The WHERE clauses skip non-matching
-      // rows SILENTLY, so survivors would take sparse ordinals (1, 3, 5...)
-      // from the full array's WITH ORDINALITY while the skipped rows keep
-      // colliding values, and the admin would still see "order saved".
-      if (res.rowCount !== ids.length) throw new StaleScopeError();
+      // rows SILENTLY, so survivors would take sparse ordinals (1, 3, 5...) from
+      // the full array's WITH ORDINALITY while skipped rows keep colliding
+      // values, and the admin would still see "order saved".
+      if (matched !== ids.length) throw new StaleScopeError();
 
       // Guard B: the payload covers the WHOLE scope. Guard A cannot catch a
       // SHORT payload: a strict subset where every row matches passes it and
@@ -1000,12 +1446,6 @@ export async function POST(req: Request) {
               [body.collectionId],
             );
       if (Number(total.rows[0].n) !== ids.length) throw new StaleScopeError();
-
-      // Deliberately NOT setting updated_at. The admin Library sorts
-      // ORDER BY a.updated_at DESC, so every drag would reshuffle the Library
-      // under the user, and app/sitemap.ts uses updated_at as lastModified, so
-      // every reorder would re-stamp every published artwork in the sitemap.
-      // (/api/admin/wall does stamp it; do not copy that here.)
     });
   } catch (err) {
     if (err instanceof StaleScopeError) {
@@ -1016,12 +1456,14 @@ export async function POST(req: Request) {
       logger.warn('shop reorder rejected: scope changed', {
         scope: body.scope,
         idCount: ids.length,
+        rowCount: matched,
       });
       stale = true;
     } else {
       logger.error('shop reorder failed', err, {
         scope: body.scope,
         idCount: ids.length,
+        rowCount: matched,
       });
       return NextResponse.json({ error: 'save failed' }, { status: 500 });
     }
@@ -1031,9 +1473,22 @@ export async function POST(req: Request) {
 }
 ```
 
-- [ ] **Step 2: Write the settings route**
+- [ ] **Step 2: Typecheck and commit**
 
-Create `app/api/admin/settings/route.ts`:
+```bash
+npm run typecheck && npm test
+git add app/api/admin/shop/order/route.ts
+git commit -m "feat(shop): scoped reorder endpoint with rollback on stale scope"
+```
+
+---
+
+### Task 10: The settings endpoint
+
+**Files:**
+- Create: `app/api/admin/settings/route.ts`
+
+- [ ] **Step 1: Write the route**
 
 ```ts
 export const runtime = 'nodejs';
@@ -1043,7 +1498,7 @@ import { pool } from '@/lib/db';
 import { requireAdmin } from '@/lib/session';
 import { requireSameOrigin } from '@/lib/origin-check';
 import { logger } from '@/lib/logger';
-import { isValidShopIndexLimit } from '@/lib/site-settings';
+import { isValidShopIndexLimit } from '@/lib/shop-limit';
 
 // The key is an ENUM, not a free-form string, so a generic key/value table can
 // never be written by a generic writer.
@@ -1080,47 +1535,170 @@ export async function PATCH(req: Request) {
 }
 ```
 
-- [ ] **Step 3: Typecheck and commit**
+- [ ] **Step 2: Typecheck and commit**
 
 ```bash
-npm run typecheck
-git add app/api/admin/shop/order/route.ts app/api/admin/settings/route.ts
-git commit -m "feat(shop): scoped reorder endpoint and settings writer"
+npm run typecheck && npm test
+git add app/api/admin/settings/route.ts
+git commit -m "feat(shop): settings endpoint for the /shop cap"
 ```
 
 ---
 
-### Task 8: Loader and the filter tray
+### Task 11: Extract the Shop shelf (no behavior change)
 
 **Files:**
-- Modify: `app/admin/wall/page.tsx`
-- Modify: `components/admin/WallArranger.tsx`
-- Modify: `app/admin/admin.css`
+- Create: `components/admin/ShopShelf.tsx`, `components/admin/TileActions.tsx`
+- Modify: `components/admin/WallArranger.tsx`, `app/admin/wall/page.tsx`, `app/dev-preview/wall/page.tsx`
 
-**Interfaces:**
-- Consumes: `deriveShopIds`, `shopScopeCounts`, `parseScopeKey`, `scopeKey`, `isArrangeable`, `ShopScope` from `@/lib/shop-arrange`; `getShopIndexLimit` from `@/lib/site-settings`.
-- Produces: `WallArranger` now takes `{ photos, collections, shopIndexLimit }` where `collections: { id: number; title: string }[]`.
+A pure extraction. The Shop shelf renders exactly as it does today; only its
+location changes. Doing it before the feature work is what keeps the Wall's state
+and the Shop's from entangling: the first draft of this plan reused the Wall's
+`[data-pos-id]` selector, in-flight flag, saved-flash, and snapshot ref, and every
+one of those was a bug.
 
-- [ ] **Step 1: Extend the loader**
+**Interfaces produced:**
 
-In `app/admin/wall/page.tsx`, add the four columns to the SELECT (after `wall_rank`'s `CASE … END AS wall_rank,` line, add before `FROM artworks a`):
+```ts
+export interface ShopShelfProps {
+  photos: LibraryPhoto[];
+  collections: { id: number; title: string }[];
+  initialLimit: number;
+  /** Parent-level mutations in flight (Library, Wall). The shelf disables while true. */
+  parentInFlight: boolean;
+  /** The shelf reports its own in-flight so the parent can gate the other panes. */
+  onBusyChange: (busy: boolean) => void;
+  minimized: boolean;
+  onMinimize: () => void;
+  /** Library drag state, for the drop-to-sell affordance. */
+  dropTarget: 'wall' | 'shop' | null;
+  dragHd: boolean | undefined;
+  onShelfDragOver: (e: React.DragEvent) => void;
+  onShelfDragLeave: (e: React.DragEvent) => void;
+  onShelfDrop: (e: React.DragEvent) => void;
+  /** Two-step remove confirm, still parent-owned (Escape clears it globally). */
+  confirmingId: number | null;
+  onArmRemove: (id: number) => void;
+  onRemoveFromShop: (id: number) => void;
+  /**
+   * Write saved positions back into the parent's `photos`. Without this the
+   * shelf re-derives from stale display_order after ANY later setPhoto and
+   * visibly snaps back to the pre-drag order.
+   */
+  onPositionsSaved: (
+    updates: { id: number; display_order?: number; collection_order?: number }[],
+  ) => void;
+  announce: (msg: string) => void;
+  fail: (msg: string) => void;
+  onTimeout: () => void;
+}
+```
+
+- [ ] **Step 1: Move `EditLink` and `RemoveButton` to a shared module**
+
+Create `components/admin/TileActions.tsx` exporting both verbatim from
+`WallArranger`, and import them in `WallArranger` from there. `ShopShelf` will
+import them too; do NOT import them from `WallArranger` (circular import).
+
+- [ ] **Step 2: Move the Shop `<section>` into `ShopShelf.tsx`**
+
+Create `components/admin/ShopShelf.tsx` with `'use client'`, the props above, and
+the Shop `<section>` markup moved verbatim. In this step the shelf keeps
+`photos.filter(isInShop)` exactly as today. No scope, no reorder, no cut line yet.
+
+- [ ] **Step 3: Add the writeback handler in `WallArranger`**
+
+```tsx
+  // Fold saved positions back into `photos` so the shelf's derivation stays
+  // truthful. Without this, any later setPhoto (removeFromShop, placeInShop,
+  // bulkApply) recomputes the shelf from stale positions and snaps it back to
+  // the pre-drag order.
+  function applyPositions(
+    updates: { id: number; display_order?: number; collection_order?: number }[],
+  ) {
+    const patch = new Map(updates.map((u) => [u.id, u]));
+    setPhotos((ps) =>
+      ps.map((p) => {
+        const u = patch.get(p.id);
+        if (!u) return p;
+        return {
+          ...p,
+          display_order: u.display_order ?? p.display_order,
+          collection_order: u.collection_order ?? p.collection_order,
+        };
+      }),
+    );
+  }
+```
+
+- [ ] **Step 4: Render `<ShopShelf …>` in place of the removed section**
+
+Wire every prop. `parentInFlight` is the existing `inFlight`; extend the parent's
+gate to include the shelf's reported busy state via `onBusyChange`.
+
+- [ ] **Step 5: Update BOTH call sites of `WallArranger`**
+
+`app/admin/wall/page.tsx` gains `collections` and `shopIndexLimit`. Task 12 adds
+the queries; for now pass `[]` and `SHOP_INDEX_LIMIT_DEFAULT` so this task stands
+alone.
+
+`app/dev-preview/wall/page.tsx:73` currently renders
+`<WallArranger photos={mockPhotos(n)} />` and **must** be updated here or this
+task's own typecheck gate fails:
+
+```tsx
+        <WallArranger
+          photos={mockPhotos(n)}
+          collections={[
+            { id: 1, title: 'The Front Range' },
+            { id: 2, title: 'Night Work' },
+          ]}
+          shopIndexLimit={12}
+        />
+```
+
+- [ ] **Step 6: Verify no behavior changed**
+
+Run: `npm run dev`, open `http://localhost:3000/dev-preview/wall?n=100`
+
+Expected: the Shop shelf looks and behaves exactly as before the extraction.
+Minimize and restore it, drag a Library tile onto it, arm and cancel a remove.
+Nothing about the Wall or Library changed.
+
+- [ ] **Step 7: Typecheck, test, commit**
+
+```bash
+npm run typecheck && npm test
+git add components/admin/ShopShelf.tsx components/admin/TileActions.tsx \
+        components/admin/WallArranger.tsx app/admin/wall/page.tsx \
+        app/dev-preview/wall/page.tsx
+git commit -m "refactor(admin): extract ShopShelf from WallArranger"
+```
+
+---
+
+### Task 12: Loader and the filter tray
+
+**Files:**
+- Modify: `app/admin/wall/page.tsx`, `components/admin/ShopShelf.tsx`, `components/admin/WallArranger.tsx`, `app/admin/admin.css`
+
+- [ ] **Step 1: Extend the loader query**
+
+`app/admin/wall/page.tsx:29` ends `))::int END AS wall_rank` with **no trailing
+comma**, because it is the last select item. Add the comma when inserting:
 
 ```sql
+                   ))::int END AS wall_rank,
               a.collection_id,
               c.title AS collection_title,
               a.collection_order,
-              a.display_order,
-```
-
-and change `FROM artworks a` to:
-
-```sql
+              a.display_order
          FROM artworks a
          LEFT JOIN collections c ON c.id = a.collection_id
+        WHERE a.image_web_url <> ''
 ```
 
-Then replace the single-query body with three, keeping the existing fail-soft
-`try/catch` around all of them:
+- [ ] **Step 2: Add the two other queries**
 
 ```tsx
   let photos: LibraryPhoto[] = [];
@@ -1128,7 +1706,7 @@ Then replace the single-query body with three, keeping the existing fail-soft
   let shopIndexLimit = SHOP_INDEX_LIMIT_DEFAULT;
   try {
     const [res, colRes, limit] = await Promise.all([
-      pool.query<LibraryPhoto>(/* the existing query, with the columns above */),
+      pool.query<LibraryPhoto>(/* the query above */),
       // Its own query, not derived from `photos`: the filter tray must show a
       // chapter even when nothing in it is currently in the shop.
       pool.query<{ id: number; title: string }>(
@@ -1142,76 +1720,34 @@ Then replace the single-query body with three, keeping the existing fail-soft
   } catch (err) {
     console.error('[admin/wall] load failed:', err);
   }
-  return (
-    <WallArranger
-      photos={photos}
-      collections={collections}
-      shopIndexLimit={shopIndexLimit}
-    />
-  );
 ```
 
-Add the imports at the top:
+Imports: `import { getShopIndexLimit } from '@/lib/site-settings';` and
+`import { SHOP_INDEX_LIMIT_DEFAULT } from '@/lib/shop-limit';`
+
+- [ ] **Step 3: Add scope state to `ShopShelf`**
 
 ```tsx
-import { getShopIndexLimit, SHOP_INDEX_LIMIT_DEFAULT } from '@/lib/site-settings';
-```
-
-- [ ] **Step 2: Add scope state to `WallArranger`**
-
-Change the component signature and add state. Replace:
-
-```tsx
-export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
-```
-
-with:
-
-```tsx
-export function WallArranger({
-  photos: initial,
-  collections,
-  shopIndexLimit: initialLimit,
-}: {
-  photos: LibraryPhoto[];
-  collections: { id: number; title: string }[];
-  shopIndexLimit: number;
-}) {
-```
-
-Add beside the existing `const [filter, setFilter] = useState<FilterKey>('all');`:
-
-```tsx
-  // Which Shop scope is on screen. Read post-mount (see the effect below), so
-  // SSR renders All and there is no hydration mismatch.
   const [shopScope, setShopScope] = useState<ShopScope>({ kind: 'all' });
-  const [shopLimit, setShopLimit] = useState<number>(initialLimit);
-```
 
-- [ ] **Step 3: Persist and restore the scope**
-
-Inside the existing post-mount `useEffect(() => { … }, [])` that reads
-`wl-wall-bandh` and `wl-wall-min`, add before the closing `catch`:
-
-```tsx
-      // Same post-mount treatment as wl-wall-min, and for the same reason:
-      // reading during render would flash the All view and its cut line before
-      // switching. Every "Edit" is a round trip out of this page and back, and
-      // losing your place on return was already fixed once here.
+  // Read post-mount, exactly as WallArranger reads wl-wall-min, so SSR renders
+  // All and there is no hydration mismatch. Reading during render would flash
+  // the All view and its cut line before switching.
+  useEffect(() => {
+    try {
       const s = window.localStorage.getItem('wl-shop-scope');
-      if (s) {
-        const parsed = parseScopeKey(s);
-        // A persisted scope naming a since-deleted collection falls back to
-        // All, rather than rendering an empty shelf with no matching chip.
-        if (parsed.kind !== 'collection' || collections.some((c) => c.id === parsed.id)) {
-          setShopScope(parsed);
-        }
+      if (!s) return;
+      const parsed = parseScopeKey(s);
+      // A persisted scope naming a since-deleted collection falls back to All,
+      // rather than rendering an empty shelf with no matching chip.
+      if (parsed.kind !== 'collection' || collections.some((c) => c.id === parsed.id)) {
+        setShopScope(parsed);
       }
-```
+    } catch {
+      /* ignore */
+    }
+  }, [collections]);
 
-Add a setter used by the tray:
-
-```tsx
   function selectShopScope(next: ShopScope) {
     setShopScope(next);
     try {
@@ -1224,10 +1760,11 @@ Add a setter used by the tray:
 
 - [ ] **Step 4: Derive the shelf list from the scope**
 
-Replace the existing `const shop = useMemo(() => photos.filter(isInShop), [photos]);` with:
+Replace `photos.filter(isInShop)` with:
 
 ```tsx
-  const shopCounts = useMemo(() => shopScopeCounts(photos), [photos]);
+  const byId = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);
+  const counts = useMemo(() => shopScopeCounts(photos), [photos]);
   const shopIds = useMemo(() => deriveShopIds(photos, shopScope), [photos, shopScope]);
   const shop = useMemo(
     () => shopIds.map((id) => byId.get(id)).filter((p): p is LibraryPhoto => !!p),
@@ -1235,11 +1772,10 @@ Replace the existing `const shop = useMemo(() => photos.filter(isInShop), [photo
   );
 ```
 
-`blockedCount` keeps working unchanged, since it reads `shop`.
+- [ ] **Step 5: Render the tray**
 
-- [ ] **Step 5: Render the tray in the Shop head**
-
-In the Shop `<section>`'s `.wl-adm-ws-head`, after the existing `<span className="wl-adm-ws-note">…</span>` block, add:
+In the shelf head, after the existing `<span className="wl-adm-ws-note">` block
+(exactly one in this file now that the shelf is extracted):
 
 ```tsx
             <div className="wl-adm-seg wrap" role="group" aria-label="Filter the shop by collection">
@@ -1249,19 +1785,17 @@ In the Shop `<section>`'s `.wl-adm-ws-head`, after the existing `<span className
                 className={shopScope.kind === 'all' ? 'on' : ''}
                 onClick={() => selectShopScope({ kind: 'all' })}
               >
-                All <span className="sub">{shopCounts.all}</span>
+                All <span className="sub">{counts.all}</span>
               </button>
               {collections.map((c) => (
                 <button
                   key={c.id}
                   type="button"
                   aria-pressed={shopScope.kind === 'collection' && shopScope.id === c.id}
-                  className={
-                    shopScope.kind === 'collection' && shopScope.id === c.id ? 'on' : ''
-                  }
+                  className={shopScope.kind === 'collection' && shopScope.id === c.id ? 'on' : ''}
                   onClick={() => selectShopScope({ kind: 'collection', id: c.id })}
                 >
-                  {c.title} <span className="sub">{shopCounts.byCollection.get(c.id) ?? 0}</span>
+                  {c.title} <span className="sub">{counts.byCollection.get(c.id) ?? 0}</span>
                 </button>
               ))}
               <button
@@ -1270,31 +1804,15 @@ In the Shop `<section>`'s `.wl-adm-ws-head`, after the existing `<span className
                 className={shopScope.kind === 'unfiled' ? 'on' : ''}
                 onClick={() => selectShopScope({ kind: 'unfiled' })}
               >
-                Unfiled <span className="sub">{shopCounts.unfiled}</span>
+                Unfiled <span className="sub">{counts.unfiled}</span>
               </button>
             </div>
 ```
 
-Add the imports at the top of the file:
-
-```tsx
-import {
-  cutLineAfter,
-  deriveShopIds,
-  isArrangeable,
-  parseScopeKey,
-  scopeKey,
-  shopScopeCounts,
-  type ShopScope,
-} from '@/lib/shop-arrange';
-```
-
 - [ ] **Step 6: Scope-aware empty states**
 
-Replace the Shop shelf's empty branch:
-
 ```tsx
-            (shop.length === 0 ? (
+            {shop.length === 0 ? (
               <div className="wl-adm-ws-empty">
                 {shopScope.kind === 'all'
                   ? 'Drag photos with a print file here to put them up for sale.'
@@ -1305,121 +1823,85 @@ Replace the Shop shelf's empty branch:
             ) : (
 ```
 
-The All-scoped "drag photos here" copy must not show under a chapter filter,
-where it reads as wrong.
-
 - [ ] **Step 7: Make the seg control wrap**
 
-In `app/admin/admin.css`, after the existing `.wl-adm-seg button:last-child` rule, add:
+`.wl-adm-seg` is `inline-flex` with `overflow: hidden` and `white-space: nowrap`
+buttons, so an overflowing row is CLIPPED, not wrapped. Add a modifier rather
+than changing the base, which is shared with the artworks-list status tabs and
+the Library filters:
 
 ```css
-/* Wrapping variant, for the Shop shelf's collection tray. The base .wl-adm-seg
-   is inline-flex + overflow:hidden with white-space:nowrap buttons, so an
-   overflowing row is CLIPPED, not wrapped. The :last-child border rule only
-   clears the divider on the final button, which leaves a stray divider at the
-   end of every wrapped row, so target the last button in each row instead. */
-.wl-adm-seg.wrap {
-  flex-wrap: wrap;
-  overflow: visible;
-}
-.wl-adm-seg.wrap button {
-  border-right: 0;
-  box-shadow: inset -1px 0 0 var(--adm-rule);
-}
-.wl-adm-seg.wrap button:last-child {
-  box-shadow: none;
-}
+/* Wrapping variant for the Shop shelf's collection tray. The base :last-child
+   border rule only clears the divider on the final button, which leaves a stray
+   divider at the end of every wrapped row, so use a per-button shadow instead. */
+.wl-adm-seg.wrap { flex-wrap: wrap; overflow: visible; }
+.wl-adm-seg.wrap button { border-right: 0; box-shadow: inset -1px 0 0 var(--adm-rule); }
+.wl-adm-seg.wrap button:last-child { box-shadow: none; }
 ```
 
-And allow the shelf head itself to wrap. Replace line `.wl-adm-ws-head { display: flex; align-items: center; gap: 10px; }` with:
+The shelf head must also wrap. `.wl-adm-ws-head` is shared with the Wall and
+Library heads, so verify all three after this change:
 
 ```css
 .wl-adm-ws-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 ```
 
-The base `.wl-adm-seg` is shared with the artworks-list status tabs and the
-Library filters; the `.wrap` modifier leaves both untouched.
-
 - [ ] **Step 8: Reserve room for a taller Shop head**
 
-In `clampBand`, the `LIB_FLOOR` constant reserves space for the Library. The
-Shop head can now be two or three rows tall, and the band's 120px floor does not
-account for it. Replace the `max` computation's comment and add a measurement:
+In `WallArranger`'s `clampBand`:
 
 ```tsx
-      // The Shop head can wrap to several rows once the collection tray and the
-      // limit field are in it. Measure it rather than assuming one row, or a
-      // maxed band leaves the Shop grid with no tile area at all.
+      // The Shop head can wrap once the collection tray and the limit field are
+      // in it. Measure it rather than assuming one row, or a maxed band leaves
+      // the Shop grid with no tile area at all.
       const shopHead = wall.querySelector<HTMLElement>('.wl-adm-ws-shelf.shop .wl-adm-ws-head');
       const shopHeadExtra = Math.max(0, (shopHead?.getBoundingClientRect().height ?? 0) - 32);
       max = wall.clientHeight - pad - errH - HANDLE - LIB_FLOOR - shopHeadExtra - gap * (errH ? 3 : 2);
 ```
 
-- [ ] **Step 9: Typecheck, test, commit**
+- [ ] **Step 9: Verify in the harness**
+
+Run: `npm run dev`, open `http://localhost:3000/dev-preview/wall?n=100`
+
+Expected: the tray renders All, two chapters, and Unfiled, each with a count.
+Clicking a chapter filters the shelf and the counts match what is shown. The tray
+wraps rather than clipping when the window is narrowed. The Wall and Library heads
+are unchanged. Reload and the chosen chapter is still selected.
+
+- [ ] **Step 10: Typecheck, test, commit**
 
 ```bash
 npm run typecheck && npm test
-git add app/admin/wall/page.tsx components/admin/WallArranger.tsx app/admin/admin.css
+git add app/admin/wall/page.tsx components/admin/ShopShelf.tsx \
+        components/admin/WallArranger.tsx app/admin/admin.css
 git commit -m "feat(shop): collection filter tray on the shop shelf"
 ```
 
 ---
 
-### Task 9: Scoped reorder on the Shop shelf
+### Task 13: Scoped reorder
 
 **Files:**
-- Modify: `components/admin/WallArranger.tsx`
+- Modify: `components/admin/ShopShelf.tsx`, `app/admin/admin.css`
 
-**Interfaces:**
-- Consumes: `POST /api/admin/shop/order` from Task 7.
-- Produces: no external interface.
-
-- [ ] **Step 1: Add scoped state, kept separate from the Wall's**
-
-"Mirror the Wall" must not mean "share the Wall's state". Add beside the Wall's
-equivalents:
+- [ ] **Step 1: Add order state**
 
 ```tsx
-  // The Shop shelf gets its OWN saving flag, flash, saved-snapshot and focus
-  // attribute. Reusing the Wall's would disable the Wall during a Shop save,
-  // flash "order saved" in the Wall's head, and send focus to a Wall tile for
-  // any photo that is both on the wall and in the shop (its [data-pos-id]
-  // would match two elements).
   const [savingShop, setSavingShop] = useState(false);
-  const [shopSavedFlash, setShopSavedFlash] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
   const [shopOrder, setShopOrder] = useState<number[]>([]);
   const shopOrderRef = useRef<number[]>([]);
   const savedShopIds = useRef<number[]>([]);
-  const [shopEditPos, setShopEditPos] = useState<number | null>(null);
-```
+  const [editPos, setEditPos] = useState<number | null>(null);
+  const [drag, setDrag] = useState<number | null>(null);
+  const inFlight = parentInFlight || savingShop;
 
-Also compute the cut index, because the tile markup in Step 4 reads it. Place
-this **after** the `shop` useMemo below, not with the state block above: it
-reads `shop`, and a `const` referenced before its declaration is a
-temporal-dead-zone error, not a hoist. (The limit *field* that lets an admin
-change `shopLimit` arrives in Task 10; until then this renders against the
-value the loader supplied.)
+  useEffect(() => onBusyChange(savingShop), [savingShop, onBusyChange]);
 
-```tsx
-  // All view only: the cut governs /shop, and a chapter view has no cut.
-  // cutLineAfter counts BUYABLE tiles, because the public query filters
-  // unbuyable rows out before applying its LIMIT.
-  const cutAfter = useMemo(
-    () => (shopScope.kind === 'all' ? cutLineAfter(shop, shopLimit) : null),
-    [shopScope, shop, shopLimit],
-  );
-```
-
-Extend the in-flight gate:
-
-```tsx
-  const inFlight = busy || savingOrder || savingShop;
-```
-
-Re-seed the local order whenever the derived list changes (a scope switch, or a
-mutation that changes membership):
-
-```tsx
+  // Re-seed whenever the derived list changes: a scope switch, or a mutation
+  // that changes membership. Task 11's onPositionsSaved writeback is what makes
+  // this safe; without it this effect re-derives from stale positions after any
+  // later setPhoto and snaps the shelf back to the pre-drag order.
   useEffect(() => {
     shopOrderRef.current = shopIds;
     setShopOrder(shopIds);
@@ -1427,7 +1909,8 @@ mutation that changes membership):
   }, [shopIds]);
 ```
 
-and render from `shopOrder` rather than `shopIds`:
+**Replace** the `shop` useMemo from Task 12 Step 4 with one that renders from
+local order:
 
 ```tsx
   const shop = useMemo(
@@ -1436,7 +1919,7 @@ and render from `shopOrder` rather than `shopIds`:
   );
 ```
 
-- [ ] **Step 2: Add the save function**
+- [ ] **Step 2: Add the save path**
 
 ```tsx
   function setShopIds(next: number[] | ((cur: number[]) => number[])) {
@@ -1445,51 +1928,43 @@ and render from `shopOrder` rather than `shopIds`:
     setShopOrder(v);
   }
 
-  async function persistShopOrder(ids: number[], scope: ShopScope): Promise<MutResult> {
-    if (ids.length === 0) {
-      savedShopIds.current = ids;
-      return { ok: true, status: 200 };
-    }
+  async function commitShopOrder() {
+    if (inFlight || !isArrangeable(shopScope)) return;
+    const attempt = shopOrderRef.current.slice();
+    if (attempt.join(',') === savedShopIds.current.join(',')) return;
+    // Tag the request with the scope it was built against. If the admin switches
+    // filters mid-flight, a rollback into the NEW scope would be nonsense.
+    const sentScope = shopScope;
+    setSavingShop(true);
+    let res: { ok: boolean; status: number; timedOut?: boolean };
     try {
       const r = await fetch('/api/admin/shop/order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
-          scope.kind === 'collection'
-            ? { scope: 'collection', collectionId: scope.id, ids }
-            : { scope: 'all', ids },
+          sentScope.kind === 'collection'
+            ? { scope: 'collection', collectionId: sentScope.id, ids: attempt }
+            : { scope: 'all', ids: attempt },
         ),
-        signal: mutationTimeout(),
+        signal: AbortSignal.timeout?.(30_000),
       });
-      if (!r.ok) return { ok: false, status: r.status };
-      savedShopIds.current = ids;
-      return { ok: true, status: r.status };
+      res = { ok: r.ok, status: r.status };
     } catch (err) {
-      if (isTimeout(err)) return { ok: false, status: 0, timedOut: true };
-      return { ok: false, status: 0, error: 'network error' };
+      const t =
+        err instanceof DOMException && (err.name === 'TimeoutError' || err.name === 'AbortError');
+      res = { ok: false, status: 0, timedOut: t };
     }
-  }
-
-  async function commitShopOrder() {
-    if (inFlight || !isArrangeable(shopScope)) return;
-    const attempt = shopOrderRef.current.slice();
-    if (!orderChanged(attempt, savedShopIds.current)) return;
-    // Tag the request with the scope it was built against. If the admin
-    // switches filters mid-flight, a rollback into the NEW scope would be
-    // nonsense, so discard it and surface the error instead.
-    const scopeAtSend = shopScope;
-    setSavingShop(true);
-    const res = await persistShopOrder(attempt, scopeAtSend);
     setSavingShop(false);
-    if (res.timedOut) return reconcileAfterTimeout();
-    if (scopeKey(scopeAtSend) !== scopeKey(shopScope)) {
+
+    if (res.timedOut) return onTimeout();
+    if (scopeKey(sentScope) !== scopeKey(shopScope)) {
       if (!res.ok) fail("Couldn't save the previous filter's order. Reload to see the saved order.");
       return;
     }
     if (res.status === 409) {
-      // The server rolled back, so nothing was written. The pending
-      // arrangement is genuinely lost, and that is correct: it was built
-      // against a membership that no longer exists.
+      // The server rolled back, so nothing was written. The pending arrangement
+      // is genuinely lost, and that is correct: it was built against a
+      // membership that no longer exists.
       setShopIds(savedShopIds.current.slice());
       fail('The shop changed in another window. Reloading to show the saved state.');
       window.setTimeout(() => window.location.reload(), 1200);
@@ -1500,234 +1975,154 @@ and render from `shopOrder` rather than `shopIds`:
       fail("Couldn't save the new shop order. Please try again.");
       return;
     }
-    setShopSavedFlash(true);
-    announce(
-      shopScope.kind === 'collection'
-        ? 'Chapter order saved'
-        : 'Shop order saved',
+    savedShopIds.current = attempt;
+    // Fold the new positions back into the parent's photos, or the next
+    // membership change re-derives from stale values and snaps the shelf back.
+    onPositionsSaved(
+      attempt.map((id, i) =>
+        sentScope.kind === 'collection'
+          ? { id, collection_order: i + 1 }
+          : { id, display_order: i + 1 },
+      ),
     );
-    window.setTimeout(() => setShopSavedFlash(false), 2200);
+    setSavedFlash(true);
+    announce(sentScope.kind === 'collection' ? 'Chapter order saved' : 'Shop order saved');
+    window.setTimeout(() => setSavedFlash(false), 2200);
   }
 ```
 
-- [ ] **Step 3: Add the move-to-position function**
+- [ ] **Step 3: Add move-to-position**
 
 ```tsx
-  function focusShopPos(id: number) {
+  function focusPos(id: number) {
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
-        const el = document.querySelector<HTMLElement>(`[data-shop-pos-id="${id}"]`);
-        if (el) el.focus({ preventScroll: true });
-        else focusLibraryFallback();
+        document
+          .querySelector<HTMLElement>(`[data-shop-pos-id="${id}"]`)
+          ?.focus({ preventScroll: true });
       }),
     );
   }
 
-  async function moveShopToPosition(id: number, pos1: number) {
+  async function moveToPosition(id: number, pos1: number) {
     if (inFlight) return;
     const cur = shopOrderRef.current;
     const from = cur.indexOf(id);
-    setShopEditPos(null);
-    if (from === -1 || !Number.isInteger(pos1) || pos1 < 1) return focusShopPos(id);
+    setEditPos(null);
+    if (from === -1 || !Number.isInteger(pos1) || pos1 < 1) return focusPos(id);
     const to = Math.max(0, Math.min(cur.length - 1, pos1 - 1));
-    if (to === from) return focusShopPos(id);
+    if (to === from) return focusPos(id);
     const next = cur.slice();
     next.splice(from, 1);
     next.splice(to, 0, id);
     setShopIds(next);
+    // Announce the move itself, not just the save. The badge exists to give the
+    // keyboard path a way to reorder, and without this that path is silent.
+    announce(`Moved to position ${to + 1} of ${next.length}`);
     await commitShopOrder();
-    focusShopPos(id);
+    focusPos(id);
   }
 ```
 
-- [ ] **Step 4: Make the Shop tiles draggable with a position badge**
+- [ ] **Step 4: Make the tiles draggable, with a position badge**
 
-Replace the Shop grid's `<figure key={p.id} className="wl-adm-ws-tile" …>` with a
-version mirroring the Wall tile. The badge is not garnish: the Shop shelf sits
-in the same height-capped band as the Wall, and `dragEnter` cannot fire on a
-tile clipped out of view, so without it a photo cannot move more than about a
-row and there is no keyboard path at all.
+Mirror the Wall's tile, using `data-shop-pos-id`, NOT `data-pos-id`. The Wall
+already uses the latter, and a photo that is both on the wall and in the shop
+would match two elements, sending focus to the wrong tile.
 
-```tsx
-                {shop.map((p, i) => {
-                  const arrangeable = isArrangeable(shopScope);
-                  return (
-                  <figure
-                    key={p.id}
-                    className={`wl-adm-ws-tile ${arrangeable ? 'grab' : ''} ${
-                      drag?.id === p.id && drag.from === 'shop' ? 'dragging' : ''
-                    } ${cutAfter != null && i > cutAfter ? 'below-cut' : ''}`}
-                    title={p.title}
-                    draggable={arrangeable && !inFlight && shopEditPos !== p.id}
-                    onDragStart={(e) => {
-                      if (!arrangeable || inFlight || shopEditPos === p.id) return;
-                      setShopEditPos(null);
-                      e.dataTransfer.setData('text/plain', String(p.id));
-                      e.dataTransfer.effectAllowed = 'move';
-                      setDrag({ id: p.id, from: 'shop' });
-                    }}
-                    onDragEnter={() => {
-                      if (drag?.from !== 'shop') return;
-                      setShopIds((ids) => reorder(ids, drag.id, p.id));
-                    }}
-                    onDragOver={(e) => e.preventDefault()}
-                    // Commit on dragEnd, NEVER drop. Chromium does not deliver
-                    // a drop event when the drag source node was moved
-                    // mid-drag, which a live reorder always does.
-                    onDragEnd={() => {
-                      setDrag(null);
-                      setDropTarget(null);
-                      void commitShopOrder();
-                    }}
-                    onDrop={(e) => e.preventDefault()}
-                  >
-                    {arrangeable && (shopEditPos === p.id ? (
-                      <span className="wl-adm-ws-posedit">
-                        <input
-                          className="wl-adm-ws-posinput"
-                          type="number"
-                          min={1}
-                          max={shop.length}
-                          defaultValue={i + 1}
-                          autoFocus
-                          draggable={false}
-                          aria-label={`Move ${p.title} to position (1 to ${shop.length})`}
-                          onClick={(e) => e.stopPropagation()}
-                          onBlur={() => setShopEditPos((cur) => (cur === p.id ? null : cur))}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              void moveShopToPosition(p.id, Number((e.target as HTMLInputElement).value));
-                            } else if (e.key === 'Escape') {
-                              e.preventDefault();
-                              setShopEditPos(null);
-                              focusShopPos(p.id);
-                            }
-                          }}
-                        />
-                        <span className="wl-adm-ws-poshint">of {shop.length} · Enter</span>
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        className="wl-adm-ws-pos"
-                        data-shop-pos-id={p.id}
-                        aria-label={`${p.title} is at position ${i + 1} of ${shop.length}. Activate to move it.`}
-                        title="Click to move this photo to a position"
-                        disabled={inFlight}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setShopEditPos(p.id);
-                        }}
-                      >
-                        {i + 1}
-                      </button>
-                    ))}
-                    <div className="wl-adm-ws-badges">
-                      {!p.buyable && (
-                        <span className="wl-adm-ws-badge blocked">hidden · no sizes available</span>
-                      )}
-                      {shopScope.kind === 'all' && (
-                        <span className="wl-adm-ws-badge chapter">
-                          {p.collection_title ?? 'unfiled'}
-                        </span>
-                      )}
-                      {shopScope.kind === 'unfiled' && cutAfter != null && i > cutAfter && (
-                        <span className="wl-adm-ws-badge blocked">unreachable</span>
-                      )}
-                    </div>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={p.image_web_url} alt={p.title} draggable={false} />
-                    <figcaption className="wl-adm-ws-cap">
-                      <EditLink id={p.id} title={p.title} />
-                      <RemoveButton
-                        confirming={confirm?.kind === 'shopRemove' && confirm.id === p.id}
-                        disabled={inFlight}
-                        label={`Remove ${p.title} from the shop`}
-                        onClick={() =>
-                          confirm?.kind === 'shopRemove' && confirm.id === p.id
-                            ? void removeFromShop(p.id)
-                            : setConfirm({ kind: 'shopRemove', id: p.id })
-                        }
-                      />
-                    </figcaption>
-                  </figure>
-                  );
-                })}
+Extract the tile markup into a local `renderTile(p, i)` so Task 14 can render it
+across two grids. Add `Fragment` to the React import if you key tiles in a
+fragment; the file does not import it today.
+
+Commit on `onDragEnd`, never `onDrop`: Chromium does not deliver a `drop` event
+when the drag source node was moved mid-drag, which a live reorder always does.
+
+Note for a later editor: the tile's `onDrop` calls `preventDefault()` but not
+`stopPropagation()`, so an intra-shelf drop also reaches the section's
+`onShelfDrop`. That handler ignores anything not dragged from the Library, so it
+is inert today. Do not relax that guard.
+
+- [ ] **Step 5: Fix the badge collision**
+
+`.wl-adm-ws-pos` and `.wl-adm-ws-badges` are both `position:absolute; top:5px;
+left:5px`. The Wall tile has the position badge and no status badges; today's
+Shop tile has status badges and no position badge. The new Shop tile has both:
+
+```css
+/* The Shop tile carries a position badge (top left, like the Wall) AND status
+   badges, which the Wall tile never did. Move the badges right rather than
+   layering them on the number. */
+.wl-adm-ws-shelf.shop .wl-adm-ws-badges { left: auto; right: 5px; }
 ```
 
-Widen the `Drag` type so `from` accepts the new source:
-
-```tsx
-type Drag = { id: number; from: 'lib' | 'wall' | 'shop' } | null;
-```
-
-- [ ] **Step 5: Show the Shop's own saved flash, with the revalidation delay**
-
-In the Shop head, beside the existing `shopHot` / `shopBad` spans:
+- [ ] **Step 6: Show the shelf's own saved flash**
 
 ```tsx
             {/* The public pages are `revalidate = 60` and there is no
                 revalidatePath call anywhere in this repo, so a saved change can
-                take up to a minute to appear. Say so here: without it the delay
-                reads as "the save did not work" and invites a second save. */}
-            {shopSavedFlash && (
+                take up to a minute to appear. Say so: without it the delay reads
+                as "the save did not work" and invites a second save. */}
+            {savedFlash && (
               <span className="wl-adm-ws-saved">order saved ✓ live within a minute</span>
             )}
 ```
 
-- [ ] **Step 6: Typecheck, test, commit**
+- [ ] **Step 7: Verify in the harness**
+
+Run: `npm run dev`, open `http://localhost:3000/dev-preview/wall?n=100`
+
+Expected: shop tiles show a position number and drag to reorder. Clicking a
+number opens the input; typing a position and pressing Enter moves the tile. The
+status badges sit at the right and do not overlap the number. Unfiled removes
+both the drag affordance and the numbers. The Wall's own drag and numbers are
+unaffected. (Saves fail against the harness, which has no API; the failure path
+and rollback are what you are checking.)
+
+- [ ] **Step 8: Typecheck, test, commit**
 
 ```bash
 npm run typecheck && npm test
-git add components/admin/WallArranger.tsx
+git add components/admin/ShopShelf.tsx app/admin/admin.css
 git commit -m "feat(shop): drag and type-a-position reorder on the shop shelf"
 ```
 
 ---
 
-### Task 10: Cut line and the limit control
+### Task 14: Cut line and the limit control
 
 **Files:**
-- Modify: `components/admin/WallArranger.tsx`
-- Modify: `app/admin/admin.css`
+- Create: `components/admin/ShopLimitField.tsx`
+- Modify: `components/admin/ShopShelf.tsx`, `app/admin/admin.css`
 
-**Interfaces:**
-- Consumes: `cutLineAfter` from `@/lib/shop-arrange`; `PATCH /api/admin/settings`; `isValidShopIndexLimit`, `SHOP_INDEX_LIMIT_MAX` from `@/lib/site-settings`.
-- Produces: `cutAfter` (used by Task 9's tile classes).
-
-- [ ] **Step 1: Add the buyable count**
-
-`cutAfter` already exists from Task 9. The limit field's readout needs the
-denominator too, so add beside it:
+- [ ] **Step 1: Compute the cut**
 
 ```tsx
+  const [shopLimit, setShopLimit] = useState(initialLimit);
+  // All view only: the cut governs /shop, and a chapter view has no cut.
+  const cutAfter = useMemo(
+    () => (shopScope.kind === 'all' ? cutLineAfter(shop, shopLimit) : null),
+    [shopScope, shop, shopLimit],
+  );
+  // Readable from ANY scope, always computed from the full All order. Used by
+  // the Unfiled view to flag a piece reachable from nowhere but the sitemap.
+  const belowCut = useMemo(() => belowCutIds(photos, shopLimit), [photos, shopLimit]);
   const buyableCount = useMemo(() => shop.filter((p) => p.buyable).length, [shop]);
 ```
 
-- [ ] **Step 2: Add the limit control and readout**
+- [ ] **Step 2: Write `ShopLimitField`**
 
-In the Shop head, rendered only when `shopScope.kind === 'all'`:
-
-```tsx
-            {shopScope.kind === 'all' && (
-              <ShopLimitField
-                value={shopLimit}
-                buyableCount={buyableCount}
-                disabled={inFlight}
-                onSaved={setShopLimit}
-                onError={fail}
-              />
-            )}
-```
-
-And at module scope, beside `PaneChip`:
+Create `components/admin/ShopLimitField.tsx`, importing ONLY from
+`@/lib/shop-limit`, never `@/lib/site-settings`. See Global Constraints: a value
+import reaching `lib/db.ts` from a client component puts `pg` in the client
+bundle and fails at `next build`.
 
 ```tsx
-// The /shop cap, editable. 0 means no limit. Client validation uses the SAME
-// predicate as the server (isValidShopIndexLimit), from one module, so the two
-// cannot drift. Module scope.
-function ShopLimitField({
+'use client';
+
+import { useEffect, useState } from 'react';
+import { isValidShopIndexLimit, SHOP_INDEX_LIMIT_MAX } from '@/lib/shop-limit';
+
+export function ShopLimitField({
   value,
   buyableCount,
   disabled,
@@ -1742,11 +2137,10 @@ function ShopLimitField({
 }) {
   const [draft, setDraft] = useState(String(value));
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [invalid, setInvalid] = useState(false);
 
-  useEffect(() => {
-    setDraft(String(value));
-  }, [value]);
+  useEffect(() => setDraft(String(value)), [value]);
 
   async function save() {
     const n = Number(draft.trim());
@@ -1762,13 +2156,15 @@ function ShopLimitField({
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: 'shop_index_limit', value: n }),
-        signal: mutationTimeout(),
+        signal: AbortSignal.timeout?.(30_000),
       });
       if (!r.ok) throw new Error(String(r.status));
       onSaved(n);
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2200);
     } catch {
-      // Revert to the last saved value rather than leaving a number on screen
-      // that does not match what /shop will do.
+      // Revert rather than leaving a number on screen that does not match what
+      // /shop will actually do.
       setDraft(String(value));
       onError("Couldn't save the shop limit. Please try again.");
     } finally {
@@ -1776,7 +2172,6 @@ function ShopLimitField({
     }
   }
 
-  const shown = value === 0 ? buyableCount : Math.min(value, buyableCount);
   return (
     <span className="wl-adm-ws-limit">
       <label htmlFor="wl-shop-limit">Show first</label>
@@ -1801,45 +2196,103 @@ function ShopLimitField({
           }
         }}
       />
-      <span id="wl-shop-limit-hint" className="hint">
+      <span id="wl-shop-limit-hint" className="hint" role="status">
         {invalid
           ? `Whole number, 0 to ${SHOP_INDEX_LIMIT_MAX}`
           : saving
             ? 'saving…'
-            : value === 0
-              ? `no limit, showing all ${buyableCount} buyable`
-              : value >= buyableCount
-                ? `showing all ${buyableCount} buyable`
-                : `showing ${shown} of ${buyableCount} buyable`}
+            : saved
+              ? 'saved ✓ live within a minute'
+              : value === 0
+                ? `no limit, showing all ${buyableCount} buyable`
+                : value >= buyableCount
+                  ? `showing all ${buyableCount} buyable`
+                  : `showing ${value} of ${buyableCount} buyable`}
       </span>
     </span>
   );
 }
 ```
 
-Note the readout says "all {buyableCount}", never "all {value}": with a limit of
-50 and 12 buyable pieces, "showing all 50 buyable" is wrong.
+The readout always says "all {buyableCount}", never "all {value}": with a limit
+of 50 and 12 buyable pieces, "showing all 50 buyable" is wrong.
 
-Add to the file's imports:
+- [ ] **Step 3: Render it, All view only**
 
 ```tsx
-import { isValidShopIndexLimit, SHOP_INDEX_LIMIT_MAX } from '@/lib/site-settings';
+            {shopScope.kind === 'all' && (
+              <ShopLimitField
+                value={shopLimit}
+                buyableCount={buyableCount}
+                disabled={inFlight}
+                onSaved={setShopLimit}
+                onError={fail}
+              />
+            )}
 ```
 
-- [ ] **Step 3: Draw the cut line**
+- [ ] **Step 4: Draw the cut as a break between two grids**
 
-Wrap the Shop grid so a divider can be absolutely positioned, or simpler, give
-the first below-cut tile a top rule. In `app/admin/admin.css`:
+Do NOT put the divider inside the grid. `.wl-adm-ws-shelf .wl-adm-ws-grid` sets
+`grid-auto-rows: 104px`, so a full-width separator would occupy a tile-height
+row. Render two grids with the divider between:
+
+```tsx
+              <>
+                <div className="wl-adm-ws-grid">
+                  {shop
+                    .slice(0, cutAfter == null ? shop.length : cutAfter + 1)
+                    .map((p, i) => renderTile(p, i))}
+                </div>
+                {cutAfter != null && (
+                  <>
+                    <div
+                      className="wl-adm-ws-cut"
+                      role="separator"
+                      aria-label="Cut line: photos below this do not appear on the shop page"
+                    >
+                      <span>below this does not appear on /shop</span>
+                    </div>
+                    <div className="wl-adm-ws-grid">
+                      {shop.slice(cutAfter + 1).map((p, i) => renderTile(p, cutAfter + 1 + i))}
+                    </div>
+                  </>
+                )}
+              </>
+```
+
+The index offset on the second grid is what keeps position numbers continuous
+across the divider.
+
+- [ ] **Step 5: Flag the orphans in the Unfiled view**
+
+```tsx
+                      {shopScope.kind === 'unfiled' && belowCut.has(p.id) && (
+                        <span className="wl-adm-ws-badge blocked">unreachable</span>
+                      )}
+```
+
+This uses `belowCut`, not `cutAfter`. `cutAfter` is null by construction outside
+the All view, and the visible index in a filtered view is not the All position,
+so a version keyed on `cutAfter` could never render.
+
+- [ ] **Step 6: Add the CSS**
 
 ```css
-/* Everything below the cut line is published and still buyable, it just does
-   not appear on /shop. Deliberately not styled as an error. */
+/* Below the cut is published and still buyable, it just does not appear on
+   /shop. Deliberately not styled as an error. */
 .wl-adm-ws-tile.below-cut { opacity: 0.45; }
 .wl-adm-ws-tile.below-cut:hover { opacity: 0.8; }
 .wl-adm-ws-badge.chapter {
-  background: var(--adm-card);
-  color: var(--adm-muted);
-  border: 1px solid var(--adm-rule);
+  background: var(--adm-card); color: var(--adm-muted); border: 1px solid var(--adm-rule);
+}
+.wl-adm-ws-cut {
+  display: flex; align-items: center; gap: 10px; margin: 8px 0;
+  font-family: var(--f-mono), monospace; font-size: 10px;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--adm-muted);
+}
+.wl-adm-ws-cut::before, .wl-adm-ws-cut::after {
+  content: ''; flex: 1; height: 1px; background: var(--adm-rule);
 }
 .wl-adm-ws-limit { display: inline-flex; align-items: center; gap: 6px; }
 .wl-adm-ws-limit label { font-size: 12px; color: var(--adm-muted); }
@@ -1855,67 +2308,69 @@ the first below-cut tile a top rule. In `app/admin/admin.css`:
 }
 ```
 
-And in the Shop grid, insert a labelled divider after the cut index:
+- [ ] **Step 7: Verify in the harness**
 
-```tsx
-                    {cutAfter === i && (
-                      <div className="wl-adm-ws-cut" role="separator" aria-label="Cut line: photos below this do not appear on the shop page">
-                        <span>below this does not appear on /shop</span>
-                      </div>
-                    )}
-```
+Run: `npm run dev`, open `http://localhost:3000/dev-preview/wall?n=100`
 
-placed as a sibling immediately after each `</figure>`, inside a fragment keyed
-by the photo id. The divider spans the grid:
+Expected: in All, a labelled divider sits after the Nth **buyable** tile and tiles
+below it are dimmed. Position numbers run continuously across the divider. Set
+the field to `0` and the divider disappears with the readout reading "no limit".
+Set it above the buyable count and the divider disappears with "showing all N
+buyable". Switch to a chapter and both the divider and the field vanish. Switch
+to Unfiled and any piece below the All cut carries an "unreachable" badge.
 
-```css
-.wl-adm-ws-cut {
-  grid-column: 1 / -1;
-  display: flex; align-items: center; gap: 10px;
-  margin: 4px 0;
-  font-family: var(--f-mono), monospace; font-size: 10px;
-  letter-spacing: 0.08em; text-transform: uppercase; color: var(--adm-muted);
-}
-.wl-adm-ws-cut::before, .wl-adm-ws-cut::after {
-  content: ''; flex: 1; height: 1px; background: var(--adm-rule);
-}
-```
-
-- [ ] **Step 4: Typecheck, test, commit**
+- [ ] **Step 8: Typecheck, test, commit**
 
 ```bash
 npm run typecheck && npm test
-git add components/admin/WallArranger.tsx app/admin/admin.css
+git add components/admin/ShopLimitField.tsx components/admin/ShopShelf.tsx app/admin/admin.css
 git commit -m "feat(shop): editable /shop cap with a buyable-counted cut line"
+```
+
+- [ ] **Step 9: Confirm no server module reached the client bundle**
+
+Run: `npm run build`
+
+Expected: build succeeds. If it fails resolving `pg`, `dns`, `net`, or `fs`, a
+client component imported `lib/site-settings.ts` or another db-backed module.
+This is the ONLY gate that catches it.
+
+---
+
+### Task 15: Public collection ordering
+
+**Files:**
+- Modify: `app/(shop)/shop/collections/[slug]/page.tsx`, `app/(shop)/portfolio/[slug]/page.tsx`, `app/(shop)/shop/artwork/[slug]/page.tsx`
+
+Split from the cap change (Task 16) so the two are independently revertible.
+
+- [ ] **Step 1: Three query swaps**
+
+Change `ORDER BY a.display_order, a.id` to `ORDER BY a.collection_order, a.id` in
+the chapter grid, the portfolio chapter grid, and the artwork page's related rail
+(the `LIMIT 4` query).
+
+Leave the `plate_idx` window function in the artwork page's gating query alone.
+It still reads `display_order` and will drift when the shop is rearranged; the
+plate-numbers spec deletes it. A known, accepted transient.
+
+- [ ] **Step 2: Typecheck and commit**
+
+```bash
+npm run typecheck && npm test
+git add "app/(shop)/shop/collections/[slug]/page.tsx" "app/(shop)/portfolio/[slug]/page.tsx" \
+        "app/(shop)/shop/artwork/[slug]/page.tsx"
+git commit -m "feat(shop): chapter pages read collection_order"
 ```
 
 ---
 
-### Task 11: Public queries, header, footer
+### Task 16: The `/shop` cap, header, and footer
 
 **Files:**
-- Modify: `app/(shop)/shop/collections/[slug]/page.tsx`, `app/(shop)/portfolio/[slug]/page.tsx`, `app/(shop)/shop/artwork/[slug]/page.tsx`, `app/(shop)/shop/page.tsx`, `components/site/Footer.tsx`
+- Modify: `app/(shop)/shop/page.tsx`, `components/site/Footer.tsx`
 
-**Interfaces:**
-- Consumes: `getShopIndexLimit` from `@/lib/site-settings`.
-
-- [ ] **Step 1: Three collection-order swaps**
-
-In each of these, change `ORDER BY a.display_order, a.id` to
-`ORDER BY a.collection_order, a.id`:
-
-- `app/(shop)/shop/collections/[slug]/page.tsx`: the chapter grid
-- `app/(shop)/portfolio/[slug]/page.tsx`: the same collection, unfiltered by buyability
-- `app/(shop)/shop/artwork/[slug]/page.tsx`: the related rail (the `LIMIT 4` query)
-
-Leave the `plate_idx` window function in the artwork page's gating query alone.
-It still reads `display_order` and will drift when the shop is rearranged; the
-plate-numbers spec deletes it.
-
-- [ ] **Step 2: Apply the limit on `/shop`**
-
-In `app/(shop)/shop/page.tsx`, change the two-query `Promise.all` to fetch the
-limit alongside the counts, then run the plates query:
+- [ ] **Step 1: Apply the limit**
 
 ```tsx
   const [countsRes, limit] = await Promise.all([
@@ -1926,19 +2381,15 @@ limit alongside the counts, then run the plates query:
     getShopIndexLimit(),
   ]);
 
-  // Serial by necessity: the limit has to be known before the plates query
-  // runs. Folding it in as a `LIMIT (SELECT ...)` subquery would avoid the hop
-  // but put the settings read inside the grid query, so one throw takes the
-  // grid down with it. Correctness beats the round trip.
+  // Serial by necessity: the limit must be known before the plates query runs.
+  // Folding it in as a `LIMIT (SELECT ...)` subquery would avoid the hop but put
+  // the settings read inside the grid query, so one throw takes the grid down
+  // with it. getShopIndexLimit never throws; this shape is what preserves that.
   //
   // NULLIF is load-bearing: in Postgres LIMIT 0 returns ZERO ROWS, and 0 means
   // "no limit" here. LIMIT NULL is the unlimited form.
   const platesRes = await pool.query<PlateRow>(
-    `SELECT a.slug,
-            a.title,
-            a.image_web_url,
-            a.year_shot,
-            a.location,
+    `SELECT a.slug, a.title, a.image_web_url, a.year_shot, a.location,
             c.title AS collection_title,
             (SELECT MIN(price_cents) FROM artwork_variants v
                WHERE v.artwork_id = a.id AND v.buyable) AS min_price_cents
@@ -1953,90 +2404,69 @@ limit alongside the counts, then run the plates query:
   );
 ```
 
-Add the import:
+Add `import { getShopIndexLimit } from '@/lib/site-settings';`
 
-```tsx
-import { getShopIndexLimit } from '@/lib/site-settings';
-```
-
-- [ ] **Step 3: Fix the header**
-
-In the same file, replace the sheet header:
+- [ ] **Step 2: Fix the header**
 
 ```tsx
         <header className="wl-sheet-h">
           <h2>Selected works</h2>
           <div className="wl-rule"></div>
-          <span className="count">
-            {String(plates.length).padStart(2, '0')} shown
-          </span>
+          <span className="count">{String(plates.length).padStart(2, '0')} shown</span>
         </header>
 ```
 
-The count now describes the grid rather than the archive. The masthead's
-"Plates on file" stat keeps counting everything, which is where a total belongs.
+The count now describes the grid rather than the archive. The masthead's "Plates
+on file" stat keeps counting everything, which is where a total belongs.
 
-- [ ] **Step 4: Fix the stale footer label**
+- [ ] **Step 3: Fix the stale footer label**
 
-In `components/site/Footer.tsx`, change the `/shop` link text from
-`Index of plates` to `Selected works`.
+In `components/site/Footer.tsx`, change the `/shop` link text from "Index of
+plates" to "Selected works".
 
-- [ ] **Step 5: Typecheck and commit**
+- [ ] **Step 4: Typecheck and commit**
 
 ```bash
 npm run typecheck && npm test
-git add "app/(shop)/shop/page.tsx" "app/(shop)/shop/collections/[slug]/page.tsx" \
-        "app/(shop)/portfolio/[slug]/page.tsx" "app/(shop)/shop/artwork/[slug]/page.tsx" \
-        components/site/Footer.tsx
-git commit -m "feat(shop): collection order on public pages, editable /shop cap"
+git add "app/(shop)/shop/page.tsx" components/site/Footer.tsx
+git commit -m "feat(shop): editable cap and Selected works heading"
 ```
 
 ---
 
-### Task 12: Browse by collection band
+### Task 17: Browse by collection band
 
 **Files:**
 - Modify: `app/(shop)/shop/page.tsx`
 
-- [ ] **Step 1: Add the band query to the existing `Promise.all`**
+- [ ] **Step 1: Add the query to the existing `Promise.all`**
 
-Task 11 left the destructuring as `const [countsRes, limit] = await Promise.all([…])`.
-Widen it to three, so the band costs no extra round trip on the storefront's
-busiest page:
+Widen Task 16's destructuring to three, so the band costs no extra round trip on
+the storefront's busiest page:
 
 ```tsx
   const [countsRes, limit, chaptersRes] = await Promise.all([
     /* the counts query, unchanged */,
     getShopIndexLimit(),
-    /* the chapters query below */,
-  ]);
-  const chapters = chaptersRes.rows;
-```
-
-The chapters query:
-
-```tsx
     pool.query<{ slug: string; title: string; n: number }>(
-      // Counts BUYABLE published works, not just published, and drops
-      // zero-count chapters. /shop/collections counts status='published' and
-      // LEFT JOINs, so reusing it verbatim here would advertise "5 plates" on
-      // the storefront's busiest index and land on a visibly empty page.
-      `SELECT c.slug, c.title,
-              COUNT(a.id)::int AS n
+      // Counts BUYABLE published works, not just published. /shop/collections
+      // counts status='published' and LEFT JOINs, so reusing it verbatim would
+      // advertise "5 plates" on the storefront's busiest index and land on a
+      // visibly empty page. The inner join already drops zero-count chapters.
+      `SELECT c.slug, c.title, COUNT(a.id)::int AS n
          FROM collections c
          JOIN artworks a ON a.collection_id = c.id
           AND a.status = 'published'
           AND EXISTS (SELECT 1 FROM artwork_variants v
                         WHERE v.artwork_id = a.id AND v.buyable)
         GROUP BY c.id
-       HAVING COUNT(a.id) > 0
         ORDER BY c.display_order, c.id`,
     ),
+  ]);
+  const chapters = chaptersRes.rows;
 ```
 
 - [ ] **Step 2: Render the band below the grid**
-
-After the `</section>` closing the `wl-sheet`:
 
 ```tsx
       {chapters.length > 0 && (
@@ -2044,17 +2474,11 @@ After the `</section>` closing the `wl-sheet`:
           <header className="wl-sheet-h">
             <h2>Browse by collection</h2>
             <div className="wl-rule"></div>
-            <span className="count">
-              {String(chapters.length).padStart(2, '0')} chapters
-            </span>
+            <span className="count">{String(chapters.length).padStart(2, '0')} chapters</span>
           </header>
           <div className="wl-cindex-list">
             {chapters.map((c) => (
-              <Link
-                key={c.slug}
-                href={`/shop/collections/${c.slug}`}
-                className="wl-cindex-row"
-              >
+              <Link key={c.slug} href={`/shop/collections/${c.slug}`} className="wl-cindex-row">
                 <span className="title">{c.title.replace(/^The /, '')}</span>
                 <span className="count">
                   {c.n} {c.n === 1 ? 'plate' : 'plates'}
@@ -2067,9 +2491,9 @@ After the `</section>` closing the `wl-sheet`:
 ```
 
 Deliberately no `CH · NN` marker. That numbering comes from the array index on
-`/shop/collections`, and omitting zero-count chapters here would make it
-disagree with the "Chapter 03 of 06" on the chapter and portfolio pages, which
-`ROW_NUMBER()` over *all* collections.
+`/shop/collections`, and omitting zero-count chapters here would make it disagree
+with "Chapter 03 of 06" on the chapter and portfolio pages, which `ROW_NUMBER()`
+over *all* collections.
 
 Add `import Link from 'next/link';` if not already present.
 
@@ -2083,143 +2507,35 @@ git commit -m "feat(shop): browse-by-collection band on the shop index"
 
 ---
 
-### Task 13: Script guards
-
-**Files:**
-- Modify: `scripts/import-manifest.ts`, `scripts/publish-selections.ts`, `README.md`
-
-- [ ] **Step 1: Stop `import-manifest` writing display order, on BOTH tables**
-
-In the `collections` upsert, delete the line `display_order = EXCLUDED.display_order,` from the `DO UPDATE SET` clause. Leave the INSERT's `display_order` column, which seeds a sensible order for a genuinely new collection.
-
-In the `artworks` upsert, delete `display_order` from the INSERT column list, from the `VALUES` list, and from the `DO UPDATE SET` clause, and drop `idx` from the parameter array. Add above it:
-
-```ts
-        // display_order is the curated All order now, arranged from
-        // /admin/wall. Writing a manifest index here would silently overwrite
-        // it on every re-import. New rows keep the column default of 0, which
-        // is the "never placed" sentinel the publish rules append from.
-```
-
-- [ ] **Step 2: Apply Rule 3 to the re-file case**
-
-`ON CONFLICT (slug) DO UPDATE SET collection_id = EXCLUDED.collection_id` re-files rows that may already be published, and those never transition into `published`, so nothing appends them. Add after the upsert, inside the same `withTransaction`:
-
-```ts
-        // A re-filed row that is ALREADY published never transitions, so the
-        // publish chokepoint never assigns it a chapter position and it would
-        // sort to the FRONT of its new chapter on /shop/collections/[slug],
-        // /portfolio/[slug] and the related rail.
-        await client.query(
-          `UPDATE artworks a
-              SET collection_order = COALESCE(
-                    (SELECT MAX(b.collection_order) FROM artworks b
-                      WHERE b.collection_id = a.collection_id
-                        AND b.status = 'published' AND b.id <> a.id), 0) + 1
-            WHERE a.slug = $1
-              AND a.status = 'published'
-              AND a.collection_order = 0
-              AND a.collection_id IS NOT NULL`,
-          [slug],
-        );
-```
-
-- [ ] **Step 3: Fence off `publish-selections`**
-
-At the top of `main()` in `scripts/publish-selections.ts`, before reading the selections file:
-
-```ts
-  // This script resolves artworks by (collection_id, display_order), expecting
-  // display_order to be the manifest's per-collection index. The shop-ordering
-  // backfill turned display_order into a global curated sequence, so that
-  // lookup now matches the WRONG rows, and the converge step below demotes
-  // every published row it did not match. A post-backfill run could therefore
-  // mass-unpublish the shop.
-  //
-  // Blocks the dry run too, not just --apply: a dry run that prints a confident
-  // and entirely wrong diff is worse than one that refuses.
-  //
-  // A missing site_settings table (a fresh or pre-migrate database) means the
-  // backfill has not run, so proceed rather than surfacing a raw Postgres error.
-  let backfilled = false;
-  try {
-    const marker = await pool.query(
-      `SELECT 1 FROM site_settings WHERE key = 'shop_order_backfilled'`,
-    );
-    backfilled = (marker.rowCount ?? 0) > 0;
-  } catch {
-    backfilled = false;
-  }
-  if (backfilled) {
-    console.error(
-      'publish:selections is disabled. display_order is now the curated /shop order, ' +
-        'not the manifest index this script looks rows up by. See ' +
-        'docs/superpowers/specs/2026-07-20-shop-collections-ordering-design.md',
-    );
-    process.exit(1);
-  }
-```
-
-- [ ] **Step 4: Update the README**
-
-In `README.md`, on the `npm run publish:selections` row, append:
-
-```
-(disabled after the shop-ordering backfill; display_order is the curated /shop order now)
-```
-
-- [ ] **Step 5: Typecheck and commit**
-
-```bash
-npm run typecheck && npm test
-git add scripts/import-manifest.ts scripts/publish-selections.ts README.md
-git commit -m "fix(scripts): stop clobbering curated order, fence off publish-selections"
-```
-
----
-
 ## Final verification
 
-- [ ] **Run the full gates**
+- [ ] **Gates**
 
 ```bash
-npm run typecheck && npm test
+npm run typecheck && npm test && npm run build
 ```
 
-Expected: typecheck clean, all tests pass. Do NOT run `npm run lint`.
-
-- [ ] **Pre-ship checks, against production, before the deploy that runs the backfill**
-
-```sql
--- 1. SNAPSHOT. The densify is not revertible by reverting code. Without this
---    there is no recovery if the comparison below fails.
-CREATE TABLE artworks_order_backup_20260721 AS
-  SELECT id, display_order, collection_id, collection_order FROM artworks;
-
--- 2. Shape of the data going in. Expect many nonzero values: import-manifest
---    wrote per-collection indices.
-SELECT COUNT(*) FILTER (WHERE display_order <> 0) AS arranged,
-       COUNT(*) AS total
-  FROM artworks;
-
--- 3. Under the 1000 payload cap and loader limit?
-SELECT COUNT(*) FROM artworks WHERE status = 'published';
-```
-
-Also confirm the Neon major version. On PostgreSQL 16 and earlier the 15s
-`statement_timeout` applies to the whole multi-statement migration message, so a
-slow deploy aborts it (fails safe, the marker rolls back, but the build fails).
-
-And confirm no `scraped/selections.json` run is pending.
+`npm run build` is required, not optional: it is the only gate that catches a
+server module leaking into the client bundle. Do NOT run `npm run lint`.
 
 - [ ] **Manual pass on the live deploy**
 
 1. Reorder in All; confirm `/shop` matches after revalidation (up to 60s).
-2. Reorder within a chapter; confirm the chapter page, the portfolio page, and the related rail all match, and that `/shop` did **not** change.
+2. Reorder within a chapter; confirm the chapter page, the portfolio page, and the related rail match, and that `/shop` did **not** change.
 3. Change the limit; confirm the cut line and the live grid agree. **Set it to `0`** and confirm the full catalogue renders rather than a blank page.
-4. **Retire a piece, then re-publish it.** Confirm it appends to the end rather than landing mid-grid (Rules 1 and 2).
-5. **Bulk-publish several drafts at once.** Confirm they get distinct consecutive positions, not a clump (Rule 2's `ROW_NUMBER()`).
-6. **Bulk-move several photos to another chapter.** Confirm they land at the end of it, not the front (Rule 3's batch case).
+4. **Retire a piece, then re-publish it.** Confirm it appends rather than landing mid-grid (Rules 1 and 2).
+5. **Bulk-publish several drafts at once.** Confirm distinct consecutive positions, not a clump (Rule 2's `ROW_NUMBER()`).
+6. **Bulk-move several photos to another chapter.** Confirm they land at the end, not the front (Rule 3's batch case).
 7. Re-select a photo's *current* chapter from the row menu. Confirm it does **not** move (Rule 3's `IS DISTINCT FROM`).
-8. Open the shelf in two tabs, reorder in one, then reorder in the other. Confirm the second gets the "shop changed in another window" message and reloads, rather than silently saving a partial order.
-9. Confirm the browse band lists only chapters with buyable work, and that each link lands on a non-empty page.
+8. PATCH a piece to `retired` **and** a new collection in one request, if reachable from the UI. Confirm a 200, not a 500 (the 42601 guard).
+9. Open the shelf in two tabs, reorder in one, then reorder in the other. Confirm the second gets the "shop changed in another window" message and reloads, rather than silently saving a partial order.
+10. Reorder, then remove a *different* photo from the shop. Confirm the arrangement does **not** snap back (the `onPositionsSaved` writeback).
+11. Confirm the browse band lists only chapters with buyable work, and each link lands on a non-empty page.
+
+## Risks and rollback
+
+- **Task 4 is the only irreversible step.** Order-preserving by construction and guarded to run once, and Step 0 takes the snapshot before it can reach any build. Recovery is a restore from `artworks_order_backup_20260721`.
+- **`display_order`'s meaning change is not code-revertible.** The manifest-index mapping `publish-selections.ts` relied on is destroyed; that script is fenced off (Task 3) rather than repaired.
+- **Reverting the query changes restores prior public behavior** without a down migration. The new columns are additive.
+- **If either order column is ever dropped and re-added, delete the `shop_order_backfilled` row too**, or the backfill silently skips and every chapter page sorts by `id`.
+- **Tasks 4 through 7 must ship together.** Splitting them puts every newly published artwork at the top of `/shop`.
