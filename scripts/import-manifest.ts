@@ -77,15 +77,19 @@ async function main() {
     const hint = COLLECTION_HINTS[canon];
     const title = hint?.title || titleize(canon);
 
-    // INSERT if new; on conflict, preserve existing tagline/cover but bump display_order
-    // and title in case we renamed.
+    // INSERT if new; on conflict, preserve existing tagline/cover and title in
+    // case we renamed.
+    //
+    // display_order is NOT bumped on conflict any more. It is the arranged
+    // collection order now (set from /admin/collections), and it drives the
+    // admin filter tray and the /shop browse band, so a re-import must not
+    // reset it. A genuinely new collection still gets `i` as a starting order.
     const res = await pool.query(
       `INSERT INTO collections (slug, title, tagline, display_order)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (slug) DO UPDATE SET
          title = EXCLUDED.title,
-         tagline = COALESCE(collections.tagline, EXCLUDED.tagline),
-         display_order = EXCLUDED.display_order
+         tagline = COALESCE(collections.tagline, EXCLUDED.tagline)
        RETURNING id`,
       [canon, title, hint?.tagline || null, i],
     );
@@ -152,17 +156,47 @@ async function main() {
       const titleGuess = a.title && a.title !== a.slug ? a.title : titleize(baseName);
 
       await withTransaction(async (client) => {
+        // Read the prior collection BEFORE the upsert overwrites it. Without
+        // this there is nothing left to compare against, and the re-file case
+        // below cannot tell a real move from a no-op re-import.
+        const prior = await client.query<{
+          id: number;
+          collection_id: number | null;
+          status: string;
+        }>(`SELECT id, collection_id, status FROM artworks WHERE slug = $1`, [slug]);
+        const priorRow = prior.rows[0] ?? null;
+
+        // display_order is the curated All order now, arranged from /admin/wall.
+        // Writing a manifest index here would silently overwrite it on every
+        // re-import. New rows keep the column default of 0, the "never placed"
+        // sentinel the publish rules append from.
         await client.query(
-          `INSERT INTO artworks (collection_id, slug, title, image_web_url, status, display_order)
-           VALUES ($1, $2, $3, $4, 'draft', $5)
+          `INSERT INTO artworks (collection_id, slug, title, image_web_url, status)
+           VALUES ($1, $2, $3, $4, 'draft')
            ON CONFLICT (slug) DO UPDATE SET
              collection_id = EXCLUDED.collection_id,
              title = EXCLUDED.title,
              image_web_url = EXCLUDED.image_web_url,
-             display_order = EXCLUDED.display_order,
              updated_at = NOW()`,
-          [colId, slug, titleGuess, targetUrl, idx],
+          [colId, slug, titleGuess, targetUrl],
         );
+
+        // A re-filed row that is ALREADY published never transitions, so the
+        // publish chokepoint never assigns it a chapter position and it would
+        // sort to the FRONT of its new chapter on /shop/collections/[slug],
+        // /portfolio/[slug] and the related rail. Only fires on a REAL change
+        // of collection, so a no-op re-import does not shuffle anything.
+        if (priorRow && priorRow.status === 'published' && priorRow.collection_id !== colId) {
+          await client.query(
+            `UPDATE artworks a
+                SET collection_order = COALESCE(
+                      (SELECT MAX(b.collection_order) FROM artworks b
+                        WHERE b.collection_id = a.collection_id
+                          AND b.status = 'published' AND b.id <> a.id), 0) + 1
+              WHERE a.id = $1 AND a.collection_id IS NOT NULL`,
+            [priorRow.id],
+          );
+        }
       });
       totalImported++;
       process.stdout.write('.');

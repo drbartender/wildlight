@@ -88,6 +88,36 @@ function canonicalSlug(raw: string): string {
 }
 
 async function main() {
+  // This script resolves artworks by (collection_id, display_order), expecting
+  // display_order to be the manifest's per-collection index. The shop-ordering
+  // backfill turned display_order into a global curated sequence, so that lookup
+  // now matches the WRONG rows, and the converge step below demotes every
+  // published row it did not match. A post-backfill run could mass-unpublish
+  // the shop.
+  //
+  // Blocks the dry run too, not just --apply: a dry run that prints a confident
+  // and entirely wrong diff is worse than one that refuses.
+  //
+  // A missing site_settings table (a fresh or pre-migrate database) means the
+  // backfill has not run, so proceed rather than surfacing a raw Postgres error.
+  let backfilled = false;
+  try {
+    const marker = await pool.query(
+      `SELECT 1 FROM site_settings WHERE key = 'shop_order_backfilled'`,
+    );
+    backfilled = (marker.rowCount ?? 0) > 0;
+  } catch {
+    backfilled = false;
+  }
+  if (backfilled) {
+    console.error(
+      'publish:selections is disabled. display_order is now the curated /shop order, ' +
+        'not the manifest index this script looks rows up by. See ' +
+        'docs/superpowers/specs/2026-07-20-shop-collections-ordering-design.md',
+    );
+    process.exit(1);
+  }
+
   const apply = process.argv.includes('--apply');
   const path = resolve(process.cwd(), 'scraped/selections.json');
   const file = JSON.parse(readFileSync(path, 'utf8')) as SelectionsFile;
