@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { orderChanged, reorder, type LibraryPhoto } from '@/lib/wall-arrange';
 import {
+  belowCutIds,
+  cutLineAfter,
   deriveShopIds,
   isArrangeable,
   parseScopeKey,
@@ -11,6 +13,7 @@ import {
   type ShopScope,
 } from '@/lib/shop-arrange';
 import { isTimeout, mutationTimeout } from '@/lib/admin-fetch';
+import { ShopLimitField } from './ShopLimitField';
 import { EditLink, RemoveButton } from './TileActions';
 
 // The Shop shelf, extracted from WallArranger.
@@ -72,6 +75,7 @@ export interface ShopShelfProps {
 export function ShopShelf({
   photos,
   collections,
+  initialLimit,
   parentInFlight,
   onBusyChange,
   announce,
@@ -152,6 +156,18 @@ export function ShopShelf({
     [shopOrder, byId],
   );
   const blockedCount = useMemo(() => shop.filter((p) => !p.buyable).length, [shop]);
+  const buyableCount = useMemo(() => shop.filter((p) => p.buyable).length, [shop]);
+
+  const [shopLimit, setShopLimit] = useState(initialLimit);
+  // All view only: the cut governs /shop, and a chapter view has no cut.
+  const cutAfter = useMemo(
+    () => (shopScope.kind === 'all' ? cutLineAfter(shop, shopLimit) : null),
+    [shopScope, shop, shopLimit],
+  );
+  // Readable from ANY scope, always computed from the full All order, because
+  // the cut is a property of /shop and a filtered view is not that sequence.
+  // Used by Unfiled to flag a piece reachable from nowhere but the sitemap.
+  const belowCut = useMemo(() => belowCutIds(photos, shopLimit), [photos, shopLimit]);
 
   // ALWAYS write the order through this: the ref is what commitShopOrder reads,
   // and reading React state out of the render closure could POST an order the
@@ -273,9 +289,11 @@ export function ShopShelf({
     return (
       <figure
         key={p.id}
+        // below-cut is what dims everything the storefront will not show. The
+        // class has styling but no meaning unless it is applied HERE.
         className={`wl-adm-ws-tile ${arrangeable ? 'grab' : ''} ${
           drag === p.id ? 'dragging' : ''
-        }`}
+        } ${belowCut.has(p.id) ? 'below-cut' : ''}`}
         title={p.title}
         draggable={arrangeable && !inFlight && editPos !== p.id}
         onDragStart={(e) => {
@@ -358,6 +376,13 @@ export function ShopShelf({
               the front page without flipping filters. */}
           {shopScope.kind === 'all' && (
             <span className="wl-adm-ws-badge chapter">{p.collection_title ?? 'unfiled'}</span>
+          )}
+          {/* Unfiled AND below the cut means reachable from nowhere on the site
+              except the sitemap. Uses belowCut, not cutAfter: cutAfter is null
+              by construction outside the All view, and a filtered view's index
+              is not the All position. */}
+          {shopScope.kind === 'unfiled' && belowCut.has(p.id) && (
+            <span className="wl-adm-ws-badge blocked">unreachable</span>
           )}
         </div>
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -452,6 +477,15 @@ export function ShopShelf({
             Unfiled <span className="sub">{counts.unfiled}</span>
           </button>
         </div>
+        {shopScope.kind === 'all' && (
+          <ShopLimitField
+            value={shopLimit}
+            buyableCount={buyableCount}
+            disabled={inFlight}
+            onSaved={setShopLimit}
+            onError={fail}
+          />
+        )}
       </div>
       {shop.length === 0 ? (
         <div className="wl-adm-ws-empty">
@@ -464,7 +498,31 @@ export function ShopShelf({
               : 'Nothing in this chapter is in the shop yet.'}
         </div>
       ) : (
-        <div className="wl-adm-ws-grid">{shop.map(renderTile)}</div>
+        // Two grids with the divider BETWEEN them, not one grid with the divider
+        // inside it: .wl-adm-ws-grid sets grid-auto-rows: 104px, so a full-width
+        // separator would occupy a whole tile-height row. The wrapper keeps the
+        // shelf to exactly one scroll region inside the capped band.
+        <div className="wl-adm-ws-scroll">
+          <div className="wl-adm-ws-grid">
+            {shop.slice(0, cutAfter == null ? shop.length : cutAfter + 1).map(renderTile)}
+          </div>
+          {cutAfter != null && (
+            <>
+              <div
+                className="wl-adm-ws-cut"
+                role="separator"
+                aria-label="Cut line: photos below this do not appear on the shop page"
+              >
+                <span>below this does not appear on /shop</span>
+              </div>
+              <div className="wl-adm-ws-grid">
+                {/* The index offset is what keeps the position numbers
+                    continuous across the divider. */}
+                {shop.slice(cutAfter + 1).map((p, i) => renderTile(p, cutAfter + 1 + i))}
+              </div>
+            </>
+          )}
+        </div>
       )}
     </section>
   );

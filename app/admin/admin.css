@@ -3835,3 +3835,41 @@
    teaches the reorder feature, so it has to be readable. */
 .wl-adm-ws-meta,
 .wl-adm-ws-note { color: var(--adm-ink-2); }
+
+/* Shop cut line + limit control ------------------------------------------- */
+/* Below the cut is published and still buyable, it just does not appear on
+   /shop. Deliberately not styled as an error. */
+.wl-adm-ws-tile.below-cut { opacity: 0.45; }
+.wl-adm-ws-tile.below-cut:hover { opacity: 0.85; }
+.wl-adm-ws-cut {
+  display: flex; align-items: center; gap: 10px; margin: 10px 0;
+  font-family: var(--f-mono), monospace; font-size: 10px;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--adm-muted);
+}
+.wl-adm-ws-cut::before, .wl-adm-ws-cut::after {
+  content: ''; flex: 1; height: 1px; background: var(--adm-rule);
+}
+.wl-adm-ws-limit { display: inline-flex; align-items: center; gap: 6px; }
+.wl-adm-ws-limit label,
+.wl-adm-ws-limit .on-shop { font-size: 12px; color: var(--adm-muted); }
+.wl-adm-ws-limit input {
+  width: 68px; font-size: 12px; padding: 4px 8px;
+  border: 1px solid var(--adm-rule); border-radius: 6px;
+  background: var(--adm-paper); color: var(--adm-ink);
+}
+.wl-adm-ws-limit input[aria-invalid='true'] { border-color: var(--adm-red); }
+.wl-adm-ws-limit .hint {
+  font-family: var(--f-mono), monospace; font-size: 10.5px;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--adm-muted);
+}
+/* The Shop shelf now has TWO grids plus a divider, so the scroll region moves
+   up to a wrapper: two sibling scrolling grids inside the capped band would
+   give it two independent scrollbars with nothing arbitrating between them. */
+@media (min-width: 900px) {
+  .wl-adm-wall.ws-fixed .wl-adm-ws-shelf.shop > .wl-adm-ws-scroll {
+    overflow-y: auto; min-height: 0; flex: 1;
+  }
+  .wl-adm-wall.ws-fixed .wl-adm-ws-shelf.shop > .wl-adm-ws-scroll > .wl-adm-ws-grid {
+    overflow-y: visible;
+  }
+}
