@@ -1,5 +1,7 @@
 'use client';
 
+import { formatPlate } from '@/lib/plate-number';
+
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useCart } from './CartProvider';
@@ -18,7 +20,8 @@ interface Props {
   artworkSlug: string;
   artworkTitle: string;
   imageUrl: string;
-  plateNo: string;
+  /** Stored accession number. Formatted at each render site. */
+  plateNo: number;
   chapterTitle: string | null;
   yearShot: number | null;
   note: string | null;
@@ -82,7 +85,7 @@ export function OrderCard({
         </h1>
         <div className="facts">
           <span>
-            <b>Plate</b> {plateNo}
+            <b>Plate</b> {formatPlate(plateNo)}
           </span>
           {chapterTitle && (
             <span>
@@ -127,7 +130,7 @@ export function OrderCard({
       </h1>
       <div className="facts">
         <span>
-          <b>Plate</b> {plateNo}
+          <b>Plate</b> {formatPlate(plateNo)}
         </span>
         {chapterTitle && (
           <span>
@@ -214,6 +217,7 @@ export function OrderCard({
               size: current.size,
               finish: current.finish,
               priceCents: current.price_cents,
+              plateNo,
             });
             setAdded(true);
             setTimeout(() => setAdded(false), 1800);

@@ -4,7 +4,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useCart } from '@/components/shop/CartProvider';
 import { formatUSD } from '@/lib/money';
-import { plateNumber } from '@/lib/plate-number';
+import { formatPlate } from '@/lib/plate-number';
 
 export default function CartPage() {
   const cart = useCart();
@@ -51,7 +51,8 @@ export default function CartPage() {
                     <div className="wl-ci-title">{l.artworkTitle}</div>
                   </Link>
                   <div className="wl-ci-sub">
-                    {plateNumber(l.artworkSlug)} · {l.type} · {l.size}
+                    {l.plateNo != null ? `${formatPlate(l.plateNo)} · ` : ''}
+                    {l.type} · {l.size}
                     {l.finish ? ` · ${l.finish}` : ''}
                   </div>
                   <div className="wl-ci-controls">

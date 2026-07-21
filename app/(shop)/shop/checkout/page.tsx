@@ -11,7 +11,7 @@ import {
 } from '@stripe/stripe-js';
 import { useCart } from '@/components/shop/CartProvider';
 import { formatUSD } from '@/lib/money';
-import { plateNumber } from '@/lib/plate-number';
+import { formatPlate } from '@/lib/plate-number';
 
 // Resolve our CSS variables (which flip on the [data-mood] attribute) to
 // hex values that the Stripe Appearance API can ingest. Stripe doesn't
@@ -346,7 +346,8 @@ export default function CheckoutPage() {
               <div>
                 <div className="wl-ci-title">{l.artworkTitle}</div>
                 <div className="wl-ci-sub">
-                  {plateNumber(l.artworkSlug)} · {l.type} · {l.size}
+                  {l.plateNo != null ? `${formatPlate(l.plateNo)} · ` : ''}
+                  {l.type} · {l.size}
                   {l.finish ? ` · ${l.finish}` : ''} · ×{l.quantity}
                 </div>
               </div>

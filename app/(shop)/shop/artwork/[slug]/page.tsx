@@ -229,7 +229,7 @@ export default async function ArtworkPage({
                 artworkSlug={art.slug}
                 artworkTitle={art.title}
                 imageUrl={art.image_web_url}
-                plateNo={plate}
+                plateNo={art.plate_no}
                 chapterTitle={art.collection_title}
                 yearShot={art.year_shot}
                 note={art.artist_note}

@@ -13,6 +13,14 @@ export interface CartLine {
   artworkId: number;
   artworkSlug: string;
   artworkTitle: string;
+  /**
+   * OPTIONAL on purpose. Carts already sitting in a browser under the
+   * `wl_cart_v1` key predate this field, and bumping the storage key to force
+   * the issue would discard live carts: real revenue friction for a cosmetic
+   * label. The cart and checkout renderers handle its absence, separator
+   * included.
+   */
+  plateNo?: number;
   imageUrl: string;
   type: string;
   size: string;
