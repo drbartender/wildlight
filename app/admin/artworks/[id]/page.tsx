@@ -7,6 +7,7 @@ import { VariantTable, type VRow } from '@/components/admin/VariantTable';
 import { AdminPill } from '@/components/admin/AdminPill';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
 import { AdminField } from '@/components/admin/AdminField';
+import { formatPlate } from '@/lib/plate-number';
 import {
   classifyPrintResolution,
   evaluateSizeResolution,
@@ -31,6 +32,12 @@ interface Artwork {
   collection_title: string | null;
   edition_size: number | null;
   signed: boolean;
+  /**
+   * Stored accession number. Typed nullable only because this interface is
+   * hand-maintained against a `SELECT a.*`; the column is NOT NULL in the
+   * database.
+   */
+  plate_no: number | null;
 }
 
 interface Data {
@@ -350,6 +357,16 @@ export default function ArtworkEditPage({
                 value={a.title}
                 onSave={(v) => save({ title: v })}
               />
+              {/* Read-only. Assigned once at insert and never rewritten, so
+                  there is nothing to edit. Deliberately NOT on the admin
+                  thumbnails: 1f23519 and d67d411 stripped names and prices off
+                  those tiles to quiet them. This is the one place you would go
+                  looking for it on purpose. */}
+              <AdminField label="Plate">
+                <span className="wl-adm-field-static">
+                  {a.plate_no != null ? formatPlate(a.plate_no) : 'not set'}
+                </span>
+              </AdminField>
               <AdminField label="Collection">
                 <select
                   className="wl-adm-field-select"
