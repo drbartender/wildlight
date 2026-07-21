@@ -884,6 +884,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
                   <figure
                     key={p.id}
                     className={`wl-adm-ws-tile grab ${drag?.id === p.id && drag.from === 'wall' ? 'dragging' : ''}`}
+                    title={p.title}
                     draggable={!inFlight && editPos !== p.id}
                     onDragStart={(e) => {
                       if (inFlight || editPos === p.id) return;
@@ -946,7 +947,6 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={p.image_web_url} alt={p.title} draggable={false} />
                     <figcaption className="wl-adm-ws-cap">
-                      <span className="name">{p.title}</span>
                       <RemoveButton
                         confirming={confirm?.kind === 'wallRemove' && confirm.id === p.id}
                         disabled={inFlight}
@@ -1004,7 +1004,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
             ) : (
               <div className="wl-adm-ws-grid">
                 {shop.map((p) => (
-                  <figure key={p.id} className="wl-adm-ws-tile">
+                  <figure key={p.id} className="wl-adm-ws-tile" title={p.title}>
                     {!p.buyable && (
                       <div className="wl-adm-ws-badges">
                         <span className="wl-adm-ws-badge blocked">hidden · no sizes available</span>
@@ -1013,7 +1013,6 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={p.image_web_url} alt={p.title} draggable={false} />
                     <figcaption className="wl-adm-ws-cap">
-                      <span className="name">{p.title}</span>
                       <span className="price">{p.price_from_cents != null ? formatUSD(p.price_from_cents) : '—'}</span>
                       <RemoveButton
                         confirming={confirm?.kind === 'shopRemove' && confirm.id === p.id}
@@ -1136,6 +1135,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
                 <div key={p.id} className={`wl-adm-ws-libitem ${drag?.id === p.id && drag.from === 'lib' ? 'dragging' : ''} ${selected.has(p.id) ? 'selected' : ''}`}>
                   <figure
                     className="wl-adm-ws-tile grab"
+                    title={p.title}
                     draggable={!inFlight}
                     onDragStart={(e) => {
                       if (inFlight) return;
@@ -1188,9 +1188,6 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
                     </button>
                   </figure>
                   <div className="wl-adm-ws-libctl">
-                    <span className="name" title={p.title}>
-                      {p.title}
-                    </span>
                     <button
                       type="button"
                       role="switch"
