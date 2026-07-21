@@ -685,9 +685,18 @@ CREATE INDEX IF NOT EXISTS idx_artworks_collection_order
 -- Do not split the migration, and never add a statement-level BEGIN/COMMIT or a
 -- non-transactional statement (CREATE INDEX CONCURRENTLY, VACUUM) to this file.
 --
--- THE MARKER IS DATA, NOT SCHEMA. If collection_order or display_order is ever
--- dropped and re-added, this row survives and the backfill silently skips,
--- leaving every collection page sorted by id. Delete the
+-- THE MARKER IS DATA, NOT SCHEMA, AND IT CUTS BOTH WAYS.
+--
+-- Lose the marker and this block RE-RUNS, which is destructive, not merely
+-- redundant: the collection_order pass ranks by (display_order, id), so a
+-- re-run rewrites every chapter's curated sequence to mirror the global /shop
+-- sequence. That is correct exactly once, on first run, when the two orders are
+-- by definition the same. Plausible ways to lose it: a Neon branch reset from a
+-- pre-marker parent, restoring the Step-0 snapshot, or any future Settings UI
+-- over this brand-new generic site_settings table that can delete keys.
+--
+-- Keep the marker while dropping a column and the opposite happens: the
+-- backfill silently skips and every collection page sorts by id. Delete the
 -- 'shop_order_backfilled' row in the same breath as any such drop.
 DO $$
 BEGIN

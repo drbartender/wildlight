@@ -155,6 +155,20 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'collectionId required' }, { status: 400 });
     }
     try {
+      // The FK violation below can no longer be relied on to catch a bad
+      // collection: when the t CTE is empty (every id already in the target, or
+      // no id matched) the UPDATE touches zero rows, `collection_id = $2` is
+      // never evaluated, and a move to a nonexistent collection would return
+      // ok:true. Check explicitly.
+      const target = await pool.query('SELECT 1 FROM collections WHERE id = $1', [
+        collectionId,
+      ]);
+      if (!target.rowCount) {
+        return NextResponse.json(
+          { error: 'Target collection does not exist.' },
+          { status: 400 },
+        );
+      }
       // Rule 3, batch-safe. This endpoint takes an ids[] and does one UPDATE,
       // so MAX + 1 would give every moved row the identical collection_order
       // and sort them as a clump at the FRONT of the target chapter. And
