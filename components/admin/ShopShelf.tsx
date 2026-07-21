@@ -67,9 +67,17 @@ export function ShopShelf({
   const blockedCount = useMemo(() => shop.filter((p) => !p.buyable).length, [shop]);
   const inFlight = parentInFlight;
 
-  // `dropTarget === 'shop'` already implies a live Library drag: the parent's
-  // overShelf only sets it when drag.from === 'lib'. The pre-extraction markup
-  // also tested `!!drag`, which is not a prop here and is redundant.
+  // The pre-extraction markup also tested `!!drag`, which is not a prop here.
+  // Dropping it is safe but not unconditionally redundant, so: the parent
+  // derives `dragHd` as `drag ? byId.get(drag.id)?.hd : undefined`, and `hd` is
+  // a non-null boolean from SQL, so `dragHd` is undefined exactly when there is
+  // no drag. That makes shopHot exactly equivalent.
+  //
+  // shopBad differs in ONE case: drag live but the dragged row missing from
+  // `byId` (undefined hd). The old code showed "needs a print file"; this shows
+  // nothing, which is the better answer for an unknown. Unreachable anyway,
+  // because `photos` only shrinks inside a mutation and library tiles are not
+  // draggable while one is in flight.
   const shopHot = dropTarget === 'shop' && !!dragHd;
   const shopBad = dropTarget === 'shop' && dragHd === false;
 
