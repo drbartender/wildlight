@@ -23,7 +23,7 @@
 - **Gates: `npm run typecheck`, `npm test`, and `npm run build`.** NOT `npm run lint`. `next lint` was removed in Next 16 and there is no flat ESLint config, so it fails for unrelated reasons.
 - **No local database and no component-test harness.** SQL is verified by the throwaway-branch migration run in Task 4 and the manual deploy pass. React changes are verified in `/dev-preview/wall`, a DB-free, auth-free harness that renders the real component against mock data. It is gated off when `NODE_ENV === 'production'`, so it is a local-only checkpoint.
 - **The reorder payload cap (1000) and the admin loader's `LIMIT 1000` stay in lockstep.** Note the loader's limit applies across ALL statuses while the reorder guard counts published rows. If total artworks approach 1000, both must be raised together or reordering 409s permanently.
-- **API JSON keys are snake_case; JS variables are camelCase.**
+- **DB columns are snake_case; JS variables are camelCase.** Admin request bodies in this repo use camelCase keys (`collectionId`, matching the existing `/api/admin/artworks` bulk route), so do not "fix" the new endpoints to snake_case.
 - **Copy rule: no em dashes** in any user-facing string.
 
 ## Task order and deploy grouping
@@ -32,6 +32,8 @@ Two orderings are load-bearing and are not free to rearrange:
 
 1. **Task 3 (script guards) comes before Task 4 (the migration).** The migration is what makes `scripts/publish-selections.ts` destructive; its guard must exist before the hazard, not ten tasks after it.
 2. **Tasks 4 through 7 must ship in the SAME deploy.** `0` sorts first under `ORDER BY display_order, id`, so with the migration live and the position rules not, every newly published artwork jumps to the top of `/shop`.
+3. **Tasks 14 and 16 must ship in the same deploy.** Task 14 gives the admin a working limit field; Task 16 is what makes `/shop` read it. Ship 14 alone and the field saves, the readout says "showing 30 of N buyable", the cut line moves, and `/shop` still returns exactly 12. A control that lies is worse than no control.
+4. **Task 17 widens Task 16's `Promise.all` in place**, so once 17 lands, 16 cannot be reverted alone without a conflict. Revert both or neither.
 
 Tasks 1 through 10 are a safe stopping point: schema, rules, and endpoints, with no UI and no public read changed.
 
@@ -40,6 +42,8 @@ Tasks 1 through 10 are a safe stopping point: schema, rules, and endpoints, with
 - After **Task 3**: a script-safety review. Both scripts can destroy a curated order.
 - After **Task 4**: a SQL/migration review before any push. This is the one irreversible task.
 - After **Task 10**: an auth and injection review of the two new endpoints.
+- After **Task 11**: a review of the extraction. It moves a 1339-line component's most stateful section, and the prop seam is wide (16 fields). This is where a behavior regression hides.
+- After **Task 14**: a client-bundle and UI-state review. Task 14 Step 9's `npm run build` is the only gate in the plan that catches a server module reaching the client.
 - After **Task 17**: a public-facing query and copy review.
 
 ---
@@ -552,10 +556,16 @@ Typecheck now fails in two places. In `tests/lib/wall-arrange-library.test.ts`, 
 In `app/dev-preview/wall/page.tsx`, inside the `out.push({…})` in `mockPhotos`, after `wall_rank`:
 
 ```ts
-      // A few chapters so the filter tray has something to show, plus a
+      // Two chapters so the filter tray has something to show, plus a
       // deliberate handful left unfiled so that chip is exercised too.
-      collection_id: published ? (i % 3 === 0 ? null : (i % 3) + 1) : null,
-      collection_title: published && i % 3 !== 0 ? `Chapter ${(i % 3) + 1}` : null,
+      //
+      // The ids here MUST match the `collections` array passed in Task 11
+      // Step 5. `i % 3` yields 1 and 2 for the filed cases, so the chips and the
+      // tiles agree; `(i % 3) + 1` would yield 2 and 3 and leave one chapter
+      // permanently empty and one set of photos with no chip at all.
+      collection_id: published ? (i % 3 === 0 ? null : i % 3) : null,
+      collection_title:
+        published && i % 3 !== 0 ? (i % 3 === 1 ? 'The Front Range' : 'Night Work') : null,
       collection_order: i,
       display_order: i,
 ```
@@ -752,6 +762,18 @@ SELECT COUNT(*) FILTER (WHERE status = 'published') AS published, COUNT(*) AS to
   FROM artworks;
 ```
 
+Two non-SQL checks in the same step:
+
+- **Confirm the Neon major version.** On PostgreSQL 16 and earlier the 15s
+  `statement_timeout` covers the entire multi-statement migration message, so a
+  slow deploy aborts the whole thing. That fails safe (the marker rolls back)
+  but it fails the build, and knowing which behavior you are on beforehand is
+  the difference between a diagnosis and a mystery.
+- **Confirm no `scraped/selections.json` run is pending.** Task 3's fence is
+  marker-gated, and the marker does not exist until this task runs, so there is
+  a real window between the two commits where the old script would still run and
+  would still be wrong.
+
 - [ ] **Step 1: Append the DDL**
 
 Order inside this block matters: `site_settings` must exist before the `DO` block
@@ -837,11 +859,23 @@ END $$;
 
 - [ ] **Step 2: Verify no statement-level transaction control was introduced**
 
-The `BEGIN` inside the `DO $$` body is PL/pgSQL block syntax, not transaction
-control, so the pattern must anchor at column 0 and not match it:
+Two checks, because a single pattern cannot do this. The `BEGIN` inside the
+`DO $$` body sits at column 0 (PL/pgSQL block syntax, not transaction control),
+and the word `CONCURRENTLY` appears in the comment above the block, so a naive
+`grep -E '^(BEGIN|...)|CONCURRENTLY'` matches the very DDL Step 1 just added.
 
-Run: `grep -nE '^(BEGIN|COMMIT|VACUUM)\b|CONCURRENTLY' lib/schema.sql`
-Expected: no output (the `DO` block's `BEGIN` is indented, so it does not match)
+First, no genuine transaction control or non-transactional statement:
+
+Run: `grep -nE '^\s*(COMMIT|VACUUM)\b|^\s*CREATE +INDEX +CONCURRENTLY' lib/schema.sql`
+Expected: no output
+
+Second, the only `BEGIN` in the file is the `DO` block's:
+
+Run: `grep -c '^BEGIN$' lib/schema.sql`
+Expected: `1`
+
+Run: `grep -B1 '^BEGIN$' lib/schema.sql`
+Expected: the preceding line is `DO $$`
 
 - [ ] **Step 3: Run the migration for real, twice, against a throwaway branch**
 
@@ -885,6 +919,31 @@ SELECT a.id, b.display_order AS before, a.display_order AS after
 SELECT value FROM site_settings WHERE key = 'shop_order_backfilled';
 -- Expect: exactly one row, value '1'
 ```
+
+**Then the assertion that actually tests the marker.** Running twice proves
+nothing on its own: the densify is idempotent on already-dense data, so an
+inverted or always-true `IF NOT EXISTS` passes assertions 1 through 5
+identically. Perturb the data between runs and confirm the second run leaves it
+alone:
+
+```sql
+UPDATE artworks SET display_order = 9999
+ WHERE id = (SELECT id FROM artworks WHERE status='published'
+              ORDER BY display_order LIMIT 1);
+```
+
+```bash
+npm run migrate   # third run
+```
+
+```sql
+SELECT display_order FROM artworks WHERE display_order = 9999;
+-- Expect: still 9999. If it was re-ranked, the marker guard is not firing and
+-- every future deploy will silently re-rank the curated order.
+```
+
+Cut the scratch branch **after** Step 0, not before, or assertion 4's join to
+`artworks_order_backup_20260721` finds no table.
 
 - [ ] **Step 4: Delete the scratch branch and commit**
 
@@ -1248,7 +1307,15 @@ vi.mock('@/lib/db', () => ({ pool: { query: (...a: unknown[]) => query(...a) } }
 
 const { getShopIndexLimit } = await import('@/lib/site-settings');
 
-beforeEach(() => query.mockReset());
+// BRACED, not a concise arrow. `mockReset()` returns the MockInstance, and
+// Vitest treats a value returned from a hook as a per-test teardown callback,
+// so `beforeEach(() => query.mockReset())` calls the mock after every test. On
+// the rejecting test that teardown returns a rejected promise and Vitest fails
+// the test even though getShopIndexLimit() resolved correctly. Verified: the
+// arrow form gives 4 pass / 1 fail, the braced form 5 pass.
+beforeEach(() => {
+  query.mockReset();
+});
 
 describe('getShopIndexLimit', () => {
   it('returns the stored value', async () => {
@@ -1435,14 +1502,23 @@ export async function POST(req: Request) {
       // Guard B: the payload covers the WHOLE scope. Guard A cannot catch a
       // SHORT payload: a strict subset where every row matches passes it and
       // gets renumbered 1..k, colliding with the rows outside the subset.
+      //
+      // `image_web_url <> ''` mirrors the admin loader exactly
+      // (app/admin/wall/page.tsx). Without it, a published row with an empty web
+      // URL is counted here but never reaches the shelf, so no payload the admin
+      // can possibly send satisfies this guard: every reorder 409s forever, and
+      // the client's 409 path reloads after 1200ms, turning a drag into a reload
+      // loop. Any change to the loader's WHERE clause must change this too.
       const total =
         body.scope === 'all'
           ? await client.query<{ n: string }>(
-              `SELECT COUNT(*)::text AS n FROM artworks WHERE status = 'published'`,
+              `SELECT COUNT(*)::text AS n FROM artworks
+                WHERE status = 'published' AND image_web_url <> ''`,
             )
           : await client.query<{ n: string }>(
               `SELECT COUNT(*)::text AS n FROM artworks
-                WHERE status = 'published' AND collection_id = $1`,
+                WHERE status = 'published' AND image_web_url <> ''
+                  AND collection_id = $1`,
               [body.collectionId],
             );
       if (Number(total.rows[0].n) !== ids.length) throw new StaleScopeError();
@@ -1570,7 +1646,15 @@ export interface ShopShelfProps {
   onBusyChange: (busy: boolean) => void;
   minimized: boolean;
   onMinimize: () => void;
-  /** Library drag state, for the drop-to-sell affordance. */
+  /**
+   * Library drag state, for the drop-to-sell affordance.
+   *
+   * The current markup computes `shopHot`/`shopBad` as
+   * `dropTarget === 'shop' && !!drag && !!dragHd`. `drag` is deliberately NOT a
+   * prop: `overShelf` only sets `dropTarget` when `drag?.from === 'lib'`, so
+   * `dropTarget === 'shop'` already implies a live library drag. Drop the
+   * `!!drag` conjunct when moving the markup, or it will not typecheck.
+   */
   dropTarget: 'wall' | 'shop' | null;
   dragHd: boolean | undefined;
   onShelfDragOver: (e: React.DragEvent) => void;
@@ -1594,11 +1678,23 @@ export interface ShopShelfProps {
 }
 ```
 
-- [ ] **Step 1: Move `EditLink` and `RemoveButton` to a shared module**
+- [ ] **Step 1: Move the shared tile pieces AND the fetch helpers out**
 
-Create `components/admin/TileActions.tsx` exporting both verbatim from
+Create `components/admin/TileActions.tsx` with `'use client'` (both components
+use `onClick`), exporting `EditLink` and `RemoveButton` verbatim from
 `WallArranger`, and import them in `WallArranger` from there. `ShopShelf` will
 import them too; do NOT import them from `WallArranger` (circular import).
+
+Also move `mutationTimeout()`, `isTimeout()`, and the `MutResult` type into a
+shared module (`lib/admin-fetch.ts` or the same `TileActions.tsx`). `ShopShelf`
+needs all three, and the alternative is inlining
+`AbortSignal.timeout?.(30_000)`, which drops the `AbortController` fallback the
+existing comment calls out explicitly: "the timeout guarantee is never silently
+dropped". Without the fallback, `onTimeout` is dead on any engine lacking
+`AbortSignal.timeout`, and a hung request wedges the shelf forever.
+
+Tasks 13 and 14 assume `mutationTimeout()` is importable. Update their `fetch`
+calls to use it rather than the inline form shown there.
 
 - [ ] **Step 2: Move the Shop `<section>` into `ShopShelf.tsx`**
 
@@ -1653,9 +1749,17 @@ task's own typecheck gate fails:
             { id: 1, title: 'The Front Range' },
             { id: 2, title: 'Night Work' },
           ]}
-          shopIndexLimit={12}
+          // Deliberately LOW. At ?n=100 the mock yields ~8 buyable pieces, so a
+          // limit of 12 would exceed the buyable count and cutLineAfter would
+          // return null: the cut line could never be seen in the harness, which
+          // is the one place Task 14 can be checked at all.
+          shopIndexLimit={4}
         />
 ```
+
+Note the prop names differ by design: the parent takes `shopIndexLimit` (what
+the loader read) and passes it to `ShopShelf` as `initialLimit` (a seed for
+local state the field then owns).
 
 - [ ] **Step 6: Verify no behavior changed**
 
@@ -1859,6 +1963,24 @@ In `WallArranger`'s `clampBand`:
       max = wall.clientHeight - pad - errH - HANDLE - LIB_FLOOR - shopHeadExtra - gap * (errH ? 3 : 2);
 ```
 
+`clampBand` currently re-runs only on window resize and on pane
+minimize/restore. The Shop head's height ALSO changes on a scope switch: the
+limit field mounts and unmounts with the All view, and chip labels differ in
+width. That is `ShopShelf`-internal state the parent cannot observe, so the band
+stays mis-clamped until the next resize. Observe the head instead of guessing:
+
+```tsx
+  // A ResizeObserver on the Shop head, so a scope switch re-clamps immediately.
+  useEffect(() => {
+    const head = document.querySelector('.wl-adm-ws-shelf.shop .wl-adm-ws-head');
+    if (!head || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => reclamp());
+    ro.observe(head);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+```
+
 - [ ] **Step 9: Verify in the harness**
 
 Run: `npm run dev`, open `http://localhost:3000/dev-preview/wall?n=100`
@@ -1931,7 +2053,11 @@ local order:
   async function commitShopOrder() {
     if (inFlight || !isArrangeable(shopScope)) return;
     const attempt = shopOrderRef.current.slice();
-    if (attempt.join(',') === savedShopIds.current.join(',')) return;
+    // Reuse the tested helper from lib/wall-arrange.ts rather than
+    // reimplementing the dirty check inline. The spec requires the order-dirty
+    // check to be unit-tested, and logic that lives inside this component is
+    // unreachable by vitest. Same for `reorder()` in the dragEnter handler.
+    if (!orderChanged(attempt, savedShopIds.current)) return;
     // Tag the request with the scope it was built against. If the admin switches
     // filters mid-flight, a rollback into the NEW scope would be nonsense.
     const sentScope = shopScope;
@@ -2030,9 +2156,49 @@ Mirror the Wall's tile, using `data-shop-pos-id`, NOT `data-pos-id`. The Wall
 already uses the latter, and a photo that is both on the wall and in the shop
 would match two elements, sending focus to the wrong tile.
 
-Extract the tile markup into a local `renderTile(p, i)` so Task 14 can render it
-across two grids. Add `Fragment` to the React import if you key tiles in a
-fragment; the file does not import it today.
+Extract the tile markup into a local `renderTile(p: LibraryPhoto, i: number)` so
+Task 14 can render it across two grids. Its signature and the three things it
+must render beyond the Wall's version:
+
+```tsx
+  function renderTile(p: LibraryPhoto, i: number) {
+    const arrangeable = isArrangeable(shopScope);
+    return (
+      <figure
+        key={p.id}
+        // `below-cut` is what dims everything the storefront will not show.
+        // The class has styling but no meaning unless it is applied HERE.
+        className={`wl-adm-ws-tile ${arrangeable ? 'grab' : ''} ${
+          drag === p.id ? 'dragging' : ''
+        } ${belowCut.has(p.id) ? 'below-cut' : ''}`}
+        …
+      >
+        {/* position badge, as above */}
+
+        {/* The badges container is ALWAYS rendered now. The pre-extraction
+            markup gated the whole container on `!p.buyable`, so a buyable piece
+            had nowhere to hang the chapter label or the unreachable flag. */}
+        <div className="wl-adm-ws-badges">
+          {!p.buyable && (
+            <span className="wl-adm-ws-badge blocked">hidden · no sizes available</span>
+          )}
+          {/* Read-only chapter label, All view only. Not a control: assignment
+              stays on the Edit page. It is here so the chapter mix is visible
+              while arranging the front page, without flipping filters. */}
+          {shopScope.kind === 'all' && (
+            <span className="wl-adm-ws-badge chapter">{p.collection_title ?? 'unfiled'}</span>
+          )}
+          {/* Task 14 Step 5 adds the `unreachable` flag here. */}
+        </div>
+
+        {/* img + figcaption, as in the current markup */}
+      </figure>
+    );
+  }
+```
+
+`belowCut` arrives in Task 14 Step 1. Until then use `false` for that conjunct
+and swap it in Task 14, or land Tasks 13 and 14 together.
 
 Commit on `onDragEnd`, never `onDrop`: Chromium does not deliver a `drop` event
 when the drag source node was moved mid-drag, which a live reorder always does.
@@ -2174,7 +2340,9 @@ export function ShopLimitField({
 
   return (
     <span className="wl-adm-ws-limit">
-      <label htmlFor="wl-shop-limit">Show first</label>
+      {/* Spec copy: the control has to say WHAT it caps. "Show first" alone
+          leaves an admin guessing whether it caps the shelf or the storefront. */}
+      <label htmlFor="wl-shop-limit">Show the first</label>
       <input
         id="wl-shop-limit"
         type="number"
@@ -2196,6 +2364,7 @@ export function ShopLimitField({
           }
         }}
       />
+      <span className="on-shop">on /shop</span>
       <span id="wl-shop-limit-hint" className="hint" role="status">
         {invalid
           ? `Whole number, 0 to ${SHOP_INDEX_LIMIT_MAX}`
@@ -2264,6 +2433,32 @@ row. Render two grids with the divider between:
 The index offset on the second grid is what keeps position numbers continuous
 across the divider.
 
+**The two grids need sizing rules.** Inside the height-capped band,
+`.wl-adm-wall.ws-fixed .wl-adm-ws-shelf` is `display:flex; flex-direction:column`
+with `> .wl-adm-ws-grid { overflow-y:auto; min-height:0 }`. Turning one scrolling
+grid into two sibling scrolling grids gives the shelf two independent scrollbars
+with nothing arbitrating between them. Wrap both grids and the divider in a
+single scrolling container instead, so the shelf still has exactly one scroll
+region:
+
+```tsx
+              <div className="wl-adm-ws-scroll">
+                {/* both grids and the divider */}
+              </div>
+```
+
+```css
+.wl-adm-wall.ws-fixed .wl-adm-ws-shelf.shop > .wl-adm-ws-scroll {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+/* The inner grids no longer scroll; the wrapper does. */
+.wl-adm-wall.ws-fixed .wl-adm-ws-shelf.shop > .wl-adm-ws-scroll > .wl-adm-ws-grid {
+  overflow-y: visible;
+}
+```
+
 - [ ] **Step 5: Flag the orphans in the Unfiled view**
 
 ```tsx
@@ -2295,7 +2490,8 @@ so a version keyed on `cutAfter` could never render.
   content: ''; flex: 1; height: 1px; background: var(--adm-rule);
 }
 .wl-adm-ws-limit { display: inline-flex; align-items: center; gap: 6px; }
-.wl-adm-ws-limit label { font-size: 12px; color: var(--adm-muted); }
+.wl-adm-ws-limit label,
+.wl-adm-ws-limit .on-shop { font-size: 12px; color: var(--adm-muted); }
 .wl-adm-ws-limit input {
   width: 68px; font-size: 12px; padding: 4px 8px;
   border: 1px solid var(--adm-rule); border-radius: 6px;
@@ -2312,12 +2508,19 @@ so a version keyed on `cutAfter` could never render.
 
 Run: `npm run dev`, open `http://localhost:3000/dev-preview/wall?n=100`
 
-Expected: in All, a labelled divider sits after the Nth **buyable** tile and tiles
-below it are dimmed. Position numbers run continuously across the divider. Set
-the field to `0` and the divider disappears with the readout reading "no limit".
-Set it above the buyable count and the divider disappears with "showing all N
-buyable". Switch to a chapter and both the divider and the field vanish. Switch
-to Unfiled and any piece below the All cut carries an "unreachable" badge.
+Expected, with the harness's `shopIndexLimit={4}`: in All, a labelled divider
+sits after the 4th **buyable** tile and every tile below it is dimmed. Position
+numbers run continuously across the divider. Each tile shows its chapter name,
+or "unfiled". Switch to a chapter and both the divider and the limit field
+vanish. Switch to Unfiled and any piece below the All cut carries an
+"unreachable" badge.
+
+**What the harness cannot show:** changing the limit. `ShopLimitField.save()`
+POSTs to `/api/admin/settings`, which 401s in the auth-free preview, so the
+field reverts and `onSaved` never fires. The `0` and above-the-count branches of
+the readout are covered by the manual pass on the live deploy (final
+verification step 3), not here. Do not write a harness expectation that requires
+the save to succeed.
 
 - [ ] **Step 8: Typecheck, test, commit**
 
@@ -2346,13 +2549,30 @@ Split from the cap change (Task 16) so the two are independently revertible.
 
 - [ ] **Step 1: Three query swaps**
 
-Change `ORDER BY a.display_order, a.id` to `ORDER BY a.collection_order, a.id` in
-the chapter grid, the portfolio chapter grid, and the artwork page's related rail
-(the `LIMIT 4` query).
+Change `ORDER BY a.display_order, a.id` to `ORDER BY a.collection_order, a.id`
+in:
 
-Leave the `plate_idx` window function in the artwork page's gating query alone.
-It still reads `display_order` and will drift when the shop is rearranged; the
-plate-numbers spec deletes it. A known, accepted transient.
+- `app/(shop)/shop/collections/[slug]/page.tsx`, the chapter grid (one match)
+- `app/(shop)/portfolio/[slug]/page.tsx`, the chapter grid (one match)
+- `app/(shop)/shop/artwork/[slug]/page.tsx`, **the `LIMIT 4` related-rail query
+  only**
+
+**Do NOT replace-all in the artwork page.** `ORDER BY a.display_order, a.id`
+appears TWICE there: once inside
+`ROW_NUMBER() OVER (ORDER BY a.display_order, a.id) AS plate_idx` in the gating
+query, and once in the related rail. Anchor on the rail's `LIMIT 4`. A
+replace-all silently changes plate numbering to a per-collection sequence over
+the whole catalogue, which is nonsense and which nothing in the gates would
+catch.
+
+Leave `plate_idx` alone. It still reads `display_order` and will drift when the
+shop is rearranged; the plate-numbers spec deletes it. A known, accepted
+transient.
+
+Verify before editing:
+
+Run: `grep -n 'ORDER BY a.display_order, a.id' "app/(shop)/shop/artwork/[slug]/page.tsx"`
+Expected: two line numbers. Change only the one inside the `LIMIT 4` query.
 
 - [ ] **Step 2: Typecheck and commit**
 
@@ -2444,9 +2664,16 @@ git commit -m "feat(shop): editable cap and Selected works heading"
 Widen Task 16's destructuring to three, so the band costs no extra round trip on
 the storefront's busiest page:
 
+Spell the counts query out in full. A comment followed by a comma
+(`/* unchanged */,`) is an **array hole**, so `countsRes` would be `undefined`
+and `countsRes.rows[0]` throws at request time on the storefront index.
+
 ```tsx
   const [countsRes, limit, chaptersRes] = await Promise.all([
-    /* the counts query, unchanged */,
+    pool.query<CountsRow>(
+      `SELECT COUNT(*)::int AS n, MAX(published_at)::text AS latest
+       FROM artworks WHERE status='published'`,
+    ),
     getShopIndexLimit(),
     pool.query<{ slug: string; title: string; n: number }>(
       // Counts BUYABLE published works, not just published. /shop/collections
@@ -2496,6 +2723,31 @@ with "Chapter 03 of 06" on the chapter and portfolio pages, which `ROW_NUMBER()`
 over *all* collections.
 
 Add `import Link from 'next/link';` if not already present.
+
+- [ ] **Step 3: Give the band its own grid**
+
+`.wl-cindex-row` is `grid-template-columns: 60px 1.5fr 2fr 1fr 120px`
+(`app/globals.css`), sized for the five cells `/shop/collections` renders (`no`,
+`title`, `tagline`, `count`, `thumb`). The band renders two, so the 44px display
+title would land in the 60px `no` track and the count in the `1.5fr` title
+track. Add a band-scoped override:
+
+```css
+/* The browse band reuses the chapter-row treatment but renders only title and
+   count, so it needs its own track sizing rather than the five-cell one. */
+.wl-browse-band .wl-cindex-row {
+  grid-template-columns: 1fr auto;
+}
+```
+
+- [ ] **Step 4: Look at it**
+
+Run: `npm run dev`, open `http://localhost:3000/shop`
+
+Expected: the band sits below Selected works, titles are left-aligned in the
+display face at full size, counts sit right, rows align with each other, and the
+page does not scroll horizontally at a narrow width. Tasks 15 through 17 change
+public pages and this is the only step in the plan that looks at one.
 
 - [ ] **Step 3: Typecheck and commit**
 
