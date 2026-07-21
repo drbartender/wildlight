@@ -3589,6 +3589,7 @@
 .wl-adm-ws-chip svg { color: var(--adm-muted); }
 .wl-adm-ws-chip .name { font-weight: 600; }
 .wl-adm-ws-chip .count { font-family: var(--f-mono), monospace; font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--adm-ink-2); }
+.wl-adm-ws-chip .count.note { color: var(--adm-blue); }
 /* min-height so it still reads as an empty state outside the fixed-pane
    regime, where flex:1 is inert (.wl-adm-wall is display:block there).
    ink-2, not muted — muted is sub-AA in both themes. */
@@ -3617,9 +3618,8 @@
 .wl-adm-ws-meta { font-family: var(--f-mono), monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--adm-muted); }
 .wl-adm-ws-note { font-size: 12px; color: var(--adm-muted); }
 .wl-adm-ws-saved { font-family: var(--f-mono), monospace; font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--adm-green); background: var(--adm-green-soft); padding: 2px 8px; border-radius: 999px; }
-.wl-adm-ws-min { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; flex-shrink: 0; border: 1px solid var(--adm-rule); border-radius: var(--adm-radius-sm, 4px); background: transparent; color: var(--adm-muted); cursor: pointer; }
+.wl-adm-ws-min { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; flex-shrink: 0; border: 1px solid var(--adm-muted); border-radius: var(--adm-radius-sm, 4px); background: transparent; color: var(--adm-muted); cursor: pointer; }
 .wl-adm-ws-min svg { transition: transform 160ms; }
-.wl-adm-ws-min.collapsed svg { transform: rotate(-90deg); }
 
 .wl-adm-ws-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .wl-adm-ws-empty { border: 1.5px dashed var(--adm-rule); border-radius: var(--adm-radius-md); padding: 34px; text-align: center; color: var(--adm-muted); font-size: 13px; }

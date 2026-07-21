@@ -118,7 +118,19 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
   useEffect(() => {
     try {
       const v = window.localStorage.getItem('wl-wall-bandh');
-      if (v) setBandH(clampBand(Number(v)));
+      if (v) {
+        bandIntentRef.current = Number(v);
+        setBandH(clampBand(Number(v)));
+      }
+      // Which panes were minimized last time. Persisted like the band height —
+      // otherwise every same-tab "Edit ↗" round trip silently reopened all three.
+      const m = window.localStorage.getItem('wl-wall-min');
+      if (m) {
+        const s = JSON.parse(m) as { wall?: boolean; shop?: boolean; lib?: boolean };
+        setWallMin(!!s.wall);
+        setShopMin(!!s.shop);
+        setLibMin(!!s.lib);
+      }
     } catch {
       /* ignore */
     }
@@ -146,16 +158,23 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
   // Re-clamp a customised band height whenever the space available changes:
   // the window resizing, OR a pane minimizing/restoring (the tray mounting
   // steals height from the Library, making a previously-legal band illegal).
+  // Always re-clamp the user's INTENDED height, not the currently-clamped one —
+  // otherwise minimizing ratchets the band down and restoring never gives the
+  // height back (the clamp is lossy in one direction).
+  function reclamp() {
+    setBandH((h) => {
+      const intent = bandIntentRef.current ?? h;
+      return intent == null ? null : clampBand(intent);
+    });
+  }
   useEffect(() => {
-    setBandH((h) => (h == null ? h : clampBand(h)));
+    reclamp();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallMin, shopMin, libMin]);
   useEffect(() => {
-    function onResize() {
-      setBandH((h) => (h == null ? h : clampBand(h)));
-    }
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    window.addEventListener('resize', reclamp);
+    return () => window.removeEventListener('resize', reclamp);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   function onResizeDown(e: React.PointerEvent) {
     const band = document.querySelector<HTMLElement>('.wl-adm-ws-shelves');
@@ -744,8 +763,17 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
   // render as the click, so focus the target after it exists. On minimize →
   // the pane's chip; on restore → the pane's heading (never the chevron that
   // would just re-hide it).
+  function setPaneMin(pane: 'wall' | 'shop' | 'lib', v: boolean) {
+    const next = { wall: wallMin, shop: shopMin, lib: libMin, [pane]: v };
+    setMin[pane](v);
+    try {
+      window.localStorage.setItem('wl-wall-min', JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  }
   function minimizePane(pane: 'wall' | 'shop' | 'lib') {
-    setMin[pane](true);
+    setPaneMin(pane, true);
     requestAnimationFrame(() =>
       requestAnimationFrame(() =>
         document.querySelector<HTMLElement>(`[data-chip="${pane}"]`)?.focus({ preventScroll: true }),
@@ -753,7 +781,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
     );
   }
   function restorePane(pane: 'wall' | 'shop' | 'lib') {
-    setMin[pane](false);
+    setPaneMin(pane, false);
     requestAnimationFrame(() =>
       requestAnimationFrame(() =>
         document.getElementById(headId[pane])?.focus({ preventScroll: true }),
@@ -832,9 +860,10 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
           <div className={`wl-adm-ws-head ${wallMin ? '' : 'open'}`}>
             <button
               type="button"
-              className={`wl-adm-ws-min ${wallMin ? 'collapsed' : ''}`}
-              aria-label={wallMin ? 'Expand the Wall' : 'Minimize the Wall'}
-              aria-expanded={!wallMin}
+              className="wl-adm-ws-min"
+              aria-label="Minimize the Wall"
+              title="Minimize the Wall"
+              aria-expanded
               onClick={() => minimizePane('wall')}
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
@@ -948,9 +977,10 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
           <div className={`wl-adm-ws-head ${shopMin ? '' : 'open'}`}>
             <button
               type="button"
-              className={`wl-adm-ws-min ${shopMin ? 'collapsed' : ''}`}
-              aria-label={shopMin ? 'Expand the Shop' : 'Minimize the Shop'}
-              aria-expanded={!shopMin}
+              className="wl-adm-ws-min"
+              aria-label="Minimize the Shop"
+              title="Minimize the Shop"
+              aria-expanded
               onClick={() => minimizePane('shop')}
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
@@ -1031,6 +1061,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
             type="button"
             className="wl-adm-ws-min"
             aria-label="Minimize the Library"
+            title="Minimize the Library"
             aria-expanded
             onClick={() => minimizePane('lib')}
           >
@@ -1239,7 +1270,8 @@ function PaneChip({
     >
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
       <span className="name">{label}</span>
-      <span className="count">{note ?? count}</span>
+      <span className="count">{count}</span>
+      {note && <span className="count note">{note}</span>}
     </button>
   );
 }
