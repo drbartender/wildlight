@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { requireAdminOrRedirect } from '@/lib/session';
 import { parsePathId } from '@/lib/db';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
@@ -29,7 +30,26 @@ export default async function StudioPage({
 
   return (
     <>
-      <AdminTopBar title={title} subtitle="Studio · Composer" />
+      {/*
+        Voice training and Subscribers have no sidebar pill of their own —
+        they hang off Studio's top bar the way Collections hangs off the
+        Wall page. The sidebar's Studio item stays lit on both, so the pill
+        is also the way back.
+      */}
+      <AdminTopBar
+        title={title}
+        subtitle="Studio · Composer"
+        actions={
+          <>
+            <Link href="/admin/voice-training" className="wl-adm-btn small">
+              Voice training
+            </Link>
+            <Link href="/admin/subscribers" className="wl-adm-btn small">
+              Subscribers
+            </Link>
+          </>
+        }
+      />
       {/*
         `key` forces a fresh mount whenever kind or draft id changes.
         Without it, App Router keeps the same StudioComposer instance

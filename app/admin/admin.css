@@ -2690,6 +2690,18 @@
     padding: 12px 16px;
     gap: 10px;
     align-items: center;
+    /* Pages that pass `actions` (Wall, Studio) put 4+ controls in .right,
+       whose min-content width alone exceeds a phone viewport. Without
+       wrapping, the bar pushes the whole document into a horizontal
+       scroll and the title and Sign out fall off the right edge. */
+    flex-wrap: wrap;
+  }
+  .wl-adm-topbar .title-group {
+    /* Take the rest of row 1 next to the burger, and let .right wrap to
+       its own row rather than squeezing the subtitle into a column of
+       single words. */
+    flex: 1 0 auto;
+    max-width: calc(100% - 46px);
   }
   .wl-adm-topbar h1 {
     font-size: 18px;
@@ -2700,6 +2712,9 @@
   .wl-adm-topbar .sub {
     margin-bottom: 2px;
     font-size: 9.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .wl-adm-topbar-crumbs {
     display: none !important;
@@ -2718,6 +2733,11 @@
   }
   .wl-adm-topbar .right {
     gap: 6px;
+    /* Row 2. Wraps internally too — two action links plus the theme
+       switch plus Sign out still overflow 390px on one line. */
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    margin-left: auto;
   }
   .wl-adm-topbar-signout {
     padding: 5px 8px;

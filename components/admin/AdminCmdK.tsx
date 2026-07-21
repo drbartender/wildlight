@@ -17,6 +17,7 @@ const ITEMS: Item[] = [
   { k: 'Go to Subscribers', to: '/admin/subscribers', hint: 'list' },
   { k: 'Go to Studio · Journal', to: '/admin/studio?kind=journal', hint: 'composer' },
   { k: 'Go to Studio · Newsletter', to: '/admin/studio?kind=newsletter', hint: 'composer' },
+  { k: 'Go to Voice training', to: '/admin/voice-training', hint: 'studio' },
   { k: 'Go to Settings', to: '/admin/settings' },
   { k: 'New artwork', to: '/admin/artworks/new', hint: 'upload' },
   { k: 'New journal entry', to: '/admin/studio?kind=journal&new=1', hint: 'studio' },
