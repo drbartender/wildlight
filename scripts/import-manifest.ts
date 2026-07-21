@@ -1,16 +1,31 @@
 /*
  * Reads ./scraped/manifest.json, uploads every image to R2 (public bucket),
- * and upserts collection + draft artwork rows into Postgres.
+ * and inserts collection + draft artwork rows into Postgres.
  *
- * Idempotent — safe to re-run. Skips re-upload if an artwork with the same
- * target R2 URL is already in the DB.
+ * ADDITIVE ONLY, and genuinely idempotent. A re-run inserts anything new in the
+ * manifest and touches nothing that already exists: no duplicate rows, no
+ * re-uploads, no overwriting of anything edited in the admin since.
+ *
+ * That rests on two things working together, and breaking either one brings the
+ * old bug back:
+ *   1. Slug planning depends only on the manifest (lib/manifest-slugs.ts), so a
+ *      re-run computes the SAME slug and collides with its own prior row. The
+ *      old code seeded its taken-slugs set from the database, so every entry's
+ *      own row made its slug look taken and it minted `-2` instead, which
+ *      duplicated the catalogue and (because the R2 key embeds the slug)
+ *      re-uploaded every image.
+ *   2. Every write is ON CONFLICT DO NOTHING / COALESCE. An UPDATE here cannot
+ *      tell an untouched imported row from one Dan has since retitled,
+ *      recollected or re-imaged, so it must not write at all. Use the admin for
+ *      changes; this script is for adding what is missing.
  */
 import { config } from 'dotenv';
 import { readFileSync } from 'node:fs';
 import { resolve, extname, join } from 'node:path';
 import { pool, withTransaction } from '@/lib/db';
 import { uploadPublic } from '@/lib/r2';
-import { slugify, uniqueSlug } from '@/lib/slug';
+import { slugify } from '@/lib/slug';
+import { canonicalSlug, planManifestSlugs } from '@/lib/manifest-slugs';
 
 config({ path: '.env.local' });
 
@@ -32,14 +47,6 @@ interface Manifest {
   scrapedAt: string;
   base: string;
   collections: ManifestCollection[];
-}
-
-/**
- * Strip trailing `-\d+` dedup suffix the scraper added when discovering the
- * same collection via multiple URLs. "the-sun-3" -> "the-sun".
- */
-function canonicalSlug(raw: string): string {
-  return slugify(raw).replace(/-\d+$/, '');
 }
 
 /** "the-sun" -> "The Sun". */
@@ -65,42 +72,6 @@ const COLLECTION_HINTS: Record<string, { title: string; tagline: string }> = {
 };
 
 async function main() {
-  // DISABLED. This script is NOT idempotent, despite its own comments saying so,
-  // and a re-run is destructive in three ways.
-  //
-  // `takenSlugs` is seeded from every slug already in the database, and
-  // `uniqueSlug` returns something not in that set, so the deterministic
-  // `<collection>-<title>` slug is already taken on a second run and comes back
-  // as `...-2`. That is a NEW slug, so ON CONFLICT (slug) never fires and the
-  // row is INSERTed again. Because r2Key embeds the slug, the target URL
-  // differs too, so the existingByUrl upload-skip misses and every image is
-  // re-uploaded. A third run gives `...-3`. It also overwrites admin-edited
-  // titles via `title = EXCLUDED.title`.
-  //
-  // Fixing it properly needs a stable identity for "which row is this manifest
-  // entry", which slug cannot be — that is the bug. The alternative, seeding
-  // takenSlugs per-run, lets an import silently adopt and overwrite an
-  // admin-created artwork that happens to share a slug.
-  //
-  // It is fenced rather than repaired because its input is gone (there is no
-  // scraped/ directory; the catalogue was imported in April 2026) and its
-  // sibling scripts/publish-selections.ts is fenced for the same reason. If a
-  // re-import is ever genuinely needed, that is a redesign, not a re-run.
-  // The override is a string, not a boolean flag, so it cannot be set by
-  // accident and reads as an acknowledgement at the call site. It also keeps
-  // the body reachable for the type checker, which narrows everything after a
-  // bare process.exit() to `never`.
-  if (process.env.ALLOW_MANIFEST_IMPORT !== 'yes-i-know-this-duplicates') {
-    console.error(
-      'import:manifest is disabled. It is not idempotent: a re-run duplicates the ' +
-        'entire catalogue as <slug>-2, re-uploads every image to R2, and overwrites ' +
-        'admin-edited titles. See the comment in scripts/import-manifest.ts.\n' +
-        'If you have read that comment and still mean it, set ' +
-        'ALLOW_MANIFEST_IMPORT=yes-i-know-this-duplicates.',
-    );
-    process.exit(1);
-  }
-
   const manifestPath = resolve(process.cwd(), 'scraped/manifest.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Manifest;
   // eslint-disable-next-line no-console
@@ -129,7 +100,10 @@ async function main() {
        VALUES ($1, $2, $3,
                (SELECT COALESCE(MAX(display_order), 0) + 1 FROM collections))
        ON CONFLICT (slug) DO UPDATE SET
-         title = EXCLUDED.title,
+         -- COALESCE, never EXCLUDED: a plain assignment would overwrite a title
+         -- or tagline edited in the admin every time this ran. DO NOTHING is not
+         -- an option here because the RETURNING id is needed either way.
+         title = COALESCE(collections.title, EXCLUDED.title),
          tagline = COALESCE(collections.tagline, EXCLUDED.tagline)
        RETURNING id`,
       [canon, title, hint?.tagline || null],
@@ -143,16 +117,20 @@ async function main() {
   const existing = await pool.query<{ slug: string; image_web_url: string }>(
     'SELECT slug, image_web_url FROM artworks',
   );
-  const takenSlugs = new Set<string>(existing.rows.map((r) => r.slug));
   const existingByUrl = new Set<string>(existing.rows.map((r) => r.image_web_url));
+
+  // Slug planning depends ONLY on the manifest (lib/manifest-slugs.ts), never
+  // on what is already in the database. That is what makes a re-run land on
+  // its own prior rows instead of minting slug-2 and duplicating everything.
+  const plan = planManifestSlugs(manifest.collections);
 
   const publicBase = (process.env.R2_PUBLIC_BASE_URL || '').replace(/\/$/, '');
   if (!publicBase) throw new Error('R2_PUBLIC_BASE_URL missing — set it before running');
 
   // --- walk each collection, upload + upsert artwork rows ---------------
   let totalImported = 0;
-  for (const c of manifest.collections) {
-    const canon = canonicalSlug(c.slug) || canonicalSlug(c.title);
+  for (const [ci, c] of manifest.collections.entries()) {
+    const canon = plan[ci].canon;
     const colId = collectionDbId.get(canon);
     if (!colId) continue;
 
@@ -163,10 +141,7 @@ async function main() {
         slugify(a.title === a.slug ? '' : a.title) ||
         slugify(a.slug) ||
         `${canon}-${String(idx + 1).padStart(3, '0')}`;
-      // Namespace slugs by collection to avoid cross-collection collisions.
-      const qualifiedBase = `${canon}-${baseName}`;
-      const slug = uniqueSlug(qualifiedBase, takenSlugs);
-      takenSlugs.add(slug);
+      const slug = plan[ci].slugs[idx];
 
       const ext = (extname(a.filename) || '.jpg').toLowerCase();
       const r2Key = `artworks/${canon}/${slug}${ext}`;
@@ -197,29 +172,20 @@ async function main() {
       const titleGuess = a.title && a.title !== a.slug ? a.title : titleize(baseName);
 
       await withTransaction(async (client) => {
-        // NOTE: the ON CONFLICT (slug) path below is UNREACHABLE on a re-run.
-        // `takenSlugs` is seeded from every slug already in the database
-        // (see above), and `uniqueSlug` returns something not in that set, so
-        // the slug is new by construction and this always INSERTs. Two
-        // consequences worth knowing before editing this block:
-        //   1. There is no "re-file an existing artwork" path here to guard.
-        //   2. Re-running this script DUPLICATES the catalogue (slug-2, slug-3)
-        //      and re-uploads every image, because r2Key embeds the slug so the
-        //      existingByUrl skip misses too. The header's "idempotent" claim is
-        //      false. Not fixed here; see the fix list.
+        // The ON CONFLICT path below IS reachable now, and is the whole
+        // mechanism: a re-run plans the same slug, hits its own prior row, and
+        // does nothing. It used to be unreachable because slugs were planned
+        // against the database, so every re-run minted a fresh slug and
+        // INSERTed a duplicate.
         //
-        // display_order is the curated All order now, arranged from /admin/wall.
-        // Writing a manifest index here would silently overwrite it on every
-        // re-import. New rows keep the column default of 0, the "never placed"
-        // sentinel the publish rules append from.
+        // display_order is deliberately absent. It is the curated /shop order
+        // now, arranged from /admin/wall, and writing a manifest index into it
+        // would silently overwrite that. New rows keep the column default of 0,
+        // which is the "never placed" sentinel the publish rules append from.
         await client.query(
           `INSERT INTO artworks (collection_id, slug, title, image_web_url, status)
            VALUES ($1, $2, $3, $4, 'draft')
-           ON CONFLICT (slug) DO UPDATE SET
-             collection_id = EXCLUDED.collection_id,
-             title = EXCLUDED.title,
-             image_web_url = EXCLUDED.image_web_url,
-             updated_at = NOW()`,
+           ON CONFLICT (slug) DO NOTHING`,
           [colId, slug, titleGuess, targetUrl],
         );
 

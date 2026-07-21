@@ -39,7 +39,7 @@ Scripts:
 | `npm run migrate` | Apply `lib/schema.sql` (idempotent) |
 | `npm run seed:admins` | Add/update an admin user (interactive) |
 | `npm run scrape` | Crawl wildlightimagery.com gallery images into `scraped/` |
-| `npm run import:manifest` | Upload scraped images to R2 + seed draft artworks |
+| `npm run import:manifest` | Upload scraped images to R2 + seed draft artworks. **Additive only:** a re-run inserts what is new and touches nothing that exists, so it never duplicates rows, re-uploads images, or overwrites admin edits. Use the admin to change existing pieces. |
 | `npm run curate:build` | Regenerate `scraped/curate.html` (the 50-pick review page) from the manifest |
 | `npm run publish:selections [-- --apply]` | **Disabled after the shop-ordering backfill.** It looked rows up by `(collection_id, display_order)` expecting the manifest index; `display_order` is the curated `/shop` order now, so the lookup would match the wrong rows and its converge step would mass-unpublish. Exits 1 when the backfill marker is present. |
 | `npm run sync:printful <id \| all>` | Create Printful sync_products for artwork(s) |
