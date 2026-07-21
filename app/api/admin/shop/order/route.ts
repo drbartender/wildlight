@@ -15,8 +15,11 @@ import { logger } from '@/lib/logger';
 // with no way to recover. Same invariant /api/admin/wall documents. Note the
 // loader's LIMIT applies across ALL statuses while Guard B below counts
 // published rows, so both must be raised together as the catalogue grows.
+// .max on the id is an int4 bound, not decoration: z.number().int() is just
+// Number.isInteger, so 2147483648 passes Zod, reaches $1::int[], and Postgres
+// raises 22003 — a 500 and a Sentry exception for what is really a 400.
 const Ids = z
-  .array(z.number().int().positive())
+  .array(z.number().int().positive().max(2147483647))
   .min(1)
   .max(1000)
   .refine((a) => new Set(a).size === a.length, 'duplicate ids');
@@ -69,7 +72,8 @@ export async function POST(req: Request) {
                  FROM (SELECT id, ord
                          FROM unnest($1::int[]) WITH ORDINALITY AS t(id, ord)) v
                 WHERE a.id = v.id
-                  AND a.status = 'published'`,
+                  AND a.status = 'published'
+                  AND a.image_web_url <> ''`,
               [ids],
             )
           : await client.query(
@@ -79,6 +83,7 @@ export async function POST(req: Request) {
                          FROM unnest($1::int[]) WITH ORDINALITY AS t(id, ord)) v
                 WHERE a.id = v.id
                   AND a.status = 'published'
+                  AND a.image_web_url <> ''
                   AND a.collection_id = $2`,
               [ids, body.collectionId],
             );
@@ -120,17 +125,22 @@ export async function POST(req: Request) {
       // reason the guards run inside withTransaction: a single statement in
       // autocommit has already committed by the time any assertion runs, so a
       // post-hoc check would only report corruption it had just made durable.
-      logger.warn('shop reorder rejected: scope changed', {
+      // info, not warn: two admin tabs open is ordinary user behaviour, and
+      // logger.warn forwards to Sentry, so this would file a recurring event
+      // for something that is working exactly as designed.
+      logger.info('shop reorder rejected: scope changed', {
         scope: body.scope,
         idCount: ids.length,
-        rowCount: matched,
+        // -1 means the UPDATE itself threw before assigning. Report it as
+        // unknown rather than as a row count of minus one.
+        rowCount: matched < 0 ? 'unknown' : matched,
       });
       stale = true;
     } else {
       logger.error('shop reorder failed', err, {
         scope: body.scope,
         idCount: ids.length,
-        rowCount: matched,
+        rowCount: matched < 0 ? 'unknown' : matched,
       });
       return NextResponse.json({ error: 'save failed' }, { status: 500 });
     }
