@@ -1,6 +1,6 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import { plateNumber } from '@/lib/plate-number';
+import { formatPlate } from '@/lib/plate-number';
 
 export interface PlateCardData {
   slug: string;
@@ -37,7 +37,7 @@ export function PlateCard({
   showPrice = true,
   linkBase = '/shop/artwork',
 }: PlateCardProps) {
-  const plate = plateNumber(item.slug);
+  const plate = formatPlate(item.plate_no);
   const fromStr =
     showPrice && item.min_price_cents != null && item.min_price_cents > 0
       ? `$${Math.floor(item.min_price_cents / 100)}+`

@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation';
 import { pool } from '@/lib/db';
 import { OrderCard, type VariantOption } from '@/components/shop/OrderCard';
 import { PlateCard, type PlateCardData } from '@/components/site/PlateCard';
-import { plateNumber } from '@/lib/plate-number';
+import { formatPlate } from '@/lib/plate-number';
 import type { EditionStatus } from '@/lib/editions';
 
 export const revalidate = 60;
@@ -125,7 +125,7 @@ export default async function ArtworkPage({
   // (handled by the CTE above).
   const related = relatedRes;
 
-  const plate = plateNumber(art.slug);
+  const plate = formatPlate(art.plate_no);
   const hasKnownDims =
     !!art.image_width &&
     !!art.image_height &&

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef } from 'react';
 import type { WallItem } from './VintageWall';
-import { plateNumber } from '@/lib/plate-number';
+import { formatPlate } from '@/lib/plate-number';
 
 /**
  * In-place viewer for the vintage wall. Dark scrim regardless of mood —
@@ -126,7 +126,7 @@ export function Lightbox({
             See print options →
           </Link>
         ) : (
-          <span className="sub">{plateNumber(item.slug)} · from the archive</span>
+          <span className="sub">{formatPlate(item.plate_no)} · from the archive</span>
         )}
         <span className="count">
           {index + 1} / {items.length}

@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import { useRef, useState } from 'react';
 import { Lightbox } from './Lightbox';
+import { formatPlate } from '@/lib/plate-number';
 
 export interface WallItem {
   slug: string;
@@ -66,7 +67,13 @@ export function VintageWall({ items }: { items: WallItem[] }) {
               style={{ objectFit: 'cover' }}
             />
             {it.available && <span className="wl-wall-dot" aria-hidden="true" />}
-            <span className="wl-wall-cap">{it.title}</span>
+            {/* The only NEW display surface in this change. Plate first, so
+                the number always survives: .wl-wall-cap is nowrap with
+                ellipsis in a 240px cell, so a long title truncates and the
+                number would be the casualty if it came second. */}
+            <span className="wl-wall-cap">
+              {formatPlate(it.plate_no)} · {it.title}
+            </span>
           </button>
         ))}
       </div>
