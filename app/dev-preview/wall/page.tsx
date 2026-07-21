@@ -50,7 +50,6 @@ function mockPhotos(n: number): LibraryPhoto[] {
       updated_at: new Date(Date.UTC(2026, 6, 20) - i * 86400000).toISOString(),
       hd,
       buyable,
-      price_from_cents: buyable ? 29000 + (i % 9) * 5000 : null,
       wall_rank: onWall ? i : null,
     });
   }

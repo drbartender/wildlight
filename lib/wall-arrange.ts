@@ -16,8 +16,6 @@ export interface LibraryPhoto {
   hd: boolean;
   /** A buyable variant exists. Read ONLY together with isInShop (see spec). */
   buyable: boolean;
-  /** Lowest buyable-variant price in cents, or null. Formatted via lib/money. */
-  price_from_cents: number | null;
   /** Homepage wall position (1-based), computed in SQL; null when off-wall. */
   wall_rank: number | null;
 }

@@ -20,7 +20,6 @@ function photo(over: Partial<LibraryPhoto> & { id: number }): LibraryPhoto {
     updated_at: over.updated_at ?? '2026-07-19T00:00:00Z',
     hd: over.hd ?? false,
     buyable: over.buyable ?? false,
-    price_from_cents: over.price_from_cents ?? null,
     wall_rank: over.wall_rank ?? null,
   };
 }

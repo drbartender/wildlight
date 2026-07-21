@@ -13,7 +13,7 @@ export default async function AdminWallPage() {
   // rows (empty web url) are excluded. wall_rank reproduces the homepage sort
   // ((wall_order=0), wall_order, md5(slug)) in SQL for on_wall rows, so the
   // admin wall order equals the public order with no client-side hashing. hd
-  // gates the Shop; buyable + price_from_cents drive the Shop tile badge/price.
+  // gates the Shop; buyable drives the Shop tile's "no sizes available" badge.
   // Fail soft on a Neon cold-start blip: render an empty screen, not a 500.
   let photos: LibraryPhoto[] = [];
   try {
@@ -23,8 +23,6 @@ export default async function AdminWallPage() {
               (a.image_print_url IS NOT NULL AND a.image_print_url <> '') AS hd,
               EXISTS (SELECT 1 FROM artwork_variants v
                         WHERE v.artwork_id = a.id AND v.buyable) AS buyable,
-              (SELECT MIN(v.price_cents) FROM artwork_variants v
-                 WHERE v.artwork_id = a.id AND v.buyable) AS price_from_cents,
               CASE WHEN a.on_wall THEN (row_number() OVER (
                      PARTITION BY a.on_wall
                      ORDER BY (a.wall_order = 0), a.wall_order, md5(a.slug)

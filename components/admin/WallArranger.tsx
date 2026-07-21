@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AdminTopBar } from './AdminTopBar';
-import { formatUSD } from '@/lib/money';
 import {
   applyFilter,
   deriveWallIds,
@@ -1014,7 +1013,6 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={p.image_web_url} alt={p.title} draggable={false} />
                     <figcaption className="wl-adm-ws-cap">
-                      <span className="price">{p.price_from_cents != null ? formatUSD(p.price_from_cents) : '—'}</span>
                       <EditLink id={p.id} title={p.title} />
                       <RemoveButton
                         confirming={confirm?.kind === 'shopRemove' && confirm.id === p.id}
