@@ -3481,3 +3481,12 @@ html[data-mood='ink'] .wl-surface::after {
   .wl-lightbox-arrow { font-size: 30px; padding: 8px 10px; }
   .wl-lightbox-cap .title { font-size: 18px; }
 }
+
+/* Browse-by-collection band on /shop -------------------------------------- */
+/* Reuses the chapter-row treatment from /shop/collections, but renders only
+   title and count instead of that page's five cells (no, title, tagline,
+   count, thumb). Without its own tracks the 44px display title would land in
+   the 60px `no` column and the count in the title column. */
+.wl-browse-band .wl-cindex-row {
+  grid-template-columns: 1fr auto;
+}
