@@ -101,6 +101,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
   const [savedFlash, setSavedFlash] = useState(false);
   const [wallMin, setWallMin] = useState(false);
   const [shopMin, setShopMin] = useState(false);
+  const [libMin, setLibMin] = useState(false);
   const [editPos, setEditPos] = useState<number | null>(null);
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
@@ -202,7 +203,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
       el.focus({ preventScroll: true });
       if (document.activeElement === el) return;
     }
-    document.getElementById('wl-library-heading')?.focus({ preventScroll: true });
+    focusLibraryFallback();
   };
   function settle() {
     setBusy(false);
@@ -425,7 +426,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
       setActionErr(`${done} added to the shop. ${skippedNoHd} skipped — they need a print file first.`);
     }
     // The bulk bar unmounts when the selection clears; move focus somewhere sane.
-    requestAnimationFrame(() => document.getElementById('wl-library-heading')?.focus({ preventScroll: true }));
+    requestAnimationFrame(() => focusLibraryFallback());
   }
 
   // ── Wall placement (no confirm; reversible) ──────────────────────────
@@ -645,7 +646,8 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         const el = document.querySelector<HTMLElement>(`[data-pos-id="${id}"]`);
-        (el ?? document.getElementById('wl-library-heading'))?.focus({ preventScroll: true });
+        if (el) el.focus({ preventScroll: true });
+        else focusLibraryFallback();
       }),
     );
   }
@@ -705,6 +707,42 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
   const shopHot = dropTarget === 'shop' && !!drag && !!dragHd;
   const shopBad = dropTarget === 'shop' && !!drag && !dragHd;
 
+  // ── Panes: minimize to a chip, restore from it ───────────────────────
+  const bandShown = !wallMin || !shopMin;
+  const anyMin = wallMin || shopMin || libMin;
+  const setMin: Record<'wall' | 'shop' | 'lib', (v: boolean) => void> = {
+    wall: setWallMin,
+    shop: setShopMin,
+    lib: setLibMin,
+  };
+  const headId = { wall: 'wl-wall-heading', shop: 'wl-shop-heading', lib: 'wl-library-heading' };
+  // Focus moves post-commit: the chip mounts / the pane unmounts in the SAME
+  // render as the click, so focus the target after it exists. On minimize →
+  // the pane's chip; on restore → the pane's heading (never the chevron that
+  // would just re-hide it).
+  function minimizePane(pane: 'wall' | 'shop' | 'lib') {
+    setMin[pane](true);
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() =>
+        document.querySelector<HTMLElement>(`[data-chip="${pane}"]`)?.focus({ preventScroll: true }),
+      ),
+    );
+  }
+  function restorePane(pane: 'wall' | 'shop' | 'lib') {
+    setMin[pane](false);
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() =>
+        document.getElementById(headId[pane])?.focus({ preventScroll: true }),
+      ),
+    );
+  }
+  // `#wl-library-heading` is the focus fallback for reorder/remove/bulk, but it
+  // unmounts when the Library is minimized — fall back to the Library chip.
+  function focusLibraryFallback() {
+    (document.getElementById('wl-library-heading') ??
+      document.querySelector<HTMLElement>('[data-chip="lib"]'))?.focus({ preventScroll: true });
+  }
+
   return (
     <>
       <AdminTopBar
@@ -729,6 +767,22 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
         }
       />
 
+      {anyMin && (
+        <div className="wl-adm-ws-tray" role="group" aria-label="Minimized panes">
+          {wallMin && <PaneChip pane="wall" label="The Wall" count={wall.length} onRestore={restorePane} />}
+          {shopMin && <PaneChip pane="shop" label="The Shop" count={shop.length} onRestore={restorePane} />}
+          {libMin && (
+            <PaneChip
+              pane="lib"
+              label="Library"
+              count={counts.all}
+              note={selected.size ? `${selected.size} selected` : undefined}
+              onRestore={restorePane}
+            />
+          )}
+        </div>
+      )}
+
       <div className="wl-adm-wall ws-fixed">
         {actionErr && (
         <p className="wl-adm-wall-err" role="alert">
@@ -736,11 +790,14 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
         </p>
       )}
 
+      {bandShown && (
       <div
-        className={`wl-adm-ws-shelves ${wallMin ? 'wall-min' : ''} ${shopMin ? 'shop-min' : ''}`}
+        className="wl-adm-ws-shelves"
+        data-lib-min={libMin}
         style={{ ['--wl-band-h' as string]: bandH != null ? `${bandH}px` : undefined } as React.CSSProperties}
       >
         {/* THE WALL */}
+        {!wallMin && (
         <section
           className={`wl-adm-ws-shelf wall ${dropTarget === 'wall' ? 'hot-ok' : ''}`}
           aria-label="The Wall"
@@ -754,11 +811,11 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
               className={`wl-adm-ws-min ${wallMin ? 'collapsed' : ''}`}
               aria-label={wallMin ? 'Expand the Wall' : 'Minimize the Wall'}
               aria-expanded={!wallMin}
-              onClick={() => setWallMin((v) => !v)}
+              onClick={() => minimizePane('wall')}
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
             </button>
-            <h2>The Wall</h2>
+            <h2 id="wl-wall-heading" tabIndex={-1}>The Wall</h2>
             <span className="wl-adm-ws-meta">homepage gallery · {wall.length}</span>
             <span style={{ flex: 1 }} />
             {savedFlash && <span className="wl-adm-ws-saved">order saved ✓</span>}
@@ -853,8 +910,10 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
               </div>
             ))}
         </section>
+        )}
 
         {/* THE SHOP */}
+        {!shopMin && (
         <section
           className={`wl-adm-ws-shelf shop ${shopHot ? 'hot-ok' : ''} ${shopBad ? 'hot-bad' : ''}`}
           aria-label="The Shop"
@@ -868,11 +927,11 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
               className={`wl-adm-ws-min ${shopMin ? 'collapsed' : ''}`}
               aria-label={shopMin ? 'Expand the Shop' : 'Minimize the Shop'}
               aria-expanded={!shopMin}
-              onClick={() => setShopMin((v) => !v)}
+              onClick={() => minimizePane('shop')}
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
             </button>
-            <h2>The Shop</h2>
+            <h2 id="wl-shop-heading" tabIndex={-1}>The Shop</h2>
             <span className="wl-adm-ws-meta">in shop · {shop.length}</span>
             <span style={{ flex: 1 }} />
             {shopHot && <span className="wl-adm-ws-saved">drop to sell ↓</span>}
@@ -918,8 +977,11 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
               </div>
             ))}
         </section>
+        )}
       </div>
+      )}
 
+      {bandShown && !libMin && (
       <div
         className="wl-adm-ws-resize"
         role="separator"
@@ -935,10 +997,21 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
       >
         <span className="grip" aria-hidden="true" />
       </div>
+      )}
 
       {/* LIBRARY */}
+      {!libMin && (
       <section className="wl-adm-ws-library" aria-label="Library">
         <div className="wl-adm-ws-head open" style={{ flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="wl-adm-ws-min"
+            aria-label="Minimize the Library"
+            aria-expanded
+            onClick={() => minimizePane('lib')}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
+          </button>
           <h2 id="wl-library-heading" tabIndex={-1}>
             Library
           </h2>
@@ -1105,10 +1178,45 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
           </div>
         )}
       </section>
+      )}
+
+      {!bandShown && libMin && (
+        <div className="wl-adm-ws-void">All panes minimized — pick a chip above.</div>
+      )}
 
       <div ref={liveRef} aria-live="polite" className="wl-adm-sr-only" />
       </div>
     </>
+  );
+}
+
+// A minimized pane, shown as a restore chip in the top tray. Module scope.
+function PaneChip({
+  pane,
+  label,
+  count,
+  note,
+  onRestore,
+}: {
+  pane: 'wall' | 'shop' | 'lib';
+  label: string;
+  count: number;
+  note?: string;
+  onRestore: (pane: 'wall' | 'shop' | 'lib') => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="wl-adm-ws-chip"
+      data-chip={pane}
+      aria-label={`Restore ${label}${note ? `, ${note}` : ''}`}
+      aria-expanded={false}
+      onClick={() => onRestore(pane)}
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+      <span className="name">{label}</span>
+      <span className="count">{note ?? count}</span>
+    </button>
   );
 }
 
