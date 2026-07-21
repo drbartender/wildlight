@@ -749,8 +749,12 @@ the production `DATABASE_URL`. **Confirm whether it does** before continuing.
 Against production:
 
 ```sql
-CREATE TABLE artworks_order_backup_20260721 AS
-  SELECT id, display_order, collection_id, collection_order FROM artworks;
+-- NOTE: no collection_order. The whole point is to snapshot BEFORE the
+-- migration, and that column does not exist until the migration adds it, so
+-- the original version of this statement would have failed.
+CREATE TABLE IF NOT EXISTS artworks_order_backup_20260721 AS
+  SELECT id, slug, status, display_order, collection_id, NOW() AS captured_at
+  FROM artworks;
 
 -- Shape of the data going in. Expect many nonzero values: import-manifest wrote
 -- per-collection indices into display_order.
@@ -879,7 +883,34 @@ Expected: `1`
 Run: `grep -B1 '^BEGIN$' lib/schema.sql`
 Expected: the preceding line is `DO $$`
 
-- [ ] **Step 3: Run the migration for real, twice, against a throwaway branch**
+- [x] **Step 3: Run the migration for real, twice, against a throwaway branch**
+
+**DONE 2026-07-21.** Neon project `sweet-dew-84186427` (Wild Light Shop, PG 17),
+branch `ci-shop-order-verify` / `br-weathered-darkness-a4e7z25i` off
+`production`, auto-expiring 2026-07-23. Snapshot taken on `production` first
+(107 rows, 26 published). Results:
+
+| assertion | result |
+|---|---|
+| dense 1..N over published | 26 rows, lo 1, hi 26, 26 distinct (was **8 distinct** before) |
+| non-published `collection_order` untouched | 0 dirty |
+| per-collection dense | The Sun 19/19, The Land 5/5, The Night 1/1 |
+| order preserved vs snapshot | 26 compared, **0 rank changes** |
+| marker | one row, value `1` |
+| re-run is a no-op | run 2 clean |
+| **marker guard actually fires** | row 241 set to 9999, run 3, **still 9999** |
+
+Two things the run taught that the plan had wrong or unstated:
+
+- The Step 0 snapshot statement referenced `collection_order`, which cannot
+  exist yet. Corrected above.
+- **11 non-published rows still carry a nonzero `display_order`** after the
+  backfill. That is correct and intended (the densify is published-only), but
+  the plan implied everything non-published sits at 0. Those are the legacy
+  drafts whose stale manifest indices Rule 2 discards on publish. Assertion 2
+  is about `collection_order`, which IS 0 across the board.
+
+The original instructions follow, for a re-run.
 
 Re-reading SQL cannot detect a wrong `PARTITION BY`, a wrong join, or a marker
 check that never fires. Create a scratch Neon branch from production, point
