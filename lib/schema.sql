@@ -640,3 +640,79 @@ ALTER TABLE voice_ab_pairs ADD CONSTRAINT voice_ab_pairs_pick_chk
 
 CREATE INDEX IF NOT EXISTS idx_voice_ab_pairs_judged
   ON voice_ab_pairs(judged_at DESC NULLS LAST);
+
+-- Shop ordering ------------------------------------------------------------
+-- Generic key/value settings. There was no settings store before this; the
+-- admin Settings page is account, env masks, and integration health only.
+CREATE TABLE IF NOT EXISTS site_settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- 12 preserves the previous hardcoded /shop LIMIT exactly, so the deploy
+-- changes nothing visible until an admin changes it.
+INSERT INTO site_settings (key, value) VALUES ('shop_index_limit', '12')
+  ON CONFLICT (key) DO NOTHING;
+
+-- collection_order: position within the row's OWN collection. Meaningful only
+-- relative to collection_id. One column suffices because an artwork belongs to
+-- exactly one collection; a join table would model a many-to-many that does not
+-- exist. 0 = never placed (the sentinel the publish rules depend on).
+ALTER TABLE artworks
+  ADD COLUMN IF NOT EXISTS collection_order INT NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_artworks_collection_order
+  ON artworks(collection_id, collection_order);
+
+-- One-time densify of BOTH orders, from the sort key visitors already see, so
+-- nothing reshuffles on deploy.
+--
+-- PUBLISHED ROWS ONLY. Every public consumer of both orders filters to
+-- status='published', so only published rows have a position that means
+-- anything. Ranking all rows would hand existing drafts positions interleaved
+-- among the published ones, and publishing such a draft later would drop it into
+-- the MIDDLE of the sequence (possibly above the cut line, displacing
+-- something) instead of appending. Leaving non-published rows at 0 is what makes
+-- append-on-entry work.
+--
+-- MARKER-GUARDED. This file re-runs on every build, and a densify that re-ran
+-- every deploy would fight the append rules: a piece published at MAX+1 would be
+-- silently re-ranked on the next deploy.
+--
+-- lib/migrate.ts sends this whole file through ONE pool.query with no explicit
+-- transaction control, so Postgres runs it as a single implicit transaction: the
+-- DO block cannot half-run, and a failure later in the file rolls the marker
+-- back too, so the backfill retries on the next build instead of being skipped.
+-- Do not split the migration, and never add a statement-level BEGIN/COMMIT or a
+-- non-transactional statement (CREATE INDEX CONCURRENTLY, VACUUM) to this file.
+--
+-- THE MARKER IS DATA, NOT SCHEMA. If collection_order or display_order is ever
+-- dropped and re-added, this row survives and the backfill silently skips,
+-- leaving every collection page sorted by id. Delete the
+-- 'shop_order_backfilled' row in the same breath as any such drop.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM site_settings WHERE key = 'shop_order_backfilled')
+  THEN
+    WITH ranked AS (
+      SELECT id, ROW_NUMBER() OVER (
+               PARTITION BY collection_id ORDER BY display_order, id
+             ) AS ord
+      FROM artworks
+      WHERE collection_id IS NOT NULL AND status = 'published'
+    )
+    UPDATE artworks a SET collection_order = r.ord FROM ranked r WHERE a.id = r.id;
+
+    WITH ranked AS (
+      SELECT id, ROW_NUMBER() OVER (ORDER BY display_order, id) AS ord
+      FROM artworks WHERE status = 'published'
+    )
+    UPDATE artworks a SET display_order = r.ord FROM ranked r WHERE a.id = r.id;
+
+    -- ON CONFLICT DO NOTHING is required, not decorative: two concurrent builds
+    -- (preview + prod, or a redeploy) both see no marker and both densify, and a
+    -- bare INSERT raises 23505 on the second, aborting the whole implicit
+    -- transaction and failing that deploy.
+    INSERT INTO site_settings (key, value) VALUES ('shop_order_backfilled', '1')
+      ON CONFLICT (key) DO NOTHING;
+  END IF;
+END $$;
