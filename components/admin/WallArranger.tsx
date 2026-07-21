@@ -108,6 +108,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
   const lastClickedRef = useRef<number | null>(null);
   const [bandH, setBandH] = useState<number | null>(null);
   const resizeRef = useRef<{ startY: number; startH: number } | null>(null);
+  const bandIntentRef = useRef<number | null>(null);
   const [actionErr, setActionErr] = useState<string | null>(null);
 
   const inFlight = busy || savingOrder;
@@ -122,15 +123,33 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
       /* ignore */
     }
   }, []);
+  // MEASURE the real container instead of guessing the chrome. `.wl-adm-wall`
+  // is flex:1 under the top bar AND the chip tray, so its clientHeight already
+  // accounts for both — a chip appearing shrinks it and the band re-clamps.
+  // (A hardcoded reserve was ~41px short even before the tray existed, and the
+  // tray's ~37px pushed a maxed band into clipping the Library unreachably.)
   function clampBand(h: number): number {
-    // Reserve the real non-band chrome above the Library floor: top padding +
-    // wall header + gaps + the resize handle + the 220px Library floor (~340),
-    // so a maxed band can't clip the Library inside the overflow:hidden box.
-    const max = Math.max(160, window.innerHeight - 340);
-    return Math.round(Math.max(120, Math.min(max, h)));
+    const HANDLE = 12; // resize handle
+    const LIB_FLOOR = 220; // .wl-adm-ws-library min-height
+    const wall = document.querySelector<HTMLElement>('.wl-adm-wall.ws-fixed');
+    let max = window.innerHeight - 380; // fallback before mount
+    if (wall) {
+      const cs = getComputedStyle(wall);
+      const pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+      const gap = parseFloat(cs.rowGap) || 14;
+      const errH = wall.querySelector('.wl-adm-wall-err')?.getBoundingClientRect().height ?? 0;
+      // Column children: [error?] + band + handle + library.
+      max = wall.clientHeight - pad - errH - HANDLE - LIB_FLOOR - gap * (errH ? 3 : 2);
+    }
+    return Math.round(Math.max(120, Math.min(Math.max(160, max), h)));
   }
-  // Re-clamp a customised band height when the window shrinks, so a band sized
-  // on a tall monitor can't later overflow the Library.
+  // Re-clamp a customised band height whenever the space available changes:
+  // the window resizing, OR a pane minimizing/restoring (the tray mounting
+  // steals height from the Library, making a previously-legal band illegal).
+  useEffect(() => {
+    setBandH((h) => (h == null ? h : clampBand(h)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallMin, shopMin, libMin]);
   useEffect(() => {
     function onResize() {
       setBandH((h) => (h == null ? h : clampBand(h)));
@@ -147,19 +166,23 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
   function onResizeMove(e: React.PointerEvent) {
     const s = resizeRef.current;
     if (!s) return;
-    setBandH(clampBand(s.startH + (e.clientY - s.startY)));
+    const h = clampBand(s.startH + (e.clientY - s.startY));
+    bandIntentRef.current = h;
+    setBandH(h);
   }
   function onResizeUp(e: React.PointerEvent) {
     if (!resizeRef.current) return;
     resizeRef.current = null;
     (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
-    const band = document.querySelector<HTMLElement>('.wl-adm-ws-shelves');
-    if (band) {
-      try {
-        window.localStorage.setItem('wl-wall-bandh', String(Math.round(band.getBoundingClientRect().height)));
-      } catch {
-        /* ignore */
-      }
+    // Persist the INTENDED height, not the measured one: the band is
+    // content-sized under its max-height, so a short/minimized shelf renders
+    // smaller than the preference and measuring would ratchet it down.
+    const v = bandIntentRef.current;
+    if (v == null) return;
+    try {
+      window.localStorage.setItem('wl-wall-bandh', String(v));
+    } catch {
+      /* ignore */
     }
   }
   function onResizeKey(e: React.KeyboardEvent) {
@@ -168,6 +191,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
     const band = document.querySelector<HTMLElement>('.wl-adm-ws-shelves');
     const cur = bandH ?? (band ? band.getBoundingClientRect().height : 260);
     const h = clampBand(cur + (e.key === 'ArrowDown' ? 24 : -24));
+    bandIntentRef.current = h;
     setBandH(h);
     try {
       window.localStorage.setItem('wl-wall-bandh', String(h));

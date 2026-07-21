@@ -3581,13 +3581,18 @@
 
 /* Minimized-pane tray: a row of restore chips between the top bar and the panes. */
 .wl-adm-ws-tray { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 24px 0; }
-.wl-adm-ws-chip { display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--adm-rule); background: var(--adm-card); color: var(--adm-ink); cursor: pointer; font-size: 12px; }
+/* --adm-rule was ~1.3:1 against the page — the chips are the ONLY way back to
+   a minimized pane, so their boundary has to actually read. */
+.wl-adm-ws-chip { display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--adm-muted); background: var(--adm-card); color: var(--adm-ink); cursor: pointer; font-size: 12px; }
 .wl-adm-ws-chip:hover { border-color: var(--adm-ink); }
 .wl-adm-ws-chip:focus-visible { outline: 2px solid var(--adm-blue); outline-offset: 2px; }
 .wl-adm-ws-chip svg { color: var(--adm-muted); }
 .wl-adm-ws-chip .name { font-weight: 600; }
 .wl-adm-ws-chip .count { font-family: var(--f-mono), monospace; font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--adm-ink-2); }
-.wl-adm-ws-void { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; color: var(--adm-muted); font-size: 13px; }
+/* min-height so it still reads as an empty state outside the fixed-pane
+   regime, where flex:1 is inert (.wl-adm-wall is display:block there).
+   ink-2, not muted — muted is sub-AA in both themes. */
+.wl-adm-ws-void { flex: 1 1 auto; min-height: 160px; display: flex; align-items: center; justify-content: center; color: var(--adm-ink-2); font-size: 13px; }
 /* No `.stacked` flip: switching to a column made the band TALLER when one shelf
    was minimized, shrinking the Library — the opposite of the intent. Keeping the
    grid means a collapsed shelf just shortens its own column, and collapsing both
@@ -3737,7 +3742,10 @@
   .wl-adm-wall.ws-fixed .wl-adm-ws-shelf:only-child { flex: 1 1 0; }
   /* Library minimized → the band fills the whole column. Scoped inside the media
      query so it beats the base `.ws-fixed .wl-adm-ws-shelves` rule. */
-  .wl-adm-wall.ws-fixed .wl-adm-ws-shelves[data-lib-min="true"] { flex: 1 1 auto; max-height: none; }
+  /* align-items:stretch so the open shelves actually FILL the taller band —
+     with flex-start a lone shelf stopped at content height and left a dead
+     zone below it, so the reclaimed space wasn't usable. */
+  .wl-adm-wall.ws-fixed .wl-adm-ws-shelves[data-lib-min="true"] { flex: 1 1 auto; max-height: none; align-items: stretch; }
 
   .wl-adm-wall.ws-fixed .wl-adm-ws-resize {
     display: flex; align-items: center; justify-content: center;
