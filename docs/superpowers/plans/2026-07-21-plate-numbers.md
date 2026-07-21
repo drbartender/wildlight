@@ -56,6 +56,7 @@ Task 2 **adds** `formatPlate` while keeping `plateNumber`, which is what lets th
 - `app/(shop)/shop/cart/page.tsx`, `app/(shop)/shop/checkout/page.tsx`: render the stored number.
 - `app/(shop)/contact/page.tsx`: reads a validated `&plate=` param.
 - `app/admin/artworks/[id]/page.tsx`: read-only Plate field.
+- `app/admin/admin.css`: `.wl-adm-field-static`, for that field's value.
 
 **Created:**
 - `tests/lib/plate-number.test.ts`
@@ -230,8 +231,17 @@ git commit -m "feat(plate): stored accession number column, scattered by a copri
 
 - [ ] **Step 6: Push and confirm on production**
 
-This push is safe to make alone: the column is additive and nothing reads it,
-so there is zero rendered change.
+**Run the SQL review gate first** (see Review cadence). The sequence, the
+permutation and the idempotency guards are the entire risk of this task, and
+this is the last point before they reach the real database. Restated here
+because a fresh session executing Task 1 never sees the header.
+
+Push Tasks 1, 2 and 7 together (see Push grouping): all three are invisible on
+the storefront, and together they let Dan see assigned numbers on the artwork
+Edit page before any public number moves.
+
+This push is safe to make: the column is additive and nothing public reads it,
+so there is zero rendered change on the storefront.
 
 ```sql
 SELECT COUNT(*) AS rows, COUNT(DISTINCT plate_no) AS distinct_no,
@@ -565,12 +575,36 @@ Replace `const plate = plateNumber(art.slug);` with:
   const plate = formatPlate(art.plate_no);
 ```
 
-Then delete the numbering that the stored value replaces. Remove `plate_idx`
-and `plate_total` from the `ArtworkRow` interface, remove
-`ROW_NUMBER() OVER (ORDER BY a.display_order, a.id) AS plate_idx,` and
-`COUNT(*) OVER () AS plate_total` from the gating CTE, remove
-`p.plate_idx::int, p.plate_total::int,` from the outer select, and replace the
-heading:
+Then delete the numbering that the stored value replaces, in four places.
+
+**The CTE removal needs a comma fixed, or the page 500s.** The two window
+functions are the LAST items in the gating CTE's select list, and the line above
+them ends with a comma:
+
+```sql
+              a.collection_id, a.edition_size, a.signed,
+              ROW_NUMBER() OVER (ORDER BY a.display_order, a.id) AS plate_idx,
+              COUNT(*) OVER () AS plate_total
+       FROM artworks a
+```
+
+Deleting just the two window-function lines leaves `a.signed,` immediately
+before `FROM`, which is `syntax error at or near "FROM"` and a hard 500 on the
+shop's highest-intent page. **Drop the trailing comma after `a.signed` too**, so
+the result reads:
+
+```sql
+              a.collection_id, a.edition_size, a.signed
+       FROM artworks a
+```
+
+Neither `npm run typecheck` nor `npm test` can see inside a SQL string, so the
+Step 5 browser pass is the only thing that catches this. Do not skip it.
+
+The other three removals are ordinary. Remove `plate_idx` and `plate_total`
+from the `ArtworkRow` interface; remove `p.plate_idx::int, p.plate_total::int,`
+from the outer select (safe: the line above it ends in a comma and a line
+follows); and replace the heading:
 
 ```tsx
         <span>{plate}</span>
@@ -591,12 +625,29 @@ provably blind to the failure mode: four of the five queries go through
 list compiles green and then renders `WL–NaN` at runtime, or 500s outright if
 the artwork page's outer select references a column its CTE never produced.
 
-Reuse the throwaway Neon branch from Task 1 Step 4 rather than a real database:
+Reuse the throwaway Neon branch from Task 1 Step 4 rather than a real database.
+**This path is verified working** (run on 2026-07-21: `/shop` returned 200 and
+rendered real plate numbers against a scratch branch), but two things will make
+it look broken if you do not know them:
+
+- There is no `DATABASE_URL` in `.env.local` on this box, only a
+  `VERCEL_OIDC_TOKEN`. Exporting it is mandatory, not optional. `lib/load-env.ts`
+  is `config({ path: '.env.local' })` with no `override`, so an exported value
+  wins.
+- **Port 3000 is occupied by an unrelated Express service, so Next silently
+  shifts to 3001.** Read the "Local:" line rather than assuming 3000. Probing
+  3000 returns a 404 from the other service, which reads exactly like a broken
+  route.
 
 ```bash
 export DATABASE_URL='<the scratch branch connection string from Task 1>'
 npm run dev
+# then read the "- Local: http://localhost:PORT" line and use that port
 ```
+
+If another `next dev` is already running for this repo it holds a lock and the
+new one exits with "Another next dev server is already running"; stop that one
+first.
 
 Check each of these and confirm a well-formed `WL–NNNN`, never `WL–NaN`:
 
@@ -620,12 +671,25 @@ of the spec, and the wall hover caption is the only one this change adds.
 
 - [ ] **Step 6: Commit the swap**
 
+The artwork page holds BOTH changes (the `formatPlate` swap and the `plate_idx`
+removal), so it cannot be staged wholesale here or Step 7 has nothing left to
+commit. Stage that one file by hunk; the other three are whole-file.
+
+The hunks are far apart (the swap is around lines 7 and 127, the removal around
+24-27, 52-59 and 146-149), so git presents them separately and `git add -p` is
+straightforward: accept the import and `const plate =` hunks, skip the interface,
+CTE, outer-select and heading hunks.
+
 ```bash
 npm run typecheck && npm test
 git add components/site/PlateCard.tsx components/site/Lightbox.tsx \
-        components/site/VintageWall.tsx "app/(shop)/shop/artwork/[slug]/page.tsx"
+        components/site/VintageWall.tsx
+git add -p "app/(shop)/shop/artwork/[slug]/page.tsx"   # swap hunks only
 git commit -m "feat(plate): render the stored number on every server surface"
 ```
+
+If splitting proves fiddly, the alternative is to do Step 4's two edits as two
+passes in the first place: swap first, commit, then remove `plate_idx`, commit.
 
 **Do not push.** The tree is mid-swap: these surfaces now show the stored
 number while the cart, checkout and contact page still derive the old hash, so
@@ -915,7 +979,7 @@ In `app/admin/admin.css`:
 /* Read-only value inside an AdminField, styled to match an input's text
    without looking editable. */
 .wl-adm-field-static {
-  font-family: var(--f-mono), monospace;
+  font-family: var(--f-mono), 'JetBrains Mono', monospace;
   font-size: 13px;
   color: var(--adm-ink-2);
 }
@@ -967,13 +1031,20 @@ the contact page imports the latter as of Task 6, and a literal reading of
 - [ ] **Step 3: Typecheck, test, build, commit**
 
 ```bash
+export DATABASE_URL='<the scratch branch connection string from Task 1>'
 npm run typecheck && npm test && npm run build
 git add lib/plate-number.ts
 git commit -m "refactor(plate): delete the slug-derived hash"
 ```
 
-`npm run build` is required here, not optional: it is the only gate that
-catches a server module reaching the client bundle.
+`npm run build` is required here, not optional: it is the only gate that catches
+a server module reaching the client bundle.
+
+**Export `DATABASE_URL` first.** `build` is `tsx lib/migrate.ts && next build`,
+so it applies `lib/schema.sql` to whatever the connection string resolves to
+before it bundles anything. Point it at the scratch branch, or use
+`npm run build:skip-migrate` if you only want the bundle check. Do not run it
+bare and hope.
 
 ---
 
@@ -1000,9 +1071,15 @@ This runs on the **scratch branch**, before the push, because the change is
 one-way: after the push, "the number is wrong on the portfolio page" is not a
 bug you fix, it is a second renumbering.
 
-The whole point is that a piece has *one* number. Pick a published, buyable
-artwork that is **also `on_wall`** (needed for surfaces 5 and 6) and confirm all
-of these render the same `WL–NNNN`:
+The whole point is that a piece has *one* number. Picking the wrong piece makes
+two surfaces silently absent, which reads as a pass. It must be published,
+buyable, **`on_wall`** (surfaces 6 and the lightbox), **inside the `/shop` cut**
+(that page is `LIMIT NULLIF($1,0)` with `shop_index_limit` seeded to 12, so a
+piece at position 13 never appears on surface 1), and **among the first four of
+its collection** (the related rail is `ORDER BY a.collection_order LIMIT 4`, so
+surface 5 is otherwise empty).
+
+Confirm all of these render the same `WL–NNNN`:
 
 1. its tile on `/shop`
 2. its tile on `/shop/collections/<slug>`
