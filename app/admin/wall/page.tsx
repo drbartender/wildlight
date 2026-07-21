@@ -1,6 +1,7 @@
 import { pool } from '@/lib/db';
 import { WallArranger } from '@/components/admin/WallArranger';
 import type { LibraryPhoto } from '@/lib/wall-arrange';
+import { SHOP_INDEX_LIMIT_DEFAULT } from '@/lib/shop-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,5 +37,10 @@ export default async function AdminWallPage() {
   } catch (err) {
     console.error('[admin/wall] load failed:', err);
   }
-  return <WallArranger photos={photos} />;
+  // collections and the /shop cap are wired to real queries in the next step.
+  // Passing the neutral values here keeps this commit a pure extraction with no
+  // behaviour change.
+  return (
+    <WallArranger photos={photos} collections={[]} shopIndexLimit={SHOP_INDEX_LIMIT_DEFAULT} />
+  );
 }

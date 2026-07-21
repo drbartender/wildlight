@@ -3,6 +3,9 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AdminTopBar } from './AdminTopBar';
+import { ShopShelf } from './ShopShelf';
+import { EditLink, RemoveButton } from './TileActions';
+import { isTimeout, mutationTimeout, type MutResult } from '@/lib/admin-fetch';
 import {
   applyFilter,
   deriveWallIds,
@@ -13,32 +16,6 @@ import {
   type FilterKey,
   type LibraryPhoto,
 } from '@/lib/wall-arrange';
-
-// Every mutation runs behind `inFlight` so the interaction models can't
-// interleave. A hung request would wedge the page, so abort at 30s (server
-// worst case = 15s connect + 15s statement_timeout). A timed-out request MAY
-// have committed, so callers reconcile by reload rather than rolling back.
-// AbortSignal.timeout is optional-chained for very old engines; fall back to a
-// real controller so the timeout guarantee is never silently dropped.
-function mutationTimeout(): AbortSignal | undefined {
-  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
-    return AbortSignal.timeout(30_000);
-  }
-  if (typeof AbortController === 'undefined') return undefined;
-  const c = new AbortController();
-  setTimeout(() => c.abort(), 30_000);
-  return c.signal;
-}
-function isTimeout(err: unknown): boolean {
-  return (
-    err instanceof DOMException &&
-    (err.name === 'TimeoutError' || err.name === 'AbortError')
-  );
-}
-
-// `timedOut` is a separate flag, not a magic string in `error` — a server body
-// of {error:'timeout'} must not be mistaken for a client-side abort.
-type MutResult = { ok: boolean; status: number; error?: string; timedOut?: boolean };
 
 async function patchArtwork(id: number, body: Record<string, unknown>): Promise<MutResult> {
   try {
@@ -69,7 +46,15 @@ type ConfirmKind = 'wallRemove' | 'shopRemove' | 'del';
 type Confirm = { kind: ConfirmKind; id: number } | null;
 type Drag = { id: number; from: 'lib' | 'wall' } | null;
 
-export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
+export function WallArranger({
+  photos: initial,
+  collections,
+  shopIndexLimit,
+}: {
+  photos: LibraryPhoto[];
+  collections: { id: number; title: string }[];
+  shopIndexLimit: number;
+}) {
   const [photos, setPhotos] = useState<LibraryPhoto[]>(initial);
   const [wallIds, setWallIds] = useState<number[]>(() => deriveWallIds(initial));
   // Mirror of wallIds. commitOrder fires from dragEnd (discrete priority) while
@@ -275,8 +260,8 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
     () => wallIds.map((id) => byId.get(id)).filter((p): p is LibraryPhoto => !!p),
     [wallIds, byId],
   );
-  const shop = useMemo(() => photos.filter(isInShop), [photos]);
-  const blockedCount = useMemo(() => shop.filter((p) => !p.buyable).length, [shop]);
+  // Kept for the top bar's summary only. The shelf derives its own list now.
+  const shopCount = useMemo(() => photos.filter(isInShop).length, [photos]);
   const libList = useMemo(() => {
     const base = applyFilter(photos, filter);
     const q = query.trim().toLowerCase();
@@ -316,6 +301,28 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
 
   function setPhoto(id: number, patch: Partial<LibraryPhoto>) {
     setPhotos((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  }
+
+  // Fold saved shop positions back into `photos` so the shelf's derivation stays
+  // truthful. Without this, any later setPhoto (removeFromShop, placeInShop,
+  // bulkApply) recomputes the shelf from stale positions and visibly snaps it
+  // back to the pre-drag order. Unused until the shelf can reorder; wired now so
+  // the prop contract is settled while the extraction is the only change.
+  function applyPositions(
+    updates: { id: number; display_order?: number; collection_order?: number }[],
+  ) {
+    const patch = new Map(updates.map((u) => [u.id, u]));
+    setPhotos((ps) =>
+      ps.map((p) => {
+        const u = patch.get(p.id);
+        if (!u) return p;
+        return {
+          ...p,
+          display_order: u.display_order ?? p.display_order,
+          collection_order: u.collection_order ?? p.collection_order,
+        };
+      }),
+    );
   }
   // A stale row (deleted/retired elsewhere) returns 404: drop it everywhere
   // rather than offering a retry that would 404 again.
@@ -746,8 +753,8 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
   };
 
   const dragHd = drag ? byId.get(drag.id)?.hd : undefined;
-  const shopHot = dropTarget === 'shop' && !!drag && !!dragHd;
-  const shopBad = dropTarget === 'shop' && !!drag && !dragHd;
+  // shopHot/shopBad moved into ShopShelf, which derives them from dropTarget +
+  // dragHd. `dropTarget === 'shop'` already implies a live library drag.
 
   // ── Panes: minimize to a chip, restore from it ───────────────────────
   const bandShown = !wallMin || !shopMin;
@@ -798,7 +805,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
     <>
       <AdminTopBar
         title="Wall & shop"
-        subtitle={`${wall.length} on the wall · ${shop.length} in the shop`}
+        subtitle={`${wall.length} on the wall · ${shopCount} in the shop`}
         actions={
           <>
             {/* Fixed-width status so the buttons don't slide on every mutation. */}
@@ -821,7 +828,7 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
       {anyMin && (
         <div className="wl-adm-ws-tray" role="group" aria-label="Minimized panes">
           {wallMin && <PaneChip pane="wall" label="The Wall" count={wall.length} onRestore={restorePane} />}
-          {shopMin && <PaneChip pane="shop" label="The Shop" count={shop.length} onRestore={restorePane} />}
+          {shopMin && <PaneChip pane="shop" label="The Shop" count={shopCount} onRestore={restorePane} />}
           {libMin && (
             <PaneChip
               pane="lib"
@@ -966,71 +973,23 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
         )}
 
         {/* THE SHOP */}
-        {!shopMin && (
-        <section
-          className={`wl-adm-ws-shelf shop ${shopHot ? 'hot-ok' : ''} ${shopBad ? 'hot-bad' : ''}`}
-          aria-label="The Shop"
-          onDragOver={overShelf('shop')}
-          onDragLeave={leaveShelf}
-          onDrop={dropOnShop}
-        >
-          <div className={`wl-adm-ws-head ${shopMin ? '' : 'open'}`}>
-            <button
-              type="button"
-              className="wl-adm-ws-min"
-              aria-label="Minimize the Shop"
-              title="Minimize the Shop"
-              aria-expanded
-              onClick={() => minimizePane('shop')}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
-            </button>
-            <h2 id="wl-shop-heading" tabIndex={-1}>The Shop</h2>
-            <span className="wl-adm-ws-meta">in shop · {shop.length}</span>
-            <span style={{ flex: 1 }} />
-            {shopHot && <span className="wl-adm-ws-saved">drop to sell ↓</span>}
-            {shopBad && <span className="wl-adm-ws-blocked-note">needs a print file ✕</span>}
-            {!shopMin && dropTarget !== 'shop' && (
-              <span className="wl-adm-ws-note">
-                {blockedCount > 0
-                  ? `${shop.length - blockedCount} buyable, ${blockedCount} hidden`
-                  : 'Exactly what customers can buy'}
-              </span>
-            )}
-          </div>
-          {!shopMin &&
-            (shop.length === 0 ? (
-              <div className="wl-adm-ws-empty">Drag photos with a print file here to put them up for sale.</div>
-            ) : (
-              <div className="wl-adm-ws-grid">
-                {shop.map((p) => (
-                  <figure key={p.id} className="wl-adm-ws-tile" title={p.title}>
-                    {!p.buyable && (
-                      <div className="wl-adm-ws-badges">
-                        <span className="wl-adm-ws-badge blocked">hidden · no sizes available</span>
-                      </div>
-                    )}
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={p.image_web_url} alt={p.title} draggable={false} />
-                    <figcaption className="wl-adm-ws-cap">
-                      <EditLink id={p.id} title={p.title} />
-                      <RemoveButton
-                        confirming={confirm?.kind === 'shopRemove' && confirm.id === p.id}
-                        disabled={inFlight}
-                        label={`Remove ${p.title} from the shop`}
-                        onClick={() =>
-                          confirm?.kind === 'shopRemove' && confirm.id === p.id
-                            ? void removeFromShop(p.id)
-                            : setConfirm({ kind: 'shopRemove', id: p.id })
-                        }
-                      />
-                    </figcaption>
-                  </figure>
-                ))}
-              </div>
-            ))}
-        </section>
-        )}
+        <ShopShelf
+          photos={photos}
+          collections={collections}
+          initialLimit={shopIndexLimit}
+          parentInFlight={inFlight}
+          minimized={shopMin}
+          onMinimize={() => minimizePane('shop')}
+          dropTarget={dropTarget}
+          dragHd={dragHd}
+          onShelfDragOver={overShelf('shop')}
+          onShelfDragLeave={leaveShelf}
+          onShelfDrop={dropOnShop}
+          confirmingId={confirm?.kind === 'shopRemove' ? confirm.id : null}
+          onArmRemove={(id) => setConfirm({ kind: 'shopRemove', id })}
+          onRemoveFromShop={(id) => void removeFromShop(id)}
+          onPositionsSaved={applyPositions}
+        />
       </div>
       )}
 
@@ -1276,64 +1235,6 @@ function PaneChip({
       <span className="name">{label}</span>
       <span className="count">{count}</span>
       {note && <span className="count note">{note}</span>}
-    </button>
-  );
-}
-
-// Jump to the artwork's detail page. Available on EVERY thumbnail (wall, shop
-// and library), styled like the other on-tile actions. Module scope.
-function EditLink({ id, title }: { id: number; title: string }) {
-  return (
-    <Link
-      href={`/admin/artworks/${id}`}
-      className="wl-adm-ws-act"
-      aria-label={`Edit ${title} details`}
-      title={`Edit ${title} details`}
-      draggable={false}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M12 20h9" />
-        <path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4z" />
-      </svg>
-    </Link>
-  );
-}
-
-// Take a photo OFF a shelf. Deliberately NEUTRAL-coloured, unlike the red
-// Library delete: same shape, but this one is reversible and must not read as
-// "destroy". Expands to a word on the confirm step so an icon-only control
-// never commits on a single click. Module scope.
-function RemoveButton({
-  confirming,
-  disabled,
-  label,
-  onClick,
-}: {
-  confirming: boolean;
-  disabled?: boolean;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={`wl-adm-ws-act wl-adm-ws-rm ${confirming ? 'confirming' : ''}`}
-      aria-label={confirming ? `${label} — activate again to confirm` : label}
-      title={label}
-      disabled={disabled}
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-    >
-      {confirming ? (
-        'Remove?'
-      ) : (
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
-          <path d="M18 6L6 18M6 6l12 12" />
-        </svg>
-      )}
     </button>
   );
 }

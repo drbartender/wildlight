@@ -82,7 +82,17 @@ export default async function DevWallPreview({
     <div className="wl-admin-surface" data-theme={theme}>
       <AdminSidebar needsReview={3} email="dan@wildlightimagery.com" />
       <div className="wl-adm-main">
-        <WallArranger photos={mockPhotos(n)} />
+        <WallArranger
+          photos={mockPhotos(n)}
+          collections={[
+            { id: 1, title: 'The Front Range' },
+            { id: 2, title: 'Night Work' },
+          ]}
+          // Deliberately LOW. At ?n=100 the mock yields ~8 buyable pieces, so a
+          // limit of 12 would exceed the buyable count and the cut line could
+          // never render here, which is the one place it can be checked at all.
+          shopIndexLimit={4}
+        />
       </div>
     </div>
   );
