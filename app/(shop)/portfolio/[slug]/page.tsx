@@ -59,7 +59,7 @@ export default async function PortfolioDetail({
        FROM artworks a
        LEFT JOIN collections c ON c.id = a.collection_id
        WHERE a.collection_id = $1 AND a.status = 'published'
-       ORDER BY a.display_order, a.id`,
+       ORDER BY a.collection_order, a.id`,
       [collection.id],
     ),
     pool.query<{ slug: string }>(

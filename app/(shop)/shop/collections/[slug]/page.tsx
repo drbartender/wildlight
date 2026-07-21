@@ -42,7 +42,7 @@ export default async function CollectionDetail({
      WHERE a.collection_id = $1 AND a.status = 'published'
        AND EXISTS (SELECT 1 FROM artwork_variants v
                      WHERE v.artwork_id = a.id AND v.buyable)
-     ORDER BY a.display_order, a.id`,
+     ORDER BY a.collection_order, a.id`,
     [c.id],
   );
   const works = arts.rows;

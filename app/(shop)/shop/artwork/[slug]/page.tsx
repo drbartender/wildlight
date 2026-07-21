@@ -109,7 +109,7 @@ export default async function ArtworkPage({
            WHERE c.slug = $1 AND a.status = 'published' AND a.slug <> $2
              AND EXISTS (SELECT 1 FROM artwork_variants v
                           WHERE v.artwork_id = a.id AND v.buyable)
-           ORDER BY a.display_order, a.id
+           ORDER BY a.collection_order, a.id
            LIMIT 4`,
           [art.collection_slug, art.slug],
         )
