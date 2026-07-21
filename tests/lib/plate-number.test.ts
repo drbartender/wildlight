@@ -25,9 +25,15 @@ describe('parsePlateParam', () => {
     expect(parsePlateParam('9099')).toBe(9099);
   });
 
+  // Caught by the range check, having passed the digit-shape check.
   it('rejects out-of-range values', () => {
     expect(parsePlateParam('99')).toBeNull();
     expect(parsePlateParam('9100')).toBeNull();
+  });
+
+  // Caught by the digit-shape check, never reaching the range check. Filed
+  // separately because this file's job is documenting WHICH guard catches what.
+  it('rejects a negative, on shape rather than range', () => {
     expect(parsePlateParam('-4312')).toBeNull();
   });
 

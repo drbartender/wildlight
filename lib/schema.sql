@@ -766,3 +766,34 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_artworks_plate_no ON artworks(plate_no);
 -- No-op on an already-NOT-NULL column: Postgres checks attnotnull and skips
 -- both the change and the verification scan.
 ALTER TABLE artworks ALTER COLUMN plate_no SET NOT NULL;
+
+-- Make the range structural rather than conventional. Without this the column
+-- default is the ONLY thing keeping values inside 100..9099, and it is
+-- bypassable by any direct UPDATE. formatPlate() has no domain guard either,
+-- so an out-of-range value renders as WL-12345 or WL-00-1 rather than failing
+-- loudly. DROP-then-ADD because Postgres has no ADD CONSTRAINT IF NOT EXISTS
+-- (same pattern as artworks_status_chk above).
+ALTER TABLE artworks DROP CONSTRAINT IF EXISTS artworks_plate_no_chk;
+ALTER TABLE artworks ADD CONSTRAINT artworks_plate_no_chk
+  CHECK (plate_no BETWEEN 100 AND 9099);
+
+-- TWO WAYS TO DESTROY THIS COLUMN, both silent, both permanent once the
+-- display swap has shipped:
+--
+-- 1. DROPPING AND RE-ADDING plate_no reissues every number. The backfill's
+--    `WHERE plate_no IS NULL` guard sees a fresh NULL column and renumbers the
+--    whole catalogue on the next build. Harmless while nothing renders it;
+--    after the swap, every piece a customer has seen gets a new number.
+--    There is no marker to protect this the way the shop-order densify above
+--    is protected: the column's own presence IS the guard.
+--
+-- 2. ANY setval THAT REWINDS THE SEQUENCE eventually mints a duplicate, and a
+--    duplicate makes CREATE UNIQUE INDEX below fail. Because migrate.ts sends
+--    this whole file as one implicit transaction, that failure aborts
+--    EVERYTHING and no environment can deploy until the data is fixed by hand.
+--    Recovery: find the collisions
+--      SELECT plate_no, array_agg(id) FROM artworks
+--       GROUP BY plate_no HAVING COUNT(*) > 1;
+--    renumber all but one of each by hand to an unused value in range, then
+--    advance the sequence past the highest DRAW taken (not the highest value
+--    stored: the permutation makes those unrelated), then re-run migrate.

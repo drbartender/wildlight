@@ -26,8 +26,12 @@ export function formatPlate(n: number): string {
  * The contact page takes this from a query string, so it is
  * attacker-controllable via a crafted link. Without validation, `?plate=abc`
  * would render "WL–NaN" in the ref pill, the seeded message and the email
- * subject, and a shared link could show a fabricated plate number as if it
- * were official.
+ * subject.
+ *
+ * This checks SHAPE AND RANGE ONLY, never existence: `?plate=4312` for a
+ * number belonging to no artwork, or to a different one, passes every check
+ * here. Resolving that would need a database round trip on a contact form,
+ * which is not worth it for a reference label.
  *
  * Digit-shape FIRST, before Number(). `Number.isInteger(Number(x))` is not a
  * digit check: Number('4e3') is 4000, Number('0x1F4') is 500, Number('+500')
