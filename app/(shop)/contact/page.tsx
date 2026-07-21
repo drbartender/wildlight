@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { plateNumber } from '@/lib/plate-number';
+import { formatPlate, parsePlateParam } from '@/lib/plate-number';
 
 type Reason =
   | 'events'
@@ -47,6 +47,17 @@ function ContactForm() {
       : 'commission';
   const piece = qp.get('piece') || legacyLicenseSlug || '';
 
+  // Attacker-controllable via a crafted link, so validate rather than trust.
+  // Without this, ?plate=abc renders "WL-NaN" in the ref pill, the seeded
+  // message and the email subject, and a shared link could show a fabricated
+  // plate number as if it were official. parsePlateParam checks digit shape
+  // before Number(), because '4e3' and '0x1F4' are integers in range.
+  //
+  // Absent is normal, not exceptional: old links and the legacy ?license= path
+  // cannot carry it. Every render site below omits the plate rather than
+  // showing a partial.
+  const plateNo = parsePlateParam(qp.get('plate'));
+
   const [reason, setReason] = useState<Reason>(initialReason);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -62,7 +73,7 @@ function ContactForm() {
   // user doesn't have to re-state which plate this is about.
   useEffect(() => {
     if (!piece || message) return;
-    const plate = plateNumber(piece);
+    const plate = plateNo != null ? formatPlate(plateNo) : null;
     const verb =
       reason === 'commission'
         ? 'a commission related to'
@@ -71,7 +82,11 @@ function ContactForm() {
           : reason === 'corporate-gift'
             ? 'a corporate gift version of'
             : 'this plate';
-    setMessage(`I'm interested in ${verb} ${plate} (${piece}).\n\n`);
+    setMessage(
+      plate
+        ? `I'm interested in ${verb} ${plate} (${piece}).\n\n`
+        : `I'm interested in ${verb} ${piece}.\n\n`,
+    );
     // deps intentionally narrow — this is a one-shot seed on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -79,9 +94,16 @@ function ContactForm() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setState('loading');
-    const subject = piece
-      ? `${REASON_LABEL[reason]} — ${plateNumber(piece)}`
-      : REASON_LABEL[reason];
+    // Falls back to the slug rather than dropping the reference: on a legacy
+    // link the piece is known but its number is not, and a subject naming the
+    // piece is more useful than one naming only the reason. The em dash is
+    // pre-existing copy preserved through a mechanical edit, not new text.
+    const subject =
+      piece && plateNo != null
+        ? `${REASON_LABEL[reason]} — ${formatPlate(plateNo)}`
+        : piece
+          ? `${REASON_LABEL[reason]} — ${piece}`
+          : REASON_LABEL[reason];
     const topic = piece ? `${reason}:${piece}` : reason;
     const res = await fetch('/api/contact', {
       method: 'POST',
@@ -148,11 +170,19 @@ function ContactForm() {
               autoComplete="off"
             />
           </label>
+          {/* Omit the NUMBER, not the pill, when there is no usable plate: an
+              empty <b> renders a bold nothing followed by a stray separator.
+              Old links and the legacy ?license= path cannot carry &plate=, so
+              absent is normal here, not exceptional. */}
           {piece && (
             <div className="ref-pill">
               <span>Re:</span>
-              <b>{plateNumber(piece)}</b>
-              <span>·</span>
+              {plateNo != null && (
+                <>
+                  <b>{formatPlate(plateNo)}</b>
+                  <span>·</span>
+                </>
+              )}
               <span>{piece}</span>
             </div>
           )}

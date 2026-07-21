@@ -113,7 +113,7 @@ export function OrderCard({
         <div className="actions" style={{ marginTop: 24 }}>
           <Link
             className="wl-btn ghost"
-            href={`/contact?reason=commission&piece=${artworkSlug}`}
+            href={`/contact?reason=commission&piece=${artworkSlug}&plate=${plateNo}`}
           >
             Commission or gift this →
           </Link>
@@ -227,7 +227,7 @@ export function OrderCard({
         </button>
         <Link
           className="wl-btn ghost"
-          href={`/contact?reason=commission&piece=${artworkSlug}`}
+          href={`/contact?reason=commission&piece=${artworkSlug}&plate=${plateNo}`}
         >
           Commission or gift this →
         </Link>
@@ -240,7 +240,7 @@ export function OrderCard({
 
       <Link
         className="wl-art-license"
-        href={`/contact?reason=license&piece=${artworkSlug}`}
+        href={`/contact?reason=license&piece=${artworkSlug}&plate=${plateNo}`}
       >
         License this image →
       </Link>
