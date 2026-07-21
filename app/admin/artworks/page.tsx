@@ -400,6 +400,9 @@ export default function AdminArtworksPage() {
               ? `Applying ${batchProgress.done}/${batchProgress.total}…`
               : `Apply full template to ${emptyVariants.length} empty`}
           </button>
+          <Link href="/admin/collections" className="wl-adm-btn small">
+            Collections
+          </Link>
           <Link
             href="/admin/artworks/bulk-upload"
             className="wl-adm-btn small"

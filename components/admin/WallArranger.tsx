@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { AdminTopBar } from './AdminTopBar';
 import { formatUSD } from '@/lib/money';
 import {
   applyFilter,
@@ -705,24 +706,31 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
   const shopBad = dropTarget === 'shop' && !!drag && !dragHd;
 
   return (
-    <div className="wl-adm-wall ws-fixed">
-      <header className="wl-adm-wall-head">
-        <div>
-          <h1>Wall &amp; shop</h1>
-        </div>
-        <div className="actions">
-          {/* Always rendered at a fixed width so "Add photos" doesn't slide
-              sideways on every mutation. */}
-          <span className="wl-adm-ws-saving" role="status">
-            {inFlight ? 'saving…' : ''}
-          </span>
-          <a className="wl-adm-wall-add" href="/admin/artworks/bulk-upload">
-            Add photos
-          </a>
-        </div>
-      </header>
+    <>
+      <AdminTopBar
+        title="Wall & shop"
+        subtitle={`${wall.length} on the wall · ${shop.length} in the shop`}
+        actions={
+          <>
+            {/* Fixed-width status so the buttons don't slide on every mutation. */}
+            <span className="wl-adm-ws-saving" role="status">
+              {inFlight ? 'saving…' : ''}
+            </span>
+            <Link href="/admin/collections" className="wl-adm-btn small">
+              Collections
+            </Link>
+            <Link
+              href="/admin/artworks/bulk-upload"
+              className="wl-adm-btn small"
+            >
+              Add photos
+            </Link>
+          </>
+        }
+      />
 
-      {actionErr && (
+      <div className="wl-adm-wall ws-fixed">
+        {actionErr && (
         <p className="wl-adm-wall-err" role="alert">
           {actionErr}
         </p>
@@ -1099,7 +1107,8 @@ export function WallArranger({ photos: initial }: { photos: LibraryPhoto[] }) {
       </section>
 
       <div ref={liveRef} aria-live="polite" className="wl-adm-sr-only" />
-    </div>
+      </div>
+    </>
   );
 }
 

@@ -34,7 +34,10 @@ const CATALOG: NavDef[] = [
     label: 'Artworks',
     href: '/admin/artworks',
     icon: 'M4 4h16v12H4zM4 18h10v2H4z',
-    match: ({ path }) => path.startsWith('/admin/artworks'),
+    // Collections has no tab of its own — it's reached via header links on the
+    // Artworks and Wall & shop pages — so keep this pill lit while editing them.
+    match: ({ path }) =>
+      path.startsWith('/admin/artworks') || path.startsWith('/admin/collections'),
   },
   {
     id: 'wall',
@@ -42,13 +45,6 @@ const CATALOG: NavDef[] = [
     href: '/admin/wall',
     icon: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
     match: ({ path }) => path.startsWith('/admin/wall'),
-  },
-  {
-    id: 'collections',
-    label: 'Collections',
-    href: '/admin/collections',
-    icon: 'M3 5h6v6H3zM11 5h10v6H11zM3 13h10v8H3zM15 13h6v8h-6z',
-    match: ({ path }) => path.startsWith('/admin/collections'),
   },
 ];
 
