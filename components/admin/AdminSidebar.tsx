@@ -24,7 +24,11 @@ const NAV: NavDef[] = [
     label: 'Overview',
     href: '/admin',
     icon: 'M3 3h7v7H3zM14 3h7v4h-7zM14 10h7v11h-7zM3 14h7v7H3z',
-    match: (path) => path === '/admin',
+    // Orders has no pill of its own — Overview is the orders screen and
+    // links through to the full list. Equality first, then the orders
+    // prefix: a bare startsWith('/admin') would light this on every
+    // route in the admin.
+    match: (path) => path === '/admin' || path.startsWith('/admin/orders'),
   },
   {
     id: 'artworks',
@@ -42,13 +46,6 @@ const NAV: NavDef[] = [
     href: '/admin/wall',
     icon: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
     match: (path) => path.startsWith('/admin/wall'),
-  },
-  {
-    id: 'orders',
-    label: 'Orders',
-    href: '/admin/orders',
-    icon: 'M4 6h16l-2 12H6zM9 10v6M15 10v6',
-    match: (path) => path.startsWith('/admin/orders'),
   },
   {
     id: 'studio',
@@ -125,8 +122,11 @@ function Item({
 
 export function AdminSidebar({ needsReview, email }: Props) {
   const path = usePathname() || '/admin';
+  // The needs-review count rides on Overview now that Orders has no pill.
+  // It is the only always-visible "something wants you" signal in the admin,
+  // and Overview is both where it is surfaced and where you act on it.
   const items = NAV.map((n) =>
-    n.id === 'orders' && needsReview > 0 ? { ...n, badge: needsReview } : n,
+    n.id === 'dashboard' && needsReview > 0 ? { ...n, badge: needsReview } : n,
   );
   const initials = email.slice(0, 2).toUpperCase();
 

@@ -774,6 +774,16 @@
 .wl-adm-card .body {
   padding: 18px 20px;
 }
+/* Recent orders on the Overview carries 10 rows now that Orders has no
+   sidebar pill. Cap the height so the card keeps its weight next to the
+   Catalog card in the same row, and scroll the rest. The header stays put
+   because only this wrapper scrolls. */
+.wl-adm-recent-scroll {
+  max-height: 300px;
+  overflow-y: auto;
+  border-bottom-left-radius: var(--adm-radius-lg);
+  border-bottom-right-radius: var(--adm-radius-lg);
+}
 
 /* ─────── TABLE ─────── */
 

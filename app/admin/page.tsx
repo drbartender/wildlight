@@ -127,9 +127,12 @@ export default async function AdminDashboard({
        FROM orders WHERE status = 'needs_review'
        ORDER BY created_at DESC LIMIT 5`,
     ),
+    // Overview is the orders screen — this card is the working list, not a
+    // teaser, so it carries 10 and scrolls. /admin/orders is still one click
+    // away for filtering by status and the columns this card doesn't show.
     pool.query<RecentRow>(
       `SELECT id, customer_name, customer_email, total_cents, status, created_at::text
-       FROM orders ORDER BY created_at DESC LIMIT 5`,
+       FROM orders ORDER BY created_at DESC LIMIT 10`,
     ),
     pool.query<TopArtworkRow>(
       `SELECT
@@ -453,34 +456,36 @@ export default async function AdminDashboard({
                 No orders yet.
               </div>
             ) : (
-              <table className="wl-adm-table">
-                <tbody>
-                  {recent.rows.map((o) => (
-                    <tr key={o.id} className="clickable">
-                      <td className="mono muted" style={{ width: 60, paddingLeft: 20 }}>
-                        <Link href={`/admin/orders/${o.id}`}>#{o.id}</Link>
-                      </td>
-                      <td className="muted" style={{ width: 140 }}>
-                        {fmtWhen(o.created_at)}
-                      </td>
-                      <td>
-                        <Link
-                          href={`/admin/orders/${o.id}`}
-                          style={{ color: 'var(--adm-ink)' }}
-                        >
-                          {o.customer_name || o.customer_email}
-                        </Link>
-                      </td>
-                      <td className="mono" style={{ width: 90 }}>
-                        {formatUSD(o.total_cents)}
-                      </td>
-                      <td className="right" style={{ paddingRight: 20 }}>
-                        <AdminPill status={o.status} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="wl-adm-recent-scroll">
+                <table className="wl-adm-table">
+                  <tbody>
+                    {recent.rows.map((o) => (
+                      <tr key={o.id} className="clickable">
+                        <td className="mono muted" style={{ width: 60, paddingLeft: 20 }}>
+                          <Link href={`/admin/orders/${o.id}`}>#{o.id}</Link>
+                        </td>
+                        <td className="muted" style={{ width: 140 }}>
+                          {fmtWhen(o.created_at)}
+                        </td>
+                        <td>
+                          <Link
+                            href={`/admin/orders/${o.id}`}
+                            style={{ color: 'var(--adm-ink)' }}
+                          >
+                            {o.customer_name || o.customer_email}
+                          </Link>
+                        </td>
+                        <td className="mono" style={{ width: 90 }}>
+                          {formatUSD(o.total_cents)}
+                        </td>
+                        <td className="right" style={{ paddingRight: 20 }}>
+                          <AdminPill status={o.status} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
 
