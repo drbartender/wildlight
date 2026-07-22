@@ -37,6 +37,10 @@ interface NeedsReviewRow {
   customer_email: string;
   total_cents: number;
   notes: string | null;
+  // Full count of the flagged set, not of this page of it. The sidebar
+  // badge is an unbounded COUNT(*) (app/admin/layout.tsx), and this card
+  // is now where that badge sends you, so the two have to agree.
+  total: number;
 }
 interface RecentRow {
   id: number;
@@ -123,7 +127,10 @@ export default async function AdminDashboard({
        WHERE status = 'published' AND image_print_url IS NULL`,
     ),
     pool.query<NeedsReviewRow>(
-      `SELECT id, customer_name, customer_email, total_cents, notes
+      // COUNT(*) OVER() is evaluated before LIMIT, so it returns the size of
+      // the whole flagged set rather than of the five rows shown.
+      `SELECT id, customer_name, customer_email, total_cents, notes,
+              COUNT(*) OVER()::int AS total
        FROM orders WHERE status = 'needs_review'
        ORDER BY created_at DESC LIMIT 5`,
     ),
@@ -184,7 +191,10 @@ export default async function AdminDashboard({
   const catMap: Record<string, number> = { published: 0, draft: 0, retired: 0 };
   for (const r of catalog.rows) catMap[r.status] = r.n;
   const missingCount = missing.rows[0]?.n ?? 0;
-  const needsReviewCount = needs.rows.length;
+  // The true total, not needs.rows.length — that would cap at the LIMIT and
+  // disagree with the sidebar badge the moment a sixth order is flagged.
+  const needsReviewCount = needs.rows[0]?.total ?? 0;
+  const needsReviewHidden = needsReviewCount - needs.rows.length;
   const subCount = sub.rows[0]?.n ?? 0;
   const revTotal = rev.rows[0]?.total ?? 0;
   const revN = rev.rows[0]?.n ?? 0;
@@ -430,6 +440,13 @@ export default async function AdminDashboard({
                       </span>
                     </Link>
                   ))}
+                  {/* The badge counts all of them; this card lists five. Say
+                      so rather than letting the list look complete. */}
+                  {needsReviewHidden > 0 && (
+                    <Link href="/admin/orders" className="wl-adm-review-more">
+                      +{needsReviewHidden} more flagged
+                    </Link>
+                  )}
                 </div>
               )}
             </div>

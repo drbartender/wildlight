@@ -47,7 +47,7 @@ export default async function Settings() {
 
   return (
     <>
-      <AdminTopBar title="Settings" subtitle="Account" />
+      <AdminTopBar title="Settings" />
 
       {/* Atelier layout */}
       <div

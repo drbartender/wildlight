@@ -344,7 +344,7 @@ export default function AdminArtworksPage() {
     <>
       <AdminTopBar
         title="Artworks"
-        subtitle={`Catalog · ${rows.length} ${rows.length === 1 ? 'piece' : 'pieces'}`}
+        subtitle={`${rows.length} ${rows.length === 1 ? 'piece' : 'pieces'}`}
       />
 
       <div className="wl-adm-page tight">

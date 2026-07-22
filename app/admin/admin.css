@@ -206,7 +206,11 @@
   padding-top: 16px;
 }
 
-.wl-adm-nav-item {
+/* Scoped to .wl-admin-surface deliberately: `.wl-admin-surface a` sets
+   `color: inherit` at (0,1,1), which outranks a bare `.wl-adm-nav-item`
+   at (0,1,0). Every item was therefore rendering at --adm-ink and the
+   active row's colour change did nothing. */
+.wl-admin-surface .wl-adm-nav-item {
   width: 100%;
   display: flex;
   align-items: center;
@@ -225,10 +229,18 @@
   background: var(--adm-card);
   color: var(--adm-ink);
 }
+/* Atelier's active state was carrying almost nothing: the fill is 1.09:1
+   against the sidebar and the --adm-rule ring 1.15:1, well under the 3:1
+   WCAG asks of a state indicator. It matters more since the nav collapsed,
+   because one pill now stands in for several destinations and is the only
+   thing saying which one you are inside. --adm-muted takes the ring to
+   3.9:1 without borrowing darkroom's green bar, which would blur the two
+   skins together — the same --adm-rule to --adm-muted move already made
+   for the resize grip and the minimize chevrons. */
 .wl-adm-nav-item.active {
   background: var(--adm-paper);
   color: var(--adm-ink);
-  box-shadow: inset 0 0 0 1px var(--adm-rule);
+  box-shadow: inset 0 0 0 1px var(--adm-muted);
 }
 .wl-admin-surface[data-theme='dark'] .wl-adm-nav-item.active {
   background: var(--adm-card);
@@ -777,12 +789,26 @@
 /* Recent orders on the Overview carries 10 rows now that Orders has no
    sidebar pill. Cap the height so the card keeps its weight next to the
    Catalog card in the same row, and scroll the rest. The header stays put
-   because only this wrapper scrolls. */
+   because only this wrapper scrolls.
+
+   The mask is load-bearing, not decoration: overlay scrollbars mean a
+   capped list has no scrollbar to see, and the two skins have different
+   row heights (38.25px atelier, 36px darkroom), so no single max-height
+   bisects a row in both. Whatever row the cut lands on, fading it says
+   "there is more" without depending on where the cut falls. */
 .wl-adm-recent-scroll {
   max-height: 300px;
   overflow-y: auto;
   border-bottom-left-radius: var(--adm-radius-lg);
   border-bottom-right-radius: var(--adm-radius-lg);
+}
+/* Only fade when the list is actually cut. 300px fits 7.8 rows in atelier
+   and 8.3 in darkroom, so nine rows is where it starts overflowing —
+   below that the mask would dim a final row for no reason, which matters
+   here because the real store has two orders, not ten. Re-check the row
+   count if the cap or the row padding moves. */
+.wl-adm-recent-scroll:has(tbody tr:nth-child(9)) {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent);
 }
 
 /* ─────── TABLE ─────── */
@@ -995,6 +1021,19 @@
 }
 .wl-adm-review-row:hover {
   background: var(--adm-chip-track);
+}
+/* Reads as a continuation of the list, not as another flagged order —
+   quieter than a review row, and it goes to the full list. */
+.wl-adm-review-more {
+  display: block;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--adm-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.wl-adm-review-more:hover {
+  color: var(--adm-ink);
 }
 .wl-adm-review-row .id {
   font-family: var(--f-mono), 'JetBrains Mono', monospace;
@@ -1987,6 +2026,17 @@
   }
   .wl-adm-row2 {
     grid-template-columns: 1fr;
+  }
+  /* One column here, so there is no neighbouring card to stay level with —
+     the cap's whole justification is gone. Keeping it would put ~950px of
+     wrapped rows inside a 300px nested touch-scroller, which is worse than
+     letting the card grow and the page scroll. */
+  .wl-adm-recent-scroll {
+    max-height: none;
+    overflow-y: visible;
+  }
+  .wl-adm-recent-scroll:has(tbody tr:nth-child(9)) {
+    mask-image: none;
   }
   .wl-adm-art-detail {
     grid-template-columns: 1fr;

@@ -127,7 +127,7 @@ export default function AdminOrderDetail({
   if (!data) {
     return (
       <>
-        <AdminTopBar title="Order" subtitle="Commerce" />
+        <AdminTopBar title="Order" subtitle="Orders" />
         <div className="wl-adm-page">
           <p style={{ color: 'var(--adm-muted)' }}>Loading…</p>
         </div>
@@ -142,7 +142,7 @@ export default function AdminOrderDetail({
 
   return (
     <>
-      <AdminTopBar title={`Order #${o.id}`} subtitle="Commerce" />
+      <AdminTopBar title={`Order #${o.id}`} subtitle="Orders" />
 
       <div className="wl-adm-page">
         <Link

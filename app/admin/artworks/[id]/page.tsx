@@ -174,7 +174,7 @@ export default function ArtworkEditPage({
   if (!data) {
     return (
       <>
-        <AdminTopBar title="Artwork" subtitle="Catalog" />
+        <AdminTopBar title="Artwork" subtitle="Artworks" />
         <div className="wl-adm-page">
           <p style={{ color: 'var(--adm-muted)' }}>Loading…</p>
         </div>
@@ -191,7 +191,7 @@ export default function ArtworkEditPage({
 
   return (
     <>
-      <AdminTopBar title={a.title} subtitle="Artwork" />
+      <AdminTopBar title={a.title} subtitle="Artworks" />
 
       <div className="wl-adm-page">
         <Link

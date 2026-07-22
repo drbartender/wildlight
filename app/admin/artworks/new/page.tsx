@@ -43,7 +43,7 @@ export default function NewArtwork() {
 
   return (
     <>
-      <AdminTopBar title="New artwork" subtitle="Catalog · Upload" />
+      <AdminTopBar title="New artwork" subtitle="Artworks · Upload" />
 
       <div className="wl-adm-page" style={{ maxWidth: 640 }}>
         <Link

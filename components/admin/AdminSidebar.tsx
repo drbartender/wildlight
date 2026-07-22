@@ -100,6 +100,10 @@ function Item({
     <Link
       href={n.href}
       className={`wl-adm-nav-item ${active ? 'active' : ''}`}
+      // The active state is otherwise purely visual, and since the nav
+      // collapsed, one pill stands in for several destinations — so where
+      // you are is exactly the thing a screen reader can't infer.
+      aria-current={active ? 'page' : undefined}
       onClick={onNavigate}
     >
       <svg
@@ -115,7 +119,17 @@ function Item({
         <path d={n.icon} />
       </svg>
       <span className="wl-adm-nav-item-label">{n.label}</span>
-      {n.badge ? <span className="wl-adm-nav-badge">{n.badge}</span> : null}
+      {n.badge ? (
+        // Without the label this announces as "Overview 3", which says
+        // nothing. The count belongs to orders, not to the page it rides on.
+        <span
+          className="wl-adm-nav-badge"
+          aria-label={`${n.badge} ${n.badge === 1 ? 'order needs' : 'orders need'} review`}
+          title={`${n.badge} ${n.badge === 1 ? 'order needs' : 'orders need'} review`}
+        >
+          {n.badge}
+        </span>
+      ) : null}
     </Link>
   );
 }
@@ -233,7 +247,7 @@ export function AdminSidebar({ needsReview, email }: Props) {
       <aside
         ref={sidebarRef}
         className={`wl-adm-sidebar ${open ? 'is-open' : ''}`}
-        aria-label="Admin navigation"
+        aria-label="Admin sidebar"
         inert={isMobile && !open}
       >
         <div className="wl-adm-sidebar-head">
@@ -258,7 +272,7 @@ export function AdminSidebar({ needsReview, email }: Props) {
           </Link>
         </div>
 
-        <nav className="wl-adm-sidebar-nav">
+        <nav className="wl-adm-sidebar-nav" aria-label="Admin navigation">
           {items.map((n) => (
             <Item
               key={n.id}
