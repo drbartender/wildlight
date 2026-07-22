@@ -614,14 +614,23 @@ html[data-mood='ink'] .wl-surface::after {
 /* Headline left, studio note right, ONE band. Was two stacked sections
    (masthead + lede) totalling 738px, which pushed the first plate below the
    fold on a 900px window. */
+/* Single column by default; the two-column form is opted into at 1080px in
+   the block below. The note needs ~440px before it stops reading as cramped,
+   and the headline needs its own column wide enough to stay on two lines —
+   below 1080px both cannot be true at once, so they stack. */
 .wl-masthead {
   position: relative;
   padding: 56px 56px 44px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
-  gap: 56px;
+  gap: 36px;
   align-items: start;
   border-bottom: 1px solid var(--rule);
+}
+@media (min-width: 1080px) {
+  .wl-masthead {
+    grid-template-columns: minmax(0, 1fr) minmax(360px, 440px);
+    gap: 56px;
+  }
 }
 .wl-masthead::after,
 .wl-sheet::after,
@@ -716,8 +725,13 @@ html[data-mood='ink'] .wl-surface::after {
   background: var(--s-green);
 }
 
-/* The note reads as the masthead's second voice, so it is set well below the
-   display headline rather than at the 19px it had when it owned a band. */
+/* The note reads as the masthead's second voice, so it is set below the
+   display headline rather than at the 19px it had when it owned a band.
+   When stacked it keeps a measure — full width under a 1000px headline
+   would run to ~90 characters a line. */
+.wl-masthead-note {
+  max-width: 560px;
+}
 .wl-masthead-note .label {
   font-family: var(--f-mono);
   font-weight: 500;
@@ -725,23 +739,26 @@ html[data-mood='ink'] .wl-surface::after {
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ink-3);
-  margin-bottom: 14px;
+  margin-bottom: 18px;
 }
+/* Paragraph spacing has to beat the line gap or the two paragraphs read as
+   one block: at 12px against a 26px line-height they did, which is most of
+   why this column looked cramped. */
 .wl-masthead-note p {
   font-family: var(--f-serif);
-  font-size: 16.5px;
-  line-height: 1.6;
+  font-size: 17.5px;
+  line-height: 1.7;
   color: var(--ink-2);
 }
 .wl-masthead-note p + p {
-  margin-top: 12px;
+  margin-top: 18px;
 }
 .wl-masthead-note .sig {
   font-family: var(--f-display);
   font-style: italic;
-  font-size: 21px;
+  font-size: 22px;
   color: var(--ink);
-  margin-top: 12px;
+  margin-top: 18px;
 }
 
 /* Masthead — mobile. Under 760px the note stacks under the headline and the
