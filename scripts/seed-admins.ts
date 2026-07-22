@@ -41,8 +41,12 @@ async function main() {
   const hash = await hashPassword(pass);
   const res = await pool.query(
     `INSERT INTO admin_users (email, password_hash) VALUES ($1, $2)
-     ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash
-     RETURNING id, email`,
+     ON CONFLICT (email) DO UPDATE
+       SET password_hash = EXCLUDED.password_hash,
+           -- rotating a password must invalidate existing sessions
+           -- (lib/session.ts checks session_version per request)
+           session_version = admin_users.session_version + 1
+     RETURNING id, email, session_version`,
     [email, hash],
   );
   // eslint-disable-next-line no-console
