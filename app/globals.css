@@ -624,25 +624,9 @@ html[data-mood='ink'] .wl-surface::after {
   align-items: start;
   border-bottom: 1px solid var(--rule);
 }
-/* max-content on the headline track, not 1fr: the headline needs exactly its
-   own widest line and no more, so everything left over goes to the note. A
-   fixed left track left ~330px of dead space in the middle while the note was
-   squeezed into a column too narrow to read, which is what made it look
-   cramped. Wider means fewer lines, so spending that space horizontally makes
-   the band SHORTER, not taller. max-content also tracks the clamped headline
-   down through the widths on its own. */
-@media (min-width: 1080px) {
-  .wl-masthead {
-    grid-template-columns: max-content minmax(320px, 1fr);
-    gap: 48px;
-  }
-  .wl-masthead-note {
-    /* Hold the right edge. The track is wider than the note's 560px measure
-       on a big screen, and the leftover belongs in the middle gutter rather
-       than stranded to the right of the text. */
-    margin-left: auto;
-  }
-}
+/* The two-column form lives BELOW the base .wl-masthead-note rules, not here.
+   It overrides them, and a media block placed above its base loses at equal
+   specificity — the bug this file has already been bitten by three times. */
 .wl-masthead::after,
 .wl-sheet::after,
 .wl-cindex-head::after,
@@ -771,13 +755,37 @@ html[data-mood='ink'] .wl-surface::after {
   margin-top: 14px;
 }
 
-/* Masthead — mobile. Under 760px the note stacks under the headline and the
-   side stats (still used by the portfolio/collections/journal heads) stack
-   too. The sheet's mobile rules live below the sheet block, not here — see
-   the note there. */
+/* Two columns: headline left, note right. Placed here, after the base
+   .wl-masthead-note rules it overrides.
+   max-content on the headline track, not 1fr: the headline takes exactly its
+   own widest line and every remaining pixel goes to the note. A fixed left
+   track left ~330px of dead space in the middle while the note was squeezed
+   into a column too narrow to read, which is what made it look cramped.
+   Wider means fewer lines, so spending that space horizontally makes the band
+   SHORTER, not taller. max-content also tracks the clamped headline down
+   through the widths on its own.
+   940px, not 1080: at 1080 the single-column form ran 118-133px TALLER than
+   the two-column one all the way down to 761px, which is backwards on a page
+   whose whole problem was height. 940 is where the headline's max-content
+   plus a readable note stops fitting. */
+@media (min-width: 940px) {
+  .wl-masthead {
+    grid-template-columns: max-content minmax(300px, 1fr);
+    gap: 40px;
+  }
+  .wl-masthead-note {
+    /* Hold the right edge. The track is wider than the note's 560px measure
+       on a big screen, and the leftover belongs in the middle gutter rather
+       than stranded to the right of the text. */
+    margin-left: auto;
+  }
+}
+
+/* Masthead — mobile. Under 760px the side stats (still used by the
+   portfolio/collections/journal heads) stack too. The sheet's mobile rules
+   live below the sheet block, not here — see the note there. */
 @media (max-width: 760px) {
   .wl-masthead {
-    grid-template-columns: 1fr;
     gap: 28px;
     padding: 40px 20px 32px;
   }
@@ -790,9 +798,6 @@ html[data-mood='ink'] .wl-surface::after {
   }
   .wl-masthead-side > div {
     justify-content: flex-start;
-  }
-  .wl-masthead-note p {
-    font-size: 17px;
   }
 }
 
@@ -3357,13 +3362,22 @@ html[data-mood='ink'] .wl-surface::after {
    The paper halo is load-bearing here in a way it isn't on /shop, where the
    tick sits on the frame's paper border. Here it sits directly on the
    photograph, and a 2px line has nothing to read against without it. */
+/* background-IMAGE, not the `background` shorthand. This rule sits ~1000
+   lines below the RAINBOW SCROLL block that gives the spectrum marks their
+   `background-size: 200% 100%`, and at equal specificity the shorthand would
+   reset that size to `auto`. At `auto` the gradient is sized to the 18x2 box,
+   every percentage background-position resolves to 0, and the tick renders
+   the whole 8-stop spectrum crushed into 18px, frozen, while /shop's
+   identical mark scrolls a slice. It looked deliberate, which is why it
+   survived review by eye. Every other member of that block declares its
+   gradient ABOVE it; this is the one that cannot. */
 .wl-wall-tick {
   position: absolute;
   top: 9px;
   right: 9px;
   width: 18px;
   height: 2px;
-  background: linear-gradient(
+  background-image: linear-gradient(
     90deg,
     var(--s-red),
     var(--s-orange),

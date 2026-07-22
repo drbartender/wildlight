@@ -46,7 +46,7 @@ export default async function MarketingHome() {
     const res = await pool.query<WallRow>(
       `SELECT a.slug, a.title, a.image_web_url, a.year_shot, a.location, a.plate_no,
               -- "available" = genuinely buyable (published AND has a buyable
-              -- variant), matching the resolution-gated shop so the wall dot +
+              -- variant), matching the resolution-gated shop so the wall tick +
               -- lightbox "See print options" link never point at a piece the
               -- shop has gated to a no-options page. A published-but-not-buyable
               -- piece shows on the wall as a look-only vintage example.

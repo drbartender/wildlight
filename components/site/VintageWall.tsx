@@ -21,7 +21,7 @@ export interface WallItem {
 /**
  * The vintage wall: Dan's body of work shown as a dense, unsorted "wall of
  * photos" (the feel of the old wildlightimagery.com gallery). Every frame
- * opens a lightbox; the few `available` frames carry a dot and offer a path
+ * opens a lightbox; the few `available` frames carry a tick and offer a path
  * into the shop from the lightbox. Look-only — never links straight to a
  * detail page, since draft artworks 404 there.
  */

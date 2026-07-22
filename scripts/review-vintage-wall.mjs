@@ -46,7 +46,12 @@ const MOODS = ['bone', 'ink'];
       await page.goto('http://localhost:3000/', { waitUntil: 'networkidle' });
       await setMood(page, mood);
       await page.waitForTimeout(400);
-      const availSel = '.wl-wall-item:has(.wl-wall-dot)';
+      // .wl-wall-tick, not .wl-wall-dot: the marker was renamed and this
+      // selector kept matching nothing, so the fallback silently opened an
+      // arbitrary tile and these shots stopped covering the available-print
+      // branch of the lightbox at all. It failed green, which is worse than
+      // failing.
+      const availSel = '.wl-wall-item:has(.wl-wall-tick)';
       const anyTile = '.wl-wall-item';
       const target = (await page.locator(availSel).count()) > 0 ? availSel : anyTile;
       await page.locator(target).first().click();
