@@ -66,13 +66,23 @@ export function VintageWall({ items }: { items: WallItem[] }) {
               loading={i < 12 ? 'eager' : 'lazy'}
               style={{ objectFit: 'cover' }}
             />
-            {it.available && <span className="wl-wall-dot" aria-hidden="true" />}
-            {/* The only NEW display surface in this change. Plate first, so
-                the number always survives: .wl-wall-cap is nowrap with
+            {it.available && (
+              <span className="wl-wall-tick" aria-hidden="true" />
+            )}
+            {/* Plate first, so the number always survives: .t is nowrap with
                 ellipsis in a 240px cell, so a long title truncates and the
-                number would be the casualty if it came second. */}
+                number would be the casualty if it came second.
+                "Print" is a SIBLING of .t, not part of it — inside, the
+                ellipsis would eat it on exactly the tiles it matters for.
+                It spells out what the corner tick means, on hover, where
+                there is room for words. Not announced: the button carries an
+                explicit aria-label that already says "available as a
+                print", and that label overrides this content. */}
             <span className="wl-wall-cap">
-              {formatPlate(it.plate_no)} · {it.title}
+              <span className="t">
+                {formatPlate(it.plate_no)} · {it.title}
+              </span>
+              {it.available && <span className="print">Print</span>}
             </span>
           </button>
         ))}

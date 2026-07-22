@@ -2343,6 +2343,7 @@ html[data-mood='ink'] .wl-surface::after {
 .wl-cindex-head::after,
 .wl-coll-head::after,
 .wl-plate-frame::after,
+.wl-wall-tick,
 .wl-summary::after,
 .wl-about .letter .sig-sub::after,
 .wl-footer::before {
@@ -2359,7 +2360,8 @@ html[data-mood='ink'] .wl-surface::after {
 /* Phase offsets — independent rivers of color, not one synced page. */
 .wl-masthead::after,
 .wl-art-card::after,
-.wl-plate-frame::after {
+.wl-plate-frame::after,
+.wl-wall-tick {
   animation-delay: -4s;
 }
 .wl-nav-sheet::before,
@@ -3345,15 +3347,33 @@ html[data-mood='ink'] .wl-surface::after {
   outline: 2px solid var(--s-blue);
   outline-offset: 2px;
 }
-/* available-as-a-print marker */
-.wl-wall-dot {
+/* Available-as-a-print marker. The same 18x2 spectrum tick every shop plate
+   carries (.wl-plate-frame::after), so the mark already means "this one is in
+   the shop" everywhere else on the site.
+   It replaced an 8px --s-red circle, which sat in the exact corner and shape
+   of a notification badge and so read as an error on the photo rather than an
+   invitation. No words at rest: the wall is a gallery, and a quarter of these
+   95 tiles are available, so a label on each would paste a shop over it.
+   The paper halo is load-bearing here in a way it isn't on /shop, where the
+   tick sits on the frame's paper border. Here it sits directly on the
+   photograph, and a 2px line has nothing to read against without it. */
+.wl-wall-tick {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--s-red);
+  top: 9px;
+  right: 9px;
+  width: 18px;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    var(--s-red),
+    var(--s-orange),
+    var(--s-yellow),
+    var(--s-green),
+    var(--s-teal),
+    var(--s-blue),
+    var(--s-magenta),
+    var(--s-red)
+  );
   box-shadow: 0 0 0 3px var(--paper-2);
 }
 /* title revealed on hover/focus */
@@ -3372,9 +3392,32 @@ html[data-mood='ink'] .wl-surface::after {
   opacity: 0;
   transition: opacity 180ms;
   pointer-events: none;
+  /* Flex, not a single truncating line: "Print" has to be a sibling of the
+     title rather than appended to it, or the ellipsis eats it first on any
+     tile whose title already fills a 270px cell. */
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+.wl-wall-cap .t {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Never shrinks, never truncates — it is the whole point of the hover. Sits
+   inline right after the title rather than pinned to the right edge: only one
+   caption is ever visible at a time, so there is nothing to align with, and
+   flush against the title the site's own "·" separator does the work of
+   telling it apart from a truncated word. */
+.wl-wall-cap .print {
+  flex: none;
+  color: #fff;
+}
+.wl-wall-cap .print::before {
+  content: '·';
+  margin-right: 7px;
+  opacity: 0.55;
 }
 .wl-wall-item:hover .wl-wall-cap,
 .wl-wall-item:focus-visible .wl-wall-cap { opacity: 1; }
