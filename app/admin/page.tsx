@@ -216,10 +216,14 @@ export default async function AdminDashboard({
           <div className="wl-adm-kpi">
             <div className="k">Orders · 30d</div>
             <div className="v">{revN}</div>
+            {/* This tile's value is a 30-day count but the flagged queue is
+                all-time, so the sub-line has to say "queue" or it reads as
+                a 30-day figure — which it never was, it was just capped at
+                5 before and rarely disagreed. */}
             <div className="d">
               {needsReviewCount > 0 ? (
                 <span className="down">
-                  {needsReviewCount} needs review
+                  {needsReviewCount} in the review queue
                 </span>
               ) : (
                 'all processed'
@@ -393,17 +397,20 @@ export default async function AdminDashboard({
           <div className="wl-adm-card">
             <div className="h">
               <h3>Needs review</h3>
-              <span
-                style={{
-                  background: 'var(--adm-red)',
-                  color: 'var(--adm-paper)',
-                  fontSize: 10,
-                  padding: '1px 7px',
-                  borderRadius: 999,
-                }}
-              >
-                {needsReviewCount}
-              </span>
+              {/* No red 0 sitting above "Nothing flagged. Quiet queue." */}
+              {needsReviewCount > 0 && (
+                <span
+                  style={{
+                    background: 'var(--adm-red)',
+                    color: 'var(--adm-paper)',
+                    fontSize: 10,
+                    padding: '1px 7px',
+                    borderRadius: 999,
+                  }}
+                >
+                  {needsReviewCount}
+                </span>
+              )}
               <Link
                 className="wl-adm-btn ghost small"
                 href="/admin/orders"

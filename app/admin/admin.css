@@ -791,24 +791,23 @@
    Catalog card in the same row, and scroll the rest. The header stays put
    because only this wrapper scrolls.
 
-   The mask is load-bearing, not decoration: overlay scrollbars mean a
-   capped list has no scrollbar to see, and the two skins have different
-   row heights (38.25px atelier, 36px darkroom), so no single max-height
-   bisects a row in both. Whatever row the cut lands on, fading it says
-   "there is more" without depending on where the cut falls. */
+   277px is chosen to bisect a row rather than land on a boundary: rows
+   measure ~36px, and 36-38px across both skins and varying cell content,
+   so 277 leaves 7 full rows plus an 11-25px sliver of the 8th in every
+   case. That sliver IS the scroll cue, which is why the cap is not a
+   round number. Overlay scrollbars mean there is often no scrollbar to
+   see, so without it a cut list reads as a finished one.
+
+   A bottom fade was tried instead and removed: it is not scroll-aware, so
+   it kept promising more content at the end of the scroll and dimmed the
+   last row's muted columns to 2.9-3.7:1. The sliver costs nothing and
+   never lies. Re-check the arithmetic if the cap or the row padding
+   moves. */
 .wl-adm-recent-scroll {
-  max-height: 300px;
+  max-height: 277px;
   overflow-y: auto;
   border-bottom-left-radius: var(--adm-radius-lg);
   border-bottom-right-radius: var(--adm-radius-lg);
-}
-/* Only fade when the list is actually cut. 300px fits 7.8 rows in atelier
-   and 8.3 in darkroom, so nine rows is where it starts overflowing —
-   below that the mask would dim a final row for no reason, which matters
-   here because the real store has two orders, not ten. Re-check the row
-   count if the cap or the row padding moves. */
-.wl-adm-recent-scroll:has(tbody tr:nth-child(9)) {
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent);
 }
 
 /* ─────── TABLE ─────── */
@@ -1023,8 +1022,13 @@
   background: var(--adm-chip-track);
 }
 /* Reads as a continuation of the list, not as another flagged order —
-   quieter than a review row, and it goes to the full list. */
-.wl-adm-review-more {
+   quieter than a review row, and it goes to the full list.
+
+   Scoped to .wl-admin-surface for the same reason .wl-adm-nav-item is:
+   `.wl-admin-surface a` sets colour and text-decoration at (0,1,1) and
+   would otherwise eat both of these declarations, leaving the link
+   louder than the rows it sits under and with no underline. */
+.wl-admin-surface .wl-adm-review-more {
   display: block;
   padding: 8px 10px;
   font-size: 12px;
@@ -1032,7 +1036,7 @@
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-.wl-adm-review-more:hover {
+.wl-admin-surface .wl-adm-review-more:hover {
   color: var(--adm-ink);
 }
 .wl-adm-review-row .id {
@@ -2029,14 +2033,11 @@
   }
   /* One column here, so there is no neighbouring card to stay level with —
      the cap's whole justification is gone. Keeping it would put ~950px of
-     wrapped rows inside a 300px nested touch-scroller, which is worse than
+     wrapped rows inside a 277px nested touch-scroller, which is worse than
      letting the card grow and the page scroll. */
   .wl-adm-recent-scroll {
     max-height: none;
     overflow-y: visible;
-  }
-  .wl-adm-recent-scroll:has(tbody tr:nth-child(9)) {
-    mask-image: none;
   }
   .wl-adm-art-detail {
     grid-template-columns: 1fr;

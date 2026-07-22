@@ -120,15 +120,23 @@ function Item({
       </svg>
       <span className="wl-adm-nav-item-label">{n.label}</span>
       {n.badge ? (
-        // Without the label this announces as "Overview 3", which says
-        // nothing. The count belongs to orders, not to the page it rides on.
-        <span
-          className="wl-adm-nav-badge"
-          aria-label={`${n.badge} ${n.badge === 1 ? 'order needs' : 'orders need'} review`}
-          title={`${n.badge} ${n.badge === 1 ? 'order needs' : 'orders need'} review`}
-        >
-          {n.badge}
-        </span>
+        // Without this the link announces as "Overview 3", which says
+        // nothing — the count belongs to orders, not to the page it rides
+        // on. The wording lives in a visually-hidden sibling rather than an
+        // aria-label on the badge: a bare span is role=generic, which ARIA
+        // says must not be named, so engines honour a label there
+        // inconsistently and Firefox drops it entirely.
+        <>
+          <span className="wl-adm-nav-badge" aria-hidden="true">
+            {n.badge}
+          </span>
+          {/* One template literal, not adjacent JSX expressions: the space
+              between two expression containers is its own text node and the
+              accessible-name pass drops it, which announced as "3orders". */}
+          <span className="wl-adm-sr-only">
+            {`, ${n.badge} ${n.badge === 1 ? 'order needs' : 'orders need'} review`}
+          </span>
+        </>
       ) : null}
     </Link>
   );
