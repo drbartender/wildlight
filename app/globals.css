@@ -615,21 +615,32 @@ html[data-mood='ink'] .wl-surface::after {
    (masthead + lede) totalling 738px, which pushed the first plate below the
    fold on a 900px window. */
 /* Single column by default; the two-column form is opted into at 1080px in
-   the block below. The note needs ~440px before it stops reading as cramped,
-   and the headline needs its own column wide enough to stay on two lines —
-   below 1080px both cannot be true at once, so they stack. */
+   the block below. */
 .wl-masthead {
   position: relative;
-  padding: 56px 56px 44px;
+  padding: 48px 56px 40px;
   display: grid;
-  gap: 36px;
+  gap: 32px;
   align-items: start;
   border-bottom: 1px solid var(--rule);
 }
+/* max-content on the headline track, not 1fr: the headline needs exactly its
+   own widest line and no more, so everything left over goes to the note. A
+   fixed left track left ~330px of dead space in the middle while the note was
+   squeezed into a column too narrow to read, which is what made it look
+   cramped. Wider means fewer lines, so spending that space horizontally makes
+   the band SHORTER, not taller. max-content also tracks the clamped headline
+   down through the widths on its own. */
 @media (min-width: 1080px) {
   .wl-masthead {
-    grid-template-columns: minmax(0, 1fr) minmax(360px, 440px);
-    gap: 56px;
+    grid-template-columns: max-content minmax(320px, 1fr);
+    gap: 48px;
+  }
+  .wl-masthead-note {
+    /* Hold the right edge. The track is wider than the note's 560px measure
+       on a big screen, and the leftover belongs in the middle gutter rather
+       than stranded to the right of the text. */
+    margin-left: auto;
   }
 }
 .wl-masthead::after,
@@ -739,26 +750,25 @@ html[data-mood='ink'] .wl-surface::after {
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ink-3);
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
-/* Paragraph spacing has to beat the line gap or the two paragraphs read as
-   one block: at 12px against a 26px line-height they did, which is most of
-   why this column looked cramped. */
 .wl-masthead-note p {
   font-family: var(--f-serif);
-  font-size: 17.5px;
-  line-height: 1.7;
+  font-size: 17px;
+  line-height: 1.6;
   color: var(--ink-2);
 }
+/* Just clears the line gap, so the two paragraphs separate without paying
+   for it in band height. */
 .wl-masthead-note p + p {
-  margin-top: 18px;
+  margin-top: 14px;
 }
 .wl-masthead-note .sig {
   font-family: var(--f-display);
   font-style: italic;
-  font-size: 22px;
+  font-size: 21px;
   color: var(--ink);
-  margin-top: 18px;
+  margin-top: 14px;
 }
 
 /* Masthead — mobile. Under 760px the note stacks under the headline and the
